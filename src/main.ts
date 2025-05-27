@@ -189,7 +189,7 @@ async function initWebGPU() {
     context.configure({
         device: device,
         format: presentationFormat,
-        alphaMode: "opaque", // or 'premultiplied'
+        alphaMode: "premultiplied", // Changed from 'opaque'
     });
 
     // Create Simulation Parameters
@@ -379,8 +379,8 @@ async function initWebGPU() {
                             operation: "add",
                         },
                         alpha: {
-                            srcFactor: "one", // or "src-alpha"
-                            dstFactor: "one-minus-src-alpha", // or "one"
+                            srcFactor: "one",
+                            dstFactor: "one-minus-src-alpha",
                             operation: "add",
                         },
                     },
@@ -518,7 +518,7 @@ window.addEventListener("resize", () => {
         context.configure({
             device: device,
             format: presentationFormat,
-            alphaMode: "opaque",
+            alphaMode: "premultiplied", // Changed from 'opaque'
         });
 
         // Update world_width, world_height, particle_render_size, and force_scale in simParamsBuffer

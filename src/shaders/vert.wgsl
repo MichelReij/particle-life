@@ -63,7 +63,7 @@ fn getColorForType(ptype: u32, num_types: u32) -> vec4<f32> {
     }
 
     let m = v - c;
-    return vec4<f32>(r_temp + m, g_temp + m, b_temp + m, 1.0);
+    return vec4<f32>(r_temp + m, g_temp + m, b_temp + m, 0.5); // Alpha set to 0.5 for semi-transparency
 }
 
 @vertex
