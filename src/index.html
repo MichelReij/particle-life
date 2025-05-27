@@ -26,19 +26,38 @@
             }
             #fpsDisplay {
                 position: fixed;
+                top: 10px;
+                left: 10px;
+                color: white;
+                font-family: Arial, sans-serif;
+            }
+            #controls {
+                position: fixed;
                 bottom: 10px;
                 left: 10px;
                 color: white;
+                font-family: Arial, sans-serif;
                 background-color: rgba(0, 0, 0, 0.5);
-                padding: 5px;
-                border-radius: 3px;
-                font-family: sans-serif;
+                padding: 10px;
+                border-radius: 5px;
             }
         </style>
         <script defer src="bundle.js" type="module"></script>
     </head>
     <body>
-        <canvas></canvas>
+        <canvas id="__webgpu_particle_life_canvas__"></canvas>
         <div id="fpsDisplay">FPS: --</div>
+        <div id="controls">
+            <label for="driftSlider">Drift Speed:</label>
+            <input
+                type="range"
+                id="driftSlider"
+                min="-100"
+                max="100"
+                value="-20"
+                step="1"
+            />
+            <span id="driftValue">-20</span> px/s
+        </div>
     </body>
 </html>

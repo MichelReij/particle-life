@@ -65,9 +65,10 @@ const NUM_TYPES = 11; // Number of particle types
 const PARTICLE_RENDER_SIZE = 3.0;
 const PARTICLE_SIZE_BYTES = 24;
 const RULE_SIZE_BYTES = 16;
-const SIM_PARAMS_SIZE_BYTES = 68; // Updated from 64 to 68 bytes
+const SIM_PARAMS_SIZE_BYTES = 68; // Remains 68 bytes (17 fields * 4 bytes)
 
 const VIRTUAL_WORLD_BORDER = 100; // 100px border on each side
+let DRIFT_X_PER_SECOND = -20.0; // Pixels per second, negative for left drift. Now a let.
 
 let device: GPUDevice;
 let presentationFormat: GPUTextureFormat;
@@ -223,12 +224,12 @@ async function initWebGPU() {
     simParamsViewF32[7] = canvasRenderHeight; // canvas_render_height
     simParamsViewF32[8] = virtualWorldOffsetX; // virtual_world_offset_x
     simParamsViewF32[9] = virtualWorldOffsetY; // virtual_world_offset_y
-    simParamsViewU32[10] = 0; // boundary_mode (0 for disappear, 1 for wrap)
+    simParamsViewU32[10] = 0; // boundary_mode (0 for disappear/respawn, 1 for wrap)
     simParamsViewF32[11] = PARTICLE_RENDER_SIZE; // particle_render_size
     simParamsViewF32[12] = 250.0; // force_scale
     simParamsViewF32[13] = 5.0; // r_smooth
     simParamsViewU32[14] = 0; // flat_force (0 for false, 1 for true)
-    simParamsViewF32[15] = 0.0; // _padding0 (can be left as 0)
+    simParamsViewF32[15] = DRIFT_X_PER_SECOND; // drift_x_per_second
     simParamsViewF32[16] = 0.0; // _padding_final (can be left as 0)
 
     simParamsBuffer = device.createBuffer({
@@ -506,6 +507,31 @@ async function main() {
         fpsDisplayElement = document.getElementById("fpsDisplay"); // Get the FPS display element
         lastFPSTime = performance.now(); // Initialize lastFPSTime for FPS calculation
         lastFrameTime = performance.now(); // Initialize lastFrameTime for deltaTime calculation
+
+        const driftSlider = document.getElementById(
+            "driftSlider"
+        ) as HTMLInputElement;
+        const driftValueDisplay = document.getElementById("driftValue");
+
+        if (driftSlider && driftValueDisplay) {
+            driftSlider.value = DRIFT_X_PER_SECOND.toString();
+            driftValueDisplay.textContent = DRIFT_X_PER_SECOND.toString();
+
+            driftSlider.addEventListener("input", () => {
+                DRIFT_X_PER_SECOND = parseFloat(driftSlider.value);
+                driftValueDisplay.textContent = driftSlider.value;
+                // Update the simParamsBuffer with the new drift speed
+                if (device && simParamsBuffer) {
+                    // Offset for drift_x_per_second is 15 * 4 bytes
+                    device.queue.writeBuffer(
+                        simParamsBuffer,
+                        15 * 4,
+                        new Float32Array([DRIFT_X_PER_SECOND])
+                    );
+                }
+            });
+        }
+
         (window as any)[GLOBAL_KEY] = {
             // Store for cleanup
             device: device,

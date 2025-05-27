@@ -15,7 +15,7 @@ struct SimParams {
   force_scale: f32,
   r_smooth: f32,
   flat_force: u32,
-  _padding0: f32, // Added to match compute shader (68 bytes total)
+  drift_x_per_second: f32, // New parameter
   _padding_final: f32, // For 68-byte alignment
 }
 

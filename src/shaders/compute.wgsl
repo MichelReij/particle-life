@@ -35,17 +35,8 @@ struct SimParams {
   force_scale: f32,
   r_smooth: f32, // Moved r_smooth here for consistent ordering with TS
   flat_force: u32, // Moved flat_force here
-  _padding0: f32, // Additional padding to maintain size if needed
-  // Ensure total size is a multiple of 16 bytes if that was the original intent.
-  // Current: 14 * 4 bytes = 56 bytes. If SIM_PARAMS_SIZE_BYTES is 48, this needs adjustment.
-  // Let's assume SIM_PARAMS_SIZE_BYTES will be updated to 64 (16 * 4 bytes) or 56 if that's acceptable.
-  // For now, aiming for 16 * 4 = 64 bytes for safety, adding 2 more padding fields.
-  // Original was 12 fields * 4 bytes = 48 bytes.
-  // New: delta_time, friction, num_particles, num_types, virtual_world_width, virtual_world_height,
-  // canvas_render_width, canvas_render_height, virtual_world_offset_x, virtual_world_offset_y,
-  // boundary_mode, particle_render_size, force_scale, r_smooth, flat_force
-  // That's 15 fields. 15 * 4 = 60 bytes. Add one padding to make it 64.
-   _padding_final: f32, // To make it 64 bytes (16 * 4)
+  drift_x_per_second: f32, // New parameter for horizontal drift
+  _padding_final: f32, // For 68-byte alignment (now 17 fields * 4 bytes = 68 bytes)
 }
 
 // Particle data (input)
@@ -149,25 +140,38 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   // Update position
   particle_p.pos = particle_p.pos + particle_p.vel * sim_params.delta_time;
 
+  // Apply drift
+  particle_p.pos.x = particle_p.pos.x + sim_params.drift_x_per_second * sim_params.delta_time;
+
   // Boundary conditions
   if (sim_params.boundary_mode == 1u) { // Wrap around virtual world
     if (particle_p.pos.x < 0.0) { particle_p.pos.x = particle_p.pos.x + sim_params.virtual_world_width; }
     if (particle_p.pos.x >= sim_params.virtual_world_width) { particle_p.pos.x = particle_p.pos.x - sim_params.virtual_world_width; }
     if (particle_p.pos.y < 0.0) { particle_p.pos.y = particle_p.pos.y + sim_params.virtual_world_height; }
     if (particle_p.pos.y >= sim_params.virtual_world_height) { particle_p.pos.y = particle_p.pos.y - sim_params.virtual_world_height; }
-  } else if (sim_params.boundary_mode == 0u) { // Disappear if outside virtual world
+  } else if (sim_params.boundary_mode == 0u) { // Disappear and respawn on right edge
     if (particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width ||
         particle_p.pos.y < 0.0 || particle_p.pos.y >= sim_params.virtual_world_height) {
-      // Mark particle as 'dead' or move it to an inactive pool.
-      // For now, let's move it to a distant, non-interacting position and stop its velocity.
-      // A more robust solution might involve a 'status' flag in the Particle struct.
-      particle_p.pos = vec2<f32>(-100000.0, -100000.0); // Move far away
-      particle_p.vel = vec2<f32>(0.0, 0.0); // Stop movement
-      // Alternatively, if we can reduce num_particles dynamically or have a 'dead' flag:
-      // particle_p.ptype = 0u; // Or some special 'dead' type, if rendering handles it.
+      // Respawn particle on the right edge with a random y position and type, and zero velocity
+      particle_p.pos.x = sim_params.virtual_world_width - EPSILON; // Slightly inside the right edge
+      particle_p.pos.y = random_float(global_id.x + particle_p.ptype) * sim_params.virtual_world_height;
+      particle_p.vel = vec2<f32>(0.0, 0.0);
+      // particle_p.ptype = u32(random_float(global_id.x + u32(particle_p.pos.y)) * f32(sim_params.num_types)); // Optionally randomize type
     }
   }
   // No bounce mode implemented as per request.
 
   particles_out[p_idx] = particle_p;
+}
+
+// Simple pseudo-random number generator based on seed (e.g., particle index)
+// Not cryptographically secure, but good enough for visual randomness.
+fn random_float(seed: u32) -> f32 {
+  var s = seed;
+  s = (s ^ 61u) ^ (s >> 16u);
+  s = s + (s << 3u);
+  s = s ^ (s >> 4u);
+  s = s * 0x27d4eb2du;
+  s = s ^ (s >> 15u);
+  return f32(s) / 4294967295.0; // Convert to [0, 1) float
 }

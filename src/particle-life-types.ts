@@ -17,20 +17,21 @@ export interface InteractionRule {
 export type ParticleRules = InteractionRule[][];
 
 export interface SimulationParams {
-    deltaTime: number;
-    friction: number;
-    numParticles: number;
-    numTypes: number;
-    virtualWorldWidth: number; // Renamed from worldWidth, e.g., 1000px
-    virtualWorldHeight: number; // Renamed from worldHeight, e.g., 1000px
-    canvasRenderWidth: number; // Actual renderable canvas width, e.g., 800px
-    canvasRenderHeight: number; // Actual renderable canvas height, e.g., 800px
-    virtualWorldOffsetX: number; // Offset of canvas within virtual world, e.g., 100px
-    virtualWorldOffsetY: number; // Offset of canvas within virtual world, e.g., 100px
-    boundaryMode: number; // 0: disappear, 1: wrap
-    forceScale: number;
-    rSmooth: number;
-    flatForce: boolean;
-    particleRenderSize: number;
-    // Removed canvasWidth, canvasHeight, velocityScale as they were deprecated or unused
+    deltaTime: number; // f32
+    friction: number; // f32
+    numParticles: number; // u32
+    numTypes: number; // u32
+    virtualWorldWidth: number; // f32
+    virtualWorldHeight: number; // f32
+    canvasRenderWidth: number; // f32
+    canvasRenderHeight: number; // f32
+    virtualWorldOffsetX: number; // f32
+    virtualWorldOffsetY: number; // f32
+    boundaryMode: number; // u32 (0: disappear/respawn, 1: wrap)
+    particleRenderSize: number; // f32
+    forceScale: number; // f32
+    rSmooth: number; // f32
+    flatForce: number; // u32 (0: false, 1: true)
+    driftXPerSecond: number; // f32 (new)
+    // _padding_final is handled by buffer sizing and explicit write in main.ts
 }
