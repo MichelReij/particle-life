@@ -24,15 +24,28 @@ struct SimParams {
   num_particles: u32,
   num_types: u32,
 
-  world_width: f32,
-  world_height: f32,
-  r_smooth: f32,
-  flat_force: u32, // 1 for true, 0 for false
-
-  wrap_mode: u32, // 1 for wrap, 0 for bounce
-  particle_render_size: f32, // REINSTATED
+  virtual_world_width: f32,  // e.g. 1000.0
+  virtual_world_height: f32, // e.g. 1000.0
+  canvas_render_width: f32,  // e.g. 800.0 (used for rendering normalization)
+  canvas_render_height: f32, // e.g. 800.0 (used for rendering normalization)
+  virtual_world_offset_x: f32, // e.g. 100.0
+  virtual_world_offset_y: f32, // e.g. 100.0
+  boundary_mode: u32, // 0: disappear, 1: wrap (replaces wrap_mode)
+  particle_render_size: f32,
   force_scale: f32,
-  _padding: f32, // Padding to ensure 48-byte total size (original padding)
+  r_smooth: f32, // Moved r_smooth here for consistent ordering with TS
+  flat_force: u32, // Moved flat_force here
+  _padding0: f32, // Additional padding to maintain size if needed
+  // Ensure total size is a multiple of 16 bytes if that was the original intent.
+  // Current: 14 * 4 bytes = 56 bytes. If SIM_PARAMS_SIZE_BYTES is 48, this needs adjustment.
+  // Let's assume SIM_PARAMS_SIZE_BYTES will be updated to 64 (16 * 4 bytes) or 56 if that's acceptable.
+  // For now, aiming for 16 * 4 = 64 bytes for safety, adding 2 more padding fields.
+  // Original was 12 fields * 4 bytes = 48 bytes.
+  // New: delta_time, friction, num_particles, num_types, virtual_world_width, virtual_world_height,
+  // canvas_render_width, canvas_render_height, virtual_world_offset_x, virtual_world_offset_y,
+  // boundary_mode, particle_render_size, force_scale, r_smooth, flat_force
+  // That's 15 fields. 15 * 4 = 60 bytes. Add one padding to make it 64.
+   _padding_final: f32, // To make it 64 bytes (16 * 4)
 }
 
 // Particle data (input)
@@ -67,19 +80,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     var diff = particle_q.pos - particle_p.pos;
 
-    // World wrapping for delta calculation
-    if (sim_params.wrap_mode == 1u) {
-      if (diff.x > sim_params.world_width * 0.5) {
-        diff.x = diff.x - sim_params.world_width;
-      } else if (diff.x < -sim_params.world_width * 0.5) {
-        diff.x = diff.x + sim_params.world_width;
+    // World wrapping for delta calculation (uses virtual world dimensions)
+    if (sim_params.boundary_mode == 1u) { // 1u is wrap
+      if (diff.x > sim_params.virtual_world_width * 0.5) {
+        diff.x = diff.x - sim_params.virtual_world_width;
+      } else if (diff.x < -sim_params.virtual_world_width * 0.5) {
+        diff.x = diff.x + sim_params.virtual_world_width;
       }
-      if (diff.y > sim_params.world_height * 0.5) {
-        diff.y = diff.y - sim_params.world_height;
-      } else if (diff.y < -sim_params.world_height * 0.5) {
-        diff.y = diff.y + sim_params.world_height;
+      if (diff.y > sim_params.virtual_world_height * 0.5) {
+        diff.y = diff.y - sim_params.virtual_world_height;
+      } else if (diff.y < -sim_params.virtual_world_height * 0.5) {
+        diff.y = diff.y + sim_params.virtual_world_height;
       }
-    }
+    } // No special delta calculation for disappear mode, direct distance is fine.
 
     let dist_sq = dot(diff, diff);
     let rule_idx = particle_p.ptype * sim_params.num_types + particle_q.ptype;
@@ -137,28 +150,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   particle_p.pos = particle_p.pos + particle_p.vel * sim_params.delta_time;
 
   // Boundary conditions
-  if (sim_params.wrap_mode == 1u) { // Wrap around
-    if (particle_p.pos.x < 0.0) { particle_p.pos.x = particle_p.pos.x + sim_params.world_width; }
-    if (particle_p.pos.x >= sim_params.world_width) { particle_p.pos.x = particle_p.pos.x - sim_params.world_width; }
-    if (particle_p.pos.y < 0.0) { particle_p.pos.y = particle_p.pos.y + sim_params.world_height; }
-    if (particle_p.pos.y >= sim_params.world_height) { particle_p.pos.y = particle_p.pos.y - sim_params.world_height; }
-  } else { // Bounce off walls
-    let particle_radius = 2.0; // A small radius for bouncing, can be a param
-    if (particle_p.pos.x < particle_radius) {
-      particle_p.pos.x = particle_radius;
-      particle_p.vel.x = -particle_p.vel.x;
-    } else if (particle_p.pos.x > sim_params.world_width - particle_radius) {
-      particle_p.pos.x = sim_params.world_width - particle_radius;
-      particle_p.vel.x = -particle_p.vel.x;
-    }
-    if (particle_p.pos.y < particle_radius) {
-      particle_p.pos.y = particle_radius;
-      particle_p.vel.y = -particle_p.vel.y;
-    } else if (particle_p.pos.y > sim_params.world_height - particle_radius) {
-      particle_p.pos.y = sim_params.world_height - particle_radius;
-      particle_p.vel.y = -particle_p.vel.y;
+  if (sim_params.boundary_mode == 1u) { // Wrap around virtual world
+    if (particle_p.pos.x < 0.0) { particle_p.pos.x = particle_p.pos.x + sim_params.virtual_world_width; }
+    if (particle_p.pos.x >= sim_params.virtual_world_width) { particle_p.pos.x = particle_p.pos.x - sim_params.virtual_world_width; }
+    if (particle_p.pos.y < 0.0) { particle_p.pos.y = particle_p.pos.y + sim_params.virtual_world_height; }
+    if (particle_p.pos.y >= sim_params.virtual_world_height) { particle_p.pos.y = particle_p.pos.y - sim_params.virtual_world_height; }
+  } else if (sim_params.boundary_mode == 0u) { // Disappear if outside virtual world
+    if (particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width ||
+        particle_p.pos.y < 0.0 || particle_p.pos.y >= sim_params.virtual_world_height) {
+      // Mark particle as 'dead' or move it to an inactive pool.
+      // For now, let's move it to a distant, non-interacting position and stop its velocity.
+      // A more robust solution might involve a 'status' flag in the Particle struct.
+      particle_p.pos = vec2<f32>(-100000.0, -100000.0); // Move far away
+      particle_p.vel = vec2<f32>(0.0, 0.0); // Stop movement
+      // Alternatively, if we can reduce num_particles dynamically or have a 'dead' flag:
+      // particle_p.ptype = 0u; // Or some special 'dead' type, if rendering handles it.
     }
   }
+  // No bounce mode implemented as per request.
 
   particles_out[p_idx] = particle_p;
 }

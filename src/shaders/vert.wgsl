@@ -3,14 +3,20 @@ struct SimParams {
   friction: f32,
   num_particles: u32,
   num_types: u32,
-  world_width: f32,
-  world_height: f32,
+
+  virtual_world_width: f32,
+  virtual_world_height: f32,
+  canvas_render_width: f32,
+  canvas_render_height: f32,
+  virtual_world_offset_x: f32,
+  virtual_world_offset_y: f32,
+  boundary_mode: u32,
+  particle_render_size: f32,
+  force_scale: f32,
   r_smooth: f32,
   flat_force: u32,
-  wrap_mode: u32,
-  particle_render_size: f32, // REINSTATED
-  force_scale: f32,
-  _padding: f32, // Padding to ensure 48-byte total size (original padding)
+  _padding0: f32, // Added to match compute shader (68 bytes total)
+  _padding_final: f32, // For 68-byte alignment
 }
 
 @group(0) @binding(0) var<uniform> sim_params: SimParams;
@@ -73,24 +79,36 @@ fn main(
 ) -> VertexOutput {
   var out: VertexOutput;
 
+  // Cull "dead" particles that were moved far away by the compute shader
+  // The compute shader moves them to (-100000.0, -100000.0).
+  // Check against a value like -50000.0 to catch these.
+  if (particle_attrs.particle_pos.x < -50000.0) {
+    out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0); // Position completely outside clip space [-1,1]
+    out.particle_color = vec4<f32>(0.0, 0.0, 0.0, 0.0); // Make transparent
+    return out;
+  }
+
   // Use global particle_render_size from sim_params
   let particle_radius_pixels = sim_params.particle_render_size;
 
-  // Convert particle position from world space (pixels) to clip space (-1 to 1)
-  // Assumes origin is top-left in world space
+  // Particle position is in virtual world coordinates.
+  // Translate to canvas-relative coordinates before normalizing.
+  let canvas_relative_pos_x = particle_attrs.particle_pos.x - sim_params.virtual_world_offset_x;
+  let canvas_relative_pos_y = particle_attrs.particle_pos.y - sim_params.virtual_world_offset_y;
+
+  // Convert canvas-relative particle position to clip space (-1 to 1)
   let normalized_particle_pos = vec2<f32>(
-    (particle_attrs.particle_pos.x / sim_params.world_width) * 2.0 - 1.0,
-    (1.0 - (particle_attrs.particle_pos.y / sim_params.world_height)) * 2.0 - 1.0 // Invert Y for clip space
+    (canvas_relative_pos_x / sim_params.canvas_render_width) * 2.0 - 1.0,
+    (1.0 - (canvas_relative_pos_y / sim_params.canvas_render_height)) * 2.0 - 1.0 // Invert Y
   );
 
-  // Scale quad vertex by particle size and convert to clip space dimensions
+  // Scale quad vertex by particle size and convert to clip space dimensions relative to canvas render size
   let scaled_quad_pos = vec2<f32>(
-    vertex_attrs.quad_pos.x * (particle_radius_pixels / sim_params.world_width),
-    vertex_attrs.quad_pos.y * (particle_radius_pixels / sim_params.world_height)
+    vertex_attrs.quad_pos.x * (particle_radius_pixels / sim_params.canvas_render_width),
+    vertex_attrs.quad_pos.y * (particle_radius_pixels / sim_params.canvas_render_height)
   );
 
   out.position = vec4<f32>(normalized_particle_pos + scaled_quad_pos, 0.0, 1.0);
   out.particle_color = getColorForType(particle_attrs.particle_type, sim_params.num_types);
-
   return out;
 }

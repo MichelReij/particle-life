@@ -62,10 +62,12 @@ canvas.style.height = "800px";
 // === Particle Life Configuration ===
 const NUM_PARTICLES = 1024; // Number of particles
 const NUM_TYPES = 11; // Number of particle types
-const PARTICLE_RENDER_SIZE = 3.0; // Default particle render size (radius in pixels) - REINSTATED
-const PARTICLE_SIZE_BYTES = 24; // pos (vec2f) + vel (vec2f) + type (u32) = 8+8+4=20, padded to 24 for alignment - REVERTED
-const RULE_SIZE_BYTES = 16; // attraction (f32) + min_radius (f32) + max_radius (f32) + padding (f32) = 16
-const SIM_PARAMS_SIZE_BYTES = 48; // Matches WGSL struct SimParams
+const PARTICLE_RENDER_SIZE = 3.0;
+const PARTICLE_SIZE_BYTES = 24;
+const RULE_SIZE_BYTES = 16;
+const SIM_PARAMS_SIZE_BYTES = 68; // Updated from 64 to 68 bytes
+
+const VIRTUAL_WORLD_BORDER = 100; // 100px border on each side
 
 let device: GPUDevice;
 let presentationFormat: GPUTextureFormat;
@@ -149,13 +151,19 @@ function createInitialParticles(
     const particleViewF32 = new Float32Array(particleData);
     const particleViewU32 = new Uint32Array(particleData);
 
+    // Initial particle positions are within the VIRTUAL world dimensions
+    const initialSpawnWidth = worldWidth; // virtualWorldWidth
+    const initialSpawnHeight = worldHeight; // virtualWorldHeight
+
     for (let i = 0; i < numParticles; i++) {
         const bufferOffsetF32 = i * (PARTICLE_SIZE_BYTES / 4);
         const bufferOffsetU32 = bufferOffsetF32;
 
-        // Position (vec2f)
-        particleViewF32[bufferOffsetF32 + 0] = Math.random() * worldWidth;
-        particleViewF32[bufferOffsetF32 + 1] = Math.random() * worldHeight;
+        // Position (vec2f) - within virtual world dimensions
+        particleViewF32[bufferOffsetF32 + 0] =
+            Math.random() * initialSpawnWidth;
+        particleViewF32[bufferOffsetF32 + 1] =
+            Math.random() * initialSpawnHeight;
         // Velocity (vec2f)
         particleViewF32[bufferOffsetF32 + 2] = (Math.random() - 0.5) * 2.0;
         particleViewF32[bufferOffsetF32 + 3] = (Math.random() - 0.5) * 2.0;
@@ -197,19 +205,31 @@ async function initWebGPU() {
     const simParamsViewF32 = new Float32Array(simParamsData);
     const simParamsViewU32 = new Uint32Array(simParamsData);
 
-    // Order matches SimParams struct in WGSL
+    const canvasRenderWidth = canvas.width;
+    const canvasRenderHeight = canvas.height;
+    const virtualWorldWidth = canvasRenderWidth + 2 * VIRTUAL_WORLD_BORDER;
+    const virtualWorldHeight = canvasRenderHeight + 2 * VIRTUAL_WORLD_BORDER;
+    const virtualWorldOffsetX = VIRTUAL_WORLD_BORDER;
+    const virtualWorldOffsetY = VIRTUAL_WORLD_BORDER;
+
+    // Order matches SimParams struct in WGSL (17 fields total for 68 bytes)
     simParamsViewF32[0] = 0.001; // delta_time (will be updated dynamically)
-    simParamsViewF32[1] = 0.15; // friction (increased from 0.1)
+    simParamsViewF32[1] = 0.15; // friction
     simParamsViewU32[2] = NUM_PARTICLES;
     simParamsViewU32[3] = NUM_TYPES;
-    simParamsViewF32[4] = canvas.width; // world_width
-    simParamsViewF32[5] = canvas.height; // world_height
-    simParamsViewF32[6] = 5.0; // r_smooth (increased from 2.0)
-    simParamsViewU32[7] = 0; // flat_force (0 for false, 1 for true)
-    simParamsViewU32[8] = 1; // wrap_mode (1 for wrap, 0 for bounce)
-    simParamsViewF32[9] = PARTICLE_RENDER_SIZE; // particle_render_size - REINSTATED
-    simParamsViewF32[10] = 250.0; // force_scale (increased from 150.0)
-    // simParamsViewF32[11] is for _padding, can be left as 0 or unassigned
+    simParamsViewF32[4] = virtualWorldWidth; // virtual_world_width
+    simParamsViewF32[5] = virtualWorldHeight; // virtual_world_height
+    simParamsViewF32[6] = canvasRenderWidth; // canvas_render_width
+    simParamsViewF32[7] = canvasRenderHeight; // canvas_render_height
+    simParamsViewF32[8] = virtualWorldOffsetX; // virtual_world_offset_x
+    simParamsViewF32[9] = virtualWorldOffsetY; // virtual_world_offset_y
+    simParamsViewU32[10] = 0; // boundary_mode (0 for disappear, 1 for wrap)
+    simParamsViewF32[11] = PARTICLE_RENDER_SIZE; // particle_render_size
+    simParamsViewF32[12] = 250.0; // force_scale
+    simParamsViewF32[13] = 5.0; // r_smooth
+    simParamsViewU32[14] = 0; // flat_force (0 for false, 1 for true)
+    simParamsViewF32[15] = 0.0; // _padding0 (can be left as 0)
+    simParamsViewF32[16] = 0.0; // _padding_final (can be left as 0)
 
     simParamsBuffer = device.createBuffer({
         label: "Simulation Parameters Buffer",
@@ -234,8 +254,8 @@ async function initWebGPU() {
     const initialParticleData = createInitialParticles(
         NUM_PARTICLES,
         NUM_TYPES,
-        canvas.width,
-        canvas.height
+        virtualWorldWidth, // Pass virtual dimensions for initial spawn
+        virtualWorldHeight
     );
     particleBuffers = [
         device.createBuffer({
@@ -518,30 +538,56 @@ window.addEventListener("resize", () => {
         context.configure({
             device: device,
             format: presentationFormat,
-            alphaMode: "premultiplied", // Changed from 'opaque'
+            alphaMode: "premultiplied",
         });
 
-        // Update world_width, world_height, particle_render_size, and force_scale in simParamsBuffer
-        // The order must match the Float32Array view used during initialization
-        // world_width is at F32 index 4
-        // particle_render_size is at F32 index 9
-        // force_scale is at F32 index 10
+        // Update relevant sim_params on resize
+        const newCanvasRenderWidth = canvas.width;
+        const newCanvasRenderHeight = canvas.height;
+        const newVirtualWorldWidth =
+            newCanvasRenderWidth + 2 * VIRTUAL_WORLD_BORDER;
+        const newVirtualWorldHeight =
+            newCanvasRenderHeight + 2 * VIRTUAL_WORLD_BORDER;
+        const newVirtualWorldOffsetX = VIRTUAL_WORLD_BORDER;
+        const newVirtualWorldOffsetY = VIRTUAL_WORLD_BORDER;
+
+        // Offsets for writing to simParamsBuffer (in bytes)
+        const virtualWorldWidthOffsetBytes = 4 * 4;
+        const virtualWorldHeightOffsetBytes = 5 * 4;
+        const canvasRenderWidthOffsetBytes = 6 * 4;
+        const canvasRenderHeightOffsetBytes = 7 * 4;
+        const virtualWorldOffsetXOffsetBytes = 8 * 4;
+        const virtualWorldOffsetYOffsetBytes = 9 * 4;
+
         device.queue.writeBuffer(
             simParamsBuffer,
-            4 * 4,
-            new Float32Array([canvas.width]),
-            0,
-            1
-        ); // world_width
+            virtualWorldWidthOffsetBytes,
+            new Float32Array([newVirtualWorldWidth])
+        );
         device.queue.writeBuffer(
             simParamsBuffer,
-            5 * 4,
-            new Float32Array([canvas.height]),
-            0,
-            1
-        ); // world_height
-        // particle_render_size and force_scale are typically not changed on resize, but if they were:
-        // device.queue.writeBuffer(simParamsBuffer, 9 * 4, new Float32Array([PARTICLE_RENDER_SIZE]), 0, 1);
-        // device.queue.writeBuffer(simParamsBuffer, 10 * 4, new Float32Array([50.0]), 0, 1); // Assuming force_scale remains 50.0
+            virtualWorldHeightOffsetBytes,
+            new Float32Array([newVirtualWorldHeight])
+        );
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            canvasRenderWidthOffsetBytes,
+            new Float32Array([newCanvasRenderWidth])
+        );
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            canvasRenderHeightOffsetBytes,
+            new Float32Array([newCanvasRenderHeight])
+        );
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            virtualWorldOffsetXOffsetBytes,
+            new Float32Array([newVirtualWorldOffsetX])
+        );
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            virtualWorldOffsetYOffsetBytes,
+            new Float32Array([newVirtualWorldOffsetY])
+        );
     }
 });

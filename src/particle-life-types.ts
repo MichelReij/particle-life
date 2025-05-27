@@ -21,13 +21,16 @@ export interface SimulationParams {
     friction: number;
     numParticles: number;
     numTypes: number;
-    canvasWidth: number; // Deprecated, use worldWidth from sim_params
-    canvasHeight: number; // Deprecated, use worldHeight from sim_params
-    worldWidth: number; // Actual simulation area width
-    worldHeight: number; // Actual simulation area height
-    forceScale: number; // To adjust overall force strength
-    velocityScale: number; // To adjust max velocity or initial velocities // This seems unused in current WGSL
-    rSmooth: number; // Smoothing factor for repulsion, from C++ RADIUS_SMOOTH
-    flatForce: boolean; // Whether to use flat force model from C++
+    virtualWorldWidth: number; // Renamed from worldWidth, e.g., 1000px
+    virtualWorldHeight: number; // Renamed from worldHeight, e.g., 1000px
+    canvasRenderWidth: number; // Actual renderable canvas width, e.g., 800px
+    canvasRenderHeight: number; // Actual renderable canvas height, e.g., 800px
+    virtualWorldOffsetX: number; // Offset of canvas within virtual world, e.g., 100px
+    virtualWorldOffsetY: number; // Offset of canvas within virtual world, e.g., 100px
+    boundaryMode: number; // 0: disappear, 1: wrap
+    forceScale: number;
+    rSmooth: number;
+    flatForce: boolean;
     particleRenderSize: number;
+    // Removed canvasWidth, canvasHeight, velocityScale as they were deprecated or unused
 }
