@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1, shrink-to-fit=no"
+        />
+        <title>webgpu-samples: gameOfLife</title>
+        <style>
+            :root {
+                color-scheme: light dark;
+            }
+            html,
+            body {
+                margin: 0; /* remove default margin */
+                height: 100%; /* make body fill the browser window */
+                display: flex;
+                place-content: center center;
+            }
+            canvas {
+                width: 600px;
+                height: 600px;
+                max-width: 100%;
+                display: block;
+            }
+            #fpsDisplay {
+                position: fixed;
+                bottom: 10px;
+                left: 10px;
+                color: white;
+                background-color: rgba(0, 0, 0, 0.5);
+                padding: 5px;
+                border-radius: 3px;
+                font-family: sans-serif;
+            }
+        </style>
+        <script defer src="bundle.js" type="module"></script>
+    </head>
+    <body>
+        <canvas></canvas>
+        <div id="fpsDisplay">FPS: --</div>
+    </body>
+</html>
