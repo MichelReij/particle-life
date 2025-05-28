@@ -38,7 +38,8 @@ struct SimParams {
   drift_x_per_second: f32, // New parameter for horizontal drift
   inter_type_attraction_scale: f32, // New parameter
   inter_type_radius_scale: f32,   // New parameter
-  _padding_final: f32, // For 76-byte alignment (now 19 fields * 4 bytes = 76 bytes)
+  time: f32, // Added time
+  _padding0: f32, // Added padding to ensure 80 bytes (20 * 4)
 }
 
 // Particle data (input)

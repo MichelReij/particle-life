@@ -3,15 +3,18 @@
 // inspired by Particle Life.
 // It uses a compute shader to update particle states and a render pipeline to draw them.
 
-import computeWGSL from "./shaders/compute.wgsl";
-// Placeholder for new shaders, old ones will be replaced or updated.
-import vertWGSL from "./shaders/vert.wgsl"; // Will need to be updated for particle rendering
-import fragWGSL from "./shaders/frag.wgsl"; // Will need to be updated for particle rendering
+import computeWGSL from "./shaders/compute.wgsl?raw"; // Changed from .wgsl to .wgsl?raw
+import vertWGSL from "./shaders/vert.wgsl?raw"; // Changed from .wgsl to .wgsl?raw
+import fragWGSL from "./shaders/frag.wgsl?raw"; // Will need to be updated for particle rendering
+import backgroundVertWGSL from "./shaders/background_vert.wgsl?raw"; // New background vertex shader
+import backgroundFragWGSL from "./shaders/background_frag.wgsl?raw"; // New background fragment shader
+
 import {
     Particle,
     InteractionRule,
     ParticleRules,
     SimulationParams,
+    SIM_PARAMS_SIZE_BYTES, // Import the constant
 } from "./particle-life-types";
 
 // --- Global Singleton & Canvas Setup (largely unchanged) ---
@@ -63,9 +66,10 @@ canvas.style.height = "800px";
 const NUM_PARTICLES = 1600; // Number of particles
 const NUM_TYPES = 11; // Number of particle types
 const PARTICLE_RENDER_SIZE = 3.0;
-const PARTICLE_SIZE_BYTES = 24;
-const RULE_SIZE_BYTES = 16;
-const SIM_PARAMS_SIZE_BYTES = 76; // Updated to 19 fields * 4 bytes = 76 bytes
+const PARTICLE_SIZE_BYTES = 24; // pos(2f) + vel(2f) + type(1u) + padding(1f for alignment if needed, or size for individual particle size)
+// For PARTICLE_SIZE_BYTES = 24: pos(8) + vel(8) + type(4) + padding(4) to make it multiple of 16 for some platforms, or particle_size (f32)
+const RULE_SIZE_BYTES = 16; // attraction(f32), min_radius(f32), max_radius(f32), padding(f32)
+// SIM_PARAMS_SIZE_BYTES is now imported from particle-life-types.ts
 
 let VIRTUAL_WORLD_BORDER = 100; // 100px border on each side. Now a let.
 let DRIFT_X_PER_SECOND = -20.0; // Pixels per second, negative for left drift. Now a let.
@@ -83,16 +87,19 @@ let context: GPUCanvasContext;
 let simParamsBuffer: GPUBuffer;
 let rulesBuffer: GPUBuffer;
 let particleBuffers: [GPUBuffer, GPUBuffer]; // Ping-pong buffers
-let quadVertexBuffer: GPUBuffer; // For rendering particles as quads
+let quadVertexBuffer: GPUBuffer; // Hoisted declaration
 
 // Pipelines and Bind Groups
 let computePipeline: GPUComputePipeline;
 let renderPipeline: GPURenderPipeline;
+let backgroundRenderPipeline: GPURenderPipeline; // New pipeline for the background
 let computeBindGroups: [GPUBindGroup, GPUBindGroup];
-let renderBindGroup: GPUBindGroup; // Might need more for particle rendering
+let renderBindGroup: GPUBindGroup;
+let backgroundRenderBindGroup: GPUBindGroup;
 
 let currentParticleBufferIndex = 0;
 let animationId: number | undefined;
+let lastFrameTime = 0; // Hoisted and initialized
 
 // FPS calculation variables
 let frameCount = 0;
@@ -207,7 +214,7 @@ async function initWebGPU() {
     });
 
     // Create Simulation Parameters
-    const simParamsData = new ArrayBuffer(SIM_PARAMS_SIZE_BYTES);
+    const simParamsData = new ArrayBuffer(SIM_PARAMS_SIZE_BYTES); // Use imported constant
     const simParamsViewF32 = new Float32Array(simParamsData);
     const simParamsViewU32 = new Uint32Array(simParamsData);
 
@@ -218,7 +225,7 @@ async function initWebGPU() {
     const virtualWorldOffsetX = VIRTUAL_WORLD_BORDER;
     const virtualWorldOffsetY = VIRTUAL_WORLD_BORDER;
 
-    // Order matches SimParams struct in WGSL (19 fields total for 76 bytes)
+    // Order matches SimParams struct in WGSL (now 20 fields total for 80 bytes with time)
     simParamsViewF32[0] = 0.001; // delta_time (will be updated dynamically)
     simParamsViewF32[1] = FRICTION; // friction
     simParamsViewU32[2] = NUM_PARTICLES;
@@ -237,11 +244,13 @@ async function initWebGPU() {
     simParamsViewF32[15] = DRIFT_X_PER_SECOND; // drift_x_per_second
     simParamsViewF32[16] = INTER_TYPE_ATTRACTION_SCALE; // inter_type_attraction_scale
     simParamsViewF32[17] = INTER_TYPE_RADIUS_SCALE; // inter_type_radius_scale
-    simParamsViewF32[18] = 0.0; // _padding_final (can be left as 0)
+    simParamsViewF32[18] = 0.0; // time - Initial time
+    // The 20th field (index 19) is for padding in the shader, matching SIM_PARAMS_SIZE_BYTES = 80
+    simParamsViewF32[19] = 0.0; // _padding_final (shader expects this to make struct 80 bytes)
 
     simParamsBuffer = device.createBuffer({
         label: "Simulation Parameters Buffer",
-        size: SIM_PARAMS_SIZE_BYTES,
+        size: SIM_PARAMS_SIZE_BYTES, // Use the imported constant
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(simParamsBuffer, 0, simParamsData);
@@ -327,14 +336,12 @@ async function initWebGPU() {
         }),
     ];
 
-    // --- Render Pipeline (Basic Placeholder for Particles) ---
-    // This will need significant updates to render particles correctly.
     // For now, let's assume particles are rendered as small quads or points.
     // We'll need a vertex buffer for a unit quad/point.
-    const unitQuad = new Float32Array([
-        // x, y, u, v (example for textured quad, adapt for simple colored quad)
-        -0.5, -0.5, 0, 0, 0.5, -0.5, 1, 0, -0.5, 0.5, 0, 1, 0.5, 0.5, 1, 1,
-    ]);
+    // const unitQuad = new Float32Array([ // This was an example, not used
+    //     // x, y, u, v (example for textured quad, adapt for simple colored quad)
+    //     -0.5, -0.5, 0, 0, 0.5, -0.5, 1, 0, -0.5, 0.5, 0, 1, 0.5, 0.5, 1, 1,
+    // ]);
     // A simpler quad for instancing, just positions
     const particleQuadVertices = new Float32Array([
         -1.0,
@@ -365,22 +372,76 @@ async function initWebGPU() {
         code: fragWGSL,
     });
 
+    // --- Background Render Pipeline ---
+    const backgroundShaderModuleVert = device.createShaderModule({
+        code: backgroundVertWGSL,
+    });
+    const backgroundShaderModuleFrag = device.createShaderModule({
+        code: backgroundFragWGSL,
+    });
+
+    // The background pipeline will also use sim_params
+    // We need to ensure the layout for sim_params (group 0, binding 0) is defined before renderPipeline tries to use "auto"
+    // or is compatible. Let's define a common bind group layout for sim_params.
+
+    const simParamsBindGroupLayout = device.createBindGroupLayout({
+        entries: [
+            {
+                binding: 0,
+                visibility:
+                    GPUShaderStage.VERTEX |
+                    GPUShaderStage.FRAGMENT |
+                    GPUShaderStage.COMPUTE,
+                buffer: { type: "uniform" },
+            },
+        ],
+    });
+
+    const backgroundPipelineLayout = device.createPipelineLayout({
+        bindGroupLayouts: [simParamsBindGroupLayout],
+    });
+
+    backgroundRenderPipeline = device.createRenderPipeline({
+        label: "Background Render Pipeline",
+        layout: backgroundPipelineLayout,
+        vertex: {
+            module: backgroundShaderModuleVert,
+            entryPoint: "main",
+        },
+        fragment: {
+            module: backgroundShaderModuleFrag,
+            entryPoint: "main",
+            targets: [{ format: presentationFormat }],
+        },
+        primitive: {
+            topology: "triangle-list", // background_vert.wgsl outputs a triangle list (full screen quad)
+        },
+    });
+
+    backgroundRenderBindGroup = device.createBindGroup({
+        label: "Background Render Bind Group",
+        layout: simParamsBindGroupLayout, // Use the common layout
+        entries: [{ binding: 0, resource: { buffer: simParamsBuffer } }],
+    });
+
+    // --- Render Pipeline (Particles) ---
     renderPipeline = device.createRenderPipeline({
         label: "Particle Render Pipeline",
-        layout: "auto",
+        layout: device.createPipelineLayout({
+            bindGroupLayouts: [simParamsBindGroupLayout],
+        }), // Use the common layout
         vertex: {
             module: renderShaderModuleVert,
-            entryPoint: "main", // Ensure your new vert.wgsl has a 'main' entry point
+            entryPoint: "main",
             buffers: [
                 {
                     // Per-instance particle data (position, type)
-                    arrayStride: PARTICLE_SIZE_BYTES, // Stride for each particle
+                    arrayStride: PARTICLE_SIZE_BYTES,
                     stepMode: "instance",
                     attributes: [
                         { shaderLocation: 0, offset: 0, format: "float32x2" }, // Particle position (offset 0)
                         { shaderLocation: 1, offset: 8, format: "float32x2" }, // Particle velocity (offset 8)
                         { shaderLocation: 2, offset: 16, format: "uint32" }, // Particle type (offset 16)
-                        // { shaderLocation: 3, offset: 20, format: "float32" },     // Particle size (offset 20) -- REVERTED
                     ],
                 },
                 {
@@ -388,18 +449,18 @@ async function initWebGPU() {
                     arrayStride: 2 * Float32Array.BYTES_PER_ELEMENT, // vec2f
                     stepMode: "vertex",
                     attributes: [
-                        { shaderLocation: 3, offset: 0, format: "float32x2" }, // Quad vertex positions - REVERTED from 4
+                        // Location 3 for quad_pos in vert.wgsl
+                        { shaderLocation: 3, offset: 0, format: "float32x2" },
                     ],
                 },
             ],
         },
         fragment: {
             module: renderShaderModuleFrag,
-            entryPoint: "main", // Ensure your new frag.wgsl has a 'main' entry point
+            entryPoint: "main",
             targets: [
                 {
                     format: presentationFormat,
-                    // Basic blending for potential particle overlap
                     blend: {
                         color: {
                             srcFactor: "src-alpha",
@@ -416,29 +477,23 @@ async function initWebGPU() {
             ],
         },
         primitive: {
-            topology: "triangle-strip", // Each quad is 2 triangles
-            stripIndexFormat: undefined, // or 'uint16'/'uint32' if using an index buffer for the quad
+            topology: "triangle-strip",
+            stripIndexFormat: undefined,
         },
     });
 
-    // Bind group for render pipeline (e.g., for sim_params if needed by shaders)
-    // For now, render bind group might not be strictly needed if vert shader gets all from instance/vertex buffers
-    // But if sim_params (like canvas size for normalization) is needed:
     renderBindGroup = device.createBindGroup({
         label: "Render Bind Group",
-        layout: renderPipeline.getBindGroupLayout(0), // Assuming group 0 for uniforms
-        entries: [
-            { binding: 0, resource: { buffer: simParamsBuffer } },
-            // Add particle type colors buffer here if needed
-        ],
+        layout: simParamsBindGroupLayout, // Use the common layout
+        entries: [{ binding: 0, resource: { buffer: simParamsBuffer } }],
     });
 }
 
-let lastFrameTime = 0;
-// const minFrameTime = 16; // Target ~60 FPS for simulation updates - we can remove this if we dynamically update delta_time
+let currentTime = 0; // Variable to track time for animation
 
 function frame(timestamp: number) {
-    if (!device) {
+    if (!device || !quadVertexBuffer) {
+        // Check if quadVertexBuffer is initialized
         animationId = requestAnimationFrame(frame);
         return;
     }
@@ -446,6 +501,7 @@ function frame(timestamp: number) {
     // Calculate deltaTime
     const deltaTime = (timestamp - lastFrameTime) / 1000; // Convert to seconds
     lastFrameTime = timestamp;
+    currentTime += deltaTime; // Increment current time
 
     // FPS calculation
     frameCount++;
@@ -459,9 +515,13 @@ function frame(timestamp: number) {
         lastFPSTime = timestamp;
     }
 
-    // Update delta_time in simParamsBuffer
-    // The first element (offset 0) in simParamsViewF32 is delta_time
+    // Update delta_time and time in simParamsBuffer
     device.queue.writeBuffer(simParamsBuffer, 0, new Float32Array([deltaTime]));
+    device.queue.writeBuffer(
+        simParamsBuffer,
+        18 * 4,
+        new Float32Array([currentTime])
+    ); // Offset for time (18th f32 field)
 
     const commandEncoder = device.createCommandEncoder({
         label: "Particle Life Frame Encoder",
@@ -480,25 +540,50 @@ function frame(timestamp: number) {
 
     // Render Pass
     const textureView = context.getCurrentTexture().createView();
-    const renderPassDescriptor: GPURenderPassDescriptor = {
+
+    // Background Render Pass
+    const backgroundPassDescriptor: GPURenderPassDescriptor = {
+        label: "Background Render Pass",
+        colorAttachments: [
+            {
+                view: textureView,
+                loadOp: "clear", // Clear the canvas for the background
+                clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, // Clear to black, background shader will draw over it
+                storeOp: "store", // Store the result of the background pass
+            },
+        ],
+    };
+    const backgroundPass = commandEncoder.beginRenderPass(
+        backgroundPassDescriptor
+    );
+    backgroundPass.setPipeline(backgroundRenderPipeline);
+    backgroundPass.setBindGroup(0, backgroundRenderBindGroup); // Use the background's bind group
+    backgroundPass.draw(6, 1, 0, 0); // Draw the full-screen quad (6 vertices)
+    backgroundPass.end();
+
+    // Particle Render Pass (now loads existing content)
+    const particleRenderPassDescriptor: GPURenderPassDescriptor = {
         label: "Particle Render Pass",
         colorAttachments: [
             {
                 view: textureView,
-                loadOp: "clear",
-                clearValue: { r: 0.0, g: 0.0, b: 0.05, a: 1.0 }, // Dark background
+                loadOp: "load", // Load the content from the background pass
                 storeOp: "store",
             },
         ],
     };
-    const renderPass = commandEncoder.beginRenderPass(renderPassDescriptor);
-    renderPass.setPipeline(renderPipeline);
-    renderPass.setVertexBuffer(0, particleBuffers[currentParticleBufferIndex]); // Particle instance data
-    renderPass.setVertexBuffer(1, quadVertexBuffer); // Quad vertex data
-    renderPass.setBindGroup(0, renderBindGroup); // Uniforms like sim_params
-    // Draw NUM_PARTICLES instances, each instance is a quad (4 vertices)
-    renderPass.draw(4, NUM_PARTICLES, 0, 0);
-    renderPass.end();
+    const particlePass = commandEncoder.beginRenderPass(
+        particleRenderPassDescriptor
+    );
+    particlePass.setPipeline(renderPipeline);
+    particlePass.setVertexBuffer(
+        0,
+        particleBuffers[currentParticleBufferIndex]
+    );
+    particlePass.setVertexBuffer(1, quadVertexBuffer);
+    particlePass.setBindGroup(0, renderBindGroup);
+    particlePass.draw(4, NUM_PARTICLES, 0, 0);
+    particlePass.end();
 
     device.queue.submit([commandEncoder.finish()]);
 
@@ -641,9 +726,9 @@ async function main() {
     try {
         await initWebGPU();
         fpsDisplayElement = document.getElementById("fpsDisplay");
-        lastFPSTime = performance.now();
-        lastFrameTime = performance.now(); // Initialize lastFrameTime
-        setupUIEventListeners(); // Setup event listeners after initWebGPU
+        // lastFPSTime = performance.now(); // This is already initialized globally or within frame
+        lastFrameTime = performance.now(); // Initialize lastFrameTime before first frame call
+        setupUIEventListeners();
         animationId = requestAnimationFrame(frame);
     } catch (error) {
         console.error("Failed to initialize Particle Life:", error);

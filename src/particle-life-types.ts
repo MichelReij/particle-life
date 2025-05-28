@@ -36,5 +36,7 @@ export interface SimulationParams {
     driftXPerSecond: number; // Horizontal drift speed
     interTypeAttractionScale: number; // Scales attraction between different types
     interTypeRadiusScale: number; // Scales interaction radii between different types
-    // No explicit padding field needed here as this is a TS interface
+    time: number; // Time in seconds for animation
 }
+
+export const SIM_PARAMS_SIZE_BYTES = 20 * 4; // 20 floats, each 4 bytes (includes new time field)
