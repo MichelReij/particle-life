@@ -46,18 +46,84 @@
     </head>
     <body>
         <canvas id="__webgpu_particle_life_canvas__"></canvas>
-        <div id="fpsDisplay">FPS: --</div>
         <div id="controls">
-            <label for="driftSlider">Drift Speed:</label>
-            <input
-                type="range"
-                id="driftSlider"
-                min="-100"
-                max="100"
-                value="-20"
-                step="1"
-            />
-            <span id="driftValue">-20</span> px/s
+            <div>
+                <label for="driftSlider">Drift Speed:</label>
+                <input
+                    type="range"
+                    id="driftSlider"
+                    min="-100"
+                    max="100"
+                    value="-20"
+                    step="1"
+                />
+                <span id="driftValue">-20</span> px/s
+            </div>
+            <div>
+                <label for="forceScaleSlider">Force Scale:</label>
+                <input
+                    type="range"
+                    id="forceScaleSlider"
+                    min="0"
+                    max="500"
+                    value="250"
+                    step="1"
+                />
+                <span id="forceScaleValue">250</span>
+            </div>
+            <div>
+                <label for="frictionSlider">Friction:</label>
+                <input
+                    type="range"
+                    id="frictionSlider"
+                    min="0.01"
+                    max="0.5"
+                    value="0.15"
+                    step="0.01"
+                />
+                <span id="frictionValue">0.15</span>
+            </div>
+            <div>
+                <label for="rSmoothSlider">R Smooth:</label>
+                <input
+                    type="range"
+                    id="rSmoothSlider"
+                    min="0.1"
+                    max="20"
+                    value="5.0"
+                    step="0.1"
+                />
+                <span id="rSmoothValue">5.0</span>
+            </div>
+            <div>
+                <label for="interTypeAttractionScaleSlider"
+                    >Inter-Type Attraction Scale:</label
+                >
+                <input
+                    type="range"
+                    id="interTypeAttractionScaleSlider"
+                    min="-2.0"
+                    max="2.0"
+                    value="1.0"
+                    step="0.1"
+                />
+                <span id="interTypeAttractionScaleValue">1.0</span>
+            </div>
+            <div>
+                <label for="interTypeRadiusScaleSlider"
+                    >Inter-Type Radius Scale:</label
+                >
+                <input
+                    type="range"
+                    id="interTypeRadiusScaleSlider"
+                    min="0.1"
+                    max="3.0"
+                    value="1.0"
+                    step="0.05"
+                />
+                <span id="interTypeRadiusScaleValue">1.0</span>
+            </div>
         </div>
+        <div id="fpsDisplay">FPS: --</div>
     </body>
 </html>

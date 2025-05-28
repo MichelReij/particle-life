@@ -60,15 +60,20 @@ canvas.style.width = "800px";
 canvas.style.height = "800px";
 
 // === Particle Life Configuration ===
-const NUM_PARTICLES = 1024; // Number of particles
+const NUM_PARTICLES = 1600; // Number of particles
 const NUM_TYPES = 11; // Number of particle types
 const PARTICLE_RENDER_SIZE = 3.0;
 const PARTICLE_SIZE_BYTES = 24;
 const RULE_SIZE_BYTES = 16;
-const SIM_PARAMS_SIZE_BYTES = 68; // Remains 68 bytes (17 fields * 4 bytes)
+const SIM_PARAMS_SIZE_BYTES = 76; // Updated to 19 fields * 4 bytes = 76 bytes
 
-const VIRTUAL_WORLD_BORDER = 100; // 100px border on each side
+let VIRTUAL_WORLD_BORDER = 100; // 100px border on each side. Now a let.
 let DRIFT_X_PER_SECOND = -20.0; // Pixels per second, negative for left drift. Now a let.
+let FORCE_SCALE = 250.0;
+let FRICTION = 0.15;
+let R_SMOOTH = 5.0;
+let INTER_TYPE_ATTRACTION_SCALE = 1.0; // Default: no change to attraction
+let INTER_TYPE_RADIUS_SCALE = 1.0; // Default: no change to radii
 
 let device: GPUDevice;
 let presentationFormat: GPUTextureFormat;
@@ -213,9 +218,9 @@ async function initWebGPU() {
     const virtualWorldOffsetX = VIRTUAL_WORLD_BORDER;
     const virtualWorldOffsetY = VIRTUAL_WORLD_BORDER;
 
-    // Order matches SimParams struct in WGSL (17 fields total for 68 bytes)
+    // Order matches SimParams struct in WGSL (19 fields total for 76 bytes)
     simParamsViewF32[0] = 0.001; // delta_time (will be updated dynamically)
-    simParamsViewF32[1] = 0.15; // friction
+    simParamsViewF32[1] = FRICTION; // friction
     simParamsViewU32[2] = NUM_PARTICLES;
     simParamsViewU32[3] = NUM_TYPES;
     simParamsViewF32[4] = virtualWorldWidth; // virtual_world_width
@@ -226,11 +231,13 @@ async function initWebGPU() {
     simParamsViewF32[9] = virtualWorldOffsetY; // virtual_world_offset_y
     simParamsViewU32[10] = 0; // boundary_mode (0 for disappear/respawn, 1 for wrap)
     simParamsViewF32[11] = PARTICLE_RENDER_SIZE; // particle_render_size
-    simParamsViewF32[12] = 250.0; // force_scale
-    simParamsViewF32[13] = 5.0; // r_smooth
+    simParamsViewF32[12] = FORCE_SCALE; // force_scale
+    simParamsViewF32[13] = R_SMOOTH; // r_smooth
     simParamsViewU32[14] = 0; // flat_force (0 for false, 1 for true)
     simParamsViewF32[15] = DRIFT_X_PER_SECOND; // drift_x_per_second
-    simParamsViewF32[16] = 0.0; // _padding_final (can be left as 0)
+    simParamsViewF32[16] = INTER_TYPE_ATTRACTION_SCALE; // inter_type_attraction_scale
+    simParamsViewF32[17] = INTER_TYPE_RADIUS_SCALE; // inter_type_radius_scale
+    simParamsViewF32[18] = 0.0; // _padding_final (can be left as 0)
 
     simParamsBuffer = device.createBuffer({
         label: "Simulation Parameters Buffer",
@@ -501,51 +508,148 @@ function frame(timestamp: number) {
     animationId = requestAnimationFrame(frame);
 }
 
+function setupUIEventListeners() {
+    const driftSlider = document.getElementById(
+        "driftSlider"
+    ) as HTMLInputElement;
+    const driftValueDisplay = document.getElementById("driftValue");
+    if (driftSlider && driftValueDisplay) {
+        driftSlider.addEventListener("input", () => {
+            DRIFT_X_PER_SECOND = parseFloat(driftSlider.value);
+            if (driftValueDisplay)
+                driftValueDisplay.textContent = driftSlider.value;
+            if (device && simParamsBuffer) {
+                device.queue.writeBuffer(
+                    simParamsBuffer,
+                    15 * 4, // Offset for drift_x_per_second (15th f32 field)
+                    new Float32Array([DRIFT_X_PER_SECOND])
+                );
+            }
+        });
+    }
+
+    const forceScaleSlider = document.getElementById(
+        "forceScaleSlider"
+    ) as HTMLInputElement;
+    const forceScaleValueDisplay = document.getElementById("forceScaleValue");
+    if (forceScaleSlider && forceScaleValueDisplay) {
+        forceScaleSlider.addEventListener("input", () => {
+            FORCE_SCALE = parseFloat(forceScaleSlider.value);
+            if (forceScaleValueDisplay)
+                forceScaleValueDisplay.textContent = forceScaleSlider.value;
+            if (device && simParamsBuffer) {
+                device.queue.writeBuffer(
+                    simParamsBuffer,
+                    12 * 4, // Offset for force_scale (12th f32 field)
+                    new Float32Array([FORCE_SCALE])
+                );
+            }
+        });
+    }
+
+    const frictionSlider = document.getElementById(
+        "frictionSlider"
+    ) as HTMLInputElement;
+    const frictionValueDisplay = document.getElementById("frictionValue");
+    if (frictionSlider && frictionValueDisplay) {
+        frictionSlider.addEventListener("input", () => {
+            FRICTION = parseFloat(frictionSlider.value);
+            if (frictionValueDisplay)
+                frictionValueDisplay.textContent = frictionSlider.value;
+            if (device && simParamsBuffer) {
+                device.queue.writeBuffer(
+                    simParamsBuffer,
+                    1 * 4, // Offset for friction (1st f32 field)
+                    new Float32Array([FRICTION])
+                );
+            }
+        });
+    }
+
+    const rSmoothSlider = document.getElementById(
+        "rSmoothSlider"
+    ) as HTMLInputElement;
+    const rSmoothValueDisplay = document.getElementById("rSmoothValue");
+    if (rSmoothSlider && rSmoothValueDisplay) {
+        rSmoothSlider.addEventListener("input", () => {
+            R_SMOOTH = parseFloat(rSmoothSlider.value);
+            if (rSmoothValueDisplay)
+                rSmoothValueDisplay.textContent = rSmoothSlider.value;
+            if (device && simParamsBuffer) {
+                device.queue.writeBuffer(
+                    simParamsBuffer,
+                    13 * 4, // Offset for r_smooth (13th f32 field)
+                    new Float32Array([R_SMOOTH])
+                );
+            }
+        });
+    }
+
+    const interTypeAttractionScaleSlider = document.getElementById(
+        "interTypeAttractionScaleSlider"
+    ) as HTMLInputElement;
+    const interTypeAttractionScaleValueDisplay = document.getElementById(
+        "interTypeAttractionScaleValue"
+    );
+    if (
+        interTypeAttractionScaleSlider &&
+        interTypeAttractionScaleValueDisplay
+    ) {
+        interTypeAttractionScaleSlider.addEventListener("input", () => {
+            INTER_TYPE_ATTRACTION_SCALE = parseFloat(
+                interTypeAttractionScaleSlider.value
+            );
+            if (interTypeAttractionScaleValueDisplay)
+                interTypeAttractionScaleValueDisplay.textContent =
+                    interTypeAttractionScaleSlider.value;
+            if (device && simParamsBuffer) {
+                device.queue.writeBuffer(
+                    simParamsBuffer,
+                    16 * 4, // Offset for inter_type_attraction_scale (16th f32 field)
+                    new Float32Array([INTER_TYPE_ATTRACTION_SCALE])
+                );
+            }
+        });
+    }
+
+    const interTypeRadiusScaleSlider = document.getElementById(
+        "interTypeRadiusScaleSlider"
+    ) as HTMLInputElement;
+    const interTypeRadiusScaleValueDisplay = document.getElementById(
+        "interTypeRadiusScaleValue"
+    );
+    if (interTypeRadiusScaleSlider && interTypeRadiusScaleValueDisplay) {
+        interTypeRadiusScaleSlider.addEventListener("input", () => {
+            INTER_TYPE_RADIUS_SCALE = parseFloat(
+                interTypeRadiusScaleSlider.value
+            );
+            if (interTypeRadiusScaleValueDisplay)
+                interTypeRadiusScaleValueDisplay.textContent =
+                    interTypeRadiusScaleSlider.value;
+            if (device && simParamsBuffer) {
+                device.queue.writeBuffer(
+                    simParamsBuffer,
+                    17 * 4, // Offset for inter_type_radius_scale (17th f32 field)
+                    new Float32Array([INTER_TYPE_RADIUS_SCALE])
+                );
+            }
+        });
+    }
+}
+
 async function main() {
     try {
         await initWebGPU();
-        fpsDisplayElement = document.getElementById("fpsDisplay"); // Get the FPS display element
-        lastFPSTime = performance.now(); // Initialize lastFPSTime for FPS calculation
-        lastFrameTime = performance.now(); // Initialize lastFrameTime for deltaTime calculation
-
-        const driftSlider = document.getElementById(
-            "driftSlider"
-        ) as HTMLInputElement;
-        const driftValueDisplay = document.getElementById("driftValue");
-
-        if (driftSlider && driftValueDisplay) {
-            driftSlider.value = DRIFT_X_PER_SECOND.toString();
-            driftValueDisplay.textContent = DRIFT_X_PER_SECOND.toString();
-
-            driftSlider.addEventListener("input", () => {
-                DRIFT_X_PER_SECOND = parseFloat(driftSlider.value);
-                driftValueDisplay.textContent = driftSlider.value;
-                // Update the simParamsBuffer with the new drift speed
-                if (device && simParamsBuffer) {
-                    // Offset for drift_x_per_second is 15 * 4 bytes
-                    device.queue.writeBuffer(
-                        simParamsBuffer,
-                        15 * 4,
-                        new Float32Array([DRIFT_X_PER_SECOND])
-                    );
-                }
-            });
-        }
-
-        (window as any)[GLOBAL_KEY] = {
-            // Store for cleanup
-            device: device,
-            canvas: canvas,
-            cancelAnimation: () => {
-                if (animationId) cancelAnimationFrame(animationId);
-            },
-        };
+        fpsDisplayElement = document.getElementById("fpsDisplay");
+        lastFPSTime = performance.now();
+        lastFrameTime = performance.now(); // Initialize lastFrameTime
+        setupUIEventListeners(); // Setup event listeners after initWebGPU
         animationId = requestAnimationFrame(frame);
-    } catch (e) {
-        console.error("Failed to initialize Particle Life:", e);
+    } catch (error) {
+        console.error("Failed to initialize Particle Life:", error);
         const errorDiv = document.createElement("div");
         errorDiv.innerHTML = `<h2>Error initializing WebGPU Particle Life</h2><p>${
-            (e as Error).message
+            (error as Error).message
         }</p><p>Please ensure your browser supports WebGPU and it's enabled. Check the console for more details.</p>`;
         document.body.appendChild(errorDiv);
     }
@@ -556,10 +660,13 @@ main();
 // Add resize handling
 window.addEventListener("resize", () => {
     if (device) {
-        canvas.width = Math.min(window.innerWidth, 2048); // Cap max size
-        canvas.height = Math.min(window.innerHeight, 2048);
-        canvas.style.width = `${canvas.width}px`;
-        canvas.style.height = `${canvas.height}px`;
+        const fixedWidth = 800;
+        const fixedHeight = 800;
+
+        canvas.width = fixedWidth;
+        canvas.height = fixedHeight;
+        canvas.style.width = `${fixedWidth}px`;
+        canvas.style.height = `${fixedHeight}px`;
 
         context.configure({
             device: device,

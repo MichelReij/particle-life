@@ -17,21 +17,24 @@ export interface InteractionRule {
 export type ParticleRules = InteractionRule[][];
 
 export interface SimulationParams {
-    deltaTime: number; // f32
-    friction: number; // f32
-    numParticles: number; // u32
-    numTypes: number; // u32
-    virtualWorldWidth: number; // f32
-    virtualWorldHeight: number; // f32
-    canvasRenderWidth: number; // f32
-    canvasRenderHeight: number; // f32
-    virtualWorldOffsetX: number; // f32
-    virtualWorldOffsetY: number; // f32
-    boundaryMode: number; // u32 (0: disappear/respawn, 1: wrap)
-    particleRenderSize: number; // f32
-    forceScale: number; // f32
-    rSmooth: number; // f32
-    flatForce: number; // u32 (0: false, 1: true)
-    driftXPerSecond: number; // f32 (new)
-    // _padding_final is handled by buffer sizing and explicit write in main.ts
+    deltaTime: number; // Time step for the simulation
+    friction: number; // Friction coefficient to slow down particles
+    numParticles: number; // Total number of particles
+    numTypes: number; // Number of particle types
+
+    virtualWorldWidth: number;
+    virtualWorldHeight: number;
+    canvasRenderWidth: number;
+    canvasRenderHeight: number;
+    virtualWorldOffsetX: number;
+    virtualWorldOffsetY: number;
+    boundaryMode: 0 | 1 | 2; // 0: disappear/respawn, 1: wrap, 2: bounce (not implemented yet)
+    particleRenderSize: number;
+    forceScale: number; // Scales the overall force applied to particles
+    rSmooth: number; // Smoothing factor for repulsion force calculation
+    flatForce: 0 | 1; // Boolean (0 or 1) to use flat force or distance-based force
+    driftXPerSecond: number; // Horizontal drift speed
+    interTypeAttractionScale: number; // Scales attraction between different types
+    interTypeRadiusScale: number; // Scales interaction radii between different types
+    // No explicit padding field needed here as this is a TS interface
 }

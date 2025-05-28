@@ -36,7 +36,9 @@ struct SimParams {
   r_smooth: f32, // Moved r_smooth here for consistent ordering with TS
   flat_force: u32, // Moved flat_force here
   drift_x_per_second: f32, // New parameter for horizontal drift
-  _padding_final: f32, // For 68-byte alignment (now 17 fields * 4 bytes = 68 bytes)
+  inter_type_attraction_scale: f32, // New parameter
+  inter_type_radius_scale: f32,   // New parameter
+  _padding_final: f32, // For 76-byte alignment (now 19 fields * 4 bytes = 76 bytes)
 }
 
 // Particle data (input)
@@ -87,9 +89,32 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     let dist_sq = dot(diff, diff);
     let rule_idx = particle_p.ptype * sim_params.num_types + particle_q.ptype;
-    let rule = rules[rule_idx];
+    var rule = rules[rule_idx];
+    var current_rule_attraction = rule.attraction;
+    var current_rule_min_radius = rule.min_radius;
+    var current_rule_max_radius = rule.max_radius;
 
-    if (dist_sq > rule.max_radius * rule.max_radius || dist_sq < EPSILON) {
+    // Apply inter-type scaling if particle types are different
+    if (particle_p.ptype != particle_q.ptype) {
+      current_rule_attraction = rule.attraction * sim_params.inter_type_attraction_scale;
+      current_rule_min_radius = rule.min_radius * sim_params.inter_type_radius_scale;
+      current_rule_max_radius = rule.max_radius * sim_params.inter_type_radius_scale;
+      // Ensure min_radius is not greater than max_radius after scaling
+      if (current_rule_min_radius > current_rule_max_radius) {
+        // Option 1: Swap them (simple fix)
+        // let temp = current_rule_min_radius;
+        // current_rule_min_radius = current_rule_max_radius;
+        // current_rule_max_radius = temp;
+        // Option 2: Clamp min_radius to max_radius (might be more stable)
+         current_rule_min_radius = current_rule_max_radius;
+      }
+       // Ensure radii are positive
+      current_rule_min_radius = max(EPSILON, current_rule_min_radius);
+      current_rule_max_radius = max(EPSILON * 2.0, current_rule_max_radius);
+    }
+
+
+    if (dist_sq > current_rule_max_radius * current_rule_max_radius || dist_sq < EPSILON) {
       continue;
     }
 
@@ -97,17 +122,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let norm_diff = diff / dist; // Normalized direction vector
 
     var force_magnitude: f32 = 0.0;
-    if (dist > rule.min_radius) {
+    if (dist > current_rule_min_radius) {
       // Attraction/Repulsion based on rule.attraction
       if (sim_params.flat_force == 1u) {
-        force_magnitude = rule.attraction;
+        force_magnitude = current_rule_attraction;
       } else {
-        let numer = 2.0 * abs(dist - 0.5 * (rule.max_radius + rule.min_radius));
-        let denom = rule.max_radius - rule.min_radius;
+        let numer = 2.0 * abs(dist - 0.5 * (current_rule_max_radius + current_rule_min_radius));
+        let denom = current_rule_max_radius - current_rule_min_radius;
         if (denom < EPSILON) { // Avoid division by zero if min_radius is very close to max_radius
-            force_magnitude = rule.attraction;
+            force_magnitude = current_rule_attraction;
         } else {
-            force_magnitude = rule.attraction * (1.0 - numer / denom);
+            force_magnitude = current_rule_attraction * (1.0 - numer / denom);
         }
       }
     } else {
@@ -126,8 +151,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
       // with r < minR, (r + R_SMOOTH) < (minR + R_SMOOTH), so 1/(r+RS) > 1/(minR+RS)
       // so (1/(minR+RS) - 1/(r+RS)) is negative.
       // Thus, the formula naturally gives a negative force for repulsion.
-      force_magnitude = sim_params.r_smooth * rule.min_radius *
-                       (1.0 / (rule.min_radius + sim_params.r_smooth) - 1.0 / (dist + sim_params.r_smooth));
+      force_magnitude = sim_params.r_smooth * current_rule_min_radius *
+                       (1.0 / (current_rule_min_radius + sim_params.r_smooth) - 1.0 / (dist + sim_params.r_smooth));
     }
     total_force = total_force + norm_diff * force_magnitude;
   }
@@ -149,13 +174,26 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (particle_p.pos.x >= sim_params.virtual_world_width) { particle_p.pos.x = particle_p.pos.x - sim_params.virtual_world_width; }
     if (particle_p.pos.y < 0.0) { particle_p.pos.y = particle_p.pos.y + sim_params.virtual_world_height; }
     if (particle_p.pos.y >= sim_params.virtual_world_height) { particle_p.pos.y = particle_p.pos.y - sim_params.virtual_world_height; }
-  } else if (sim_params.boundary_mode == 0u) { // Disappear and respawn on right edge
-    if (particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width ||
-        particle_p.pos.y < 0.0 || particle_p.pos.y >= sim_params.virtual_world_height) {
-      // Respawn particle on the right edge with a random y position and type, and zero velocity
-      particle_p.pos.x = sim_params.virtual_world_width - EPSILON; // Slightly inside the right edge
-      particle_p.pos.y = random_float(global_id.x + particle_p.ptype) * sim_params.virtual_world_height;
+  } else if (sim_params.boundary_mode == 0u) { // Disappear and respawn
+    let is_out_of_bounds = particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width ||
+                           particle_p.pos.y < 0.0 || particle_p.pos.y >= sim_params.virtual_world_height;
+
+    if (is_out_of_bounds) {
+      // Reset velocity
       particle_p.vel = vec2<f32>(0.0, 0.0);
+
+      // Randomize Y position for respawn
+      particle_p.pos.y = random_float(global_id.x + particle_p.ptype) * sim_params.virtual_world_height;
+
+      // Determine X respawn position based on drift direction
+      if (sim_params.drift_x_per_second > EPSILON) { // Drifting significantly right, respawn left
+        particle_p.pos.x = EPSILON;
+      } else if (sim_params.drift_x_per_second < -EPSILON) { // Drifting significantly left, respawn right
+        particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
+      } else { // No significant drift or drift is very close to zero, respawn on the right (consistent default)
+        particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
+      }
+
       // particle_p.ptype = u32(random_float(global_id.x + u32(particle_p.pos.y)) * f32(sim_params.num_types)); // Optionally randomize type
     }
   }

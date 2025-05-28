@@ -16,7 +16,9 @@ struct SimParams {
   r_smooth: f32,
   flat_force: u32,
   drift_x_per_second: f32, // New parameter
-  _padding_final: f32, // For 68-byte alignment
+  inter_type_attraction_scale: f32, // New parameter
+  inter_type_radius_scale: f32,   // New parameter
+  _padding_final: f32, // For 76-byte alignment
 }
 
 @group(0) @binding(0) var<uniform> sim_params: SimParams;
