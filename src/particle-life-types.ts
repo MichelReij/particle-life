@@ -32,11 +32,51 @@ export interface SimulationParams {
     particleRenderSize: number;
     forceScale: number; // Scales the overall force applied to particles
     rSmooth: number; // Smoothing factor for repulsion force calculation
-    flatForce: 0 | 1; // Boolean (0 or 1) to use flat force or distance-based force
+    flatForce: boolean; // Keep as boolean, buffer conversion will handle it
     driftXPerSecond: number; // Horizontal drift speed
     interTypeAttractionScale: number; // Scales attraction between different types
     interTypeRadiusScale: number; // Scales interaction radii between different types
     time: number; // Time in seconds for animation
+    // _padding0 is implicit in WGSL if needed before backgroundColor for alignment
+    backgroundColor: [number, number, number]; // RGB color
+    // _padding1 is implicit in WGSL if needed after backgroundColor for alignment
 }
 
-export const SIM_PARAMS_SIZE_BYTES = 20 * 4; // 20 floats, each 4 bytes (includes new time field)
+// Size of the SimulationParams struct in bytes
+// Must be a multiple of 16 for WGSL alignment
+// deltaTime: f32 (4)
+// friction: f32 (4)
+// numParticles: u32 (4)
+// numTypes: u32 (4)
+// virtualWorldWidth: f32 (4)
+// virtualWorldHeight: f32 (4)
+// canvasRenderWidth: f32 (4)
+// canvasRenderHeight: f32 (4)
+// virtualWorldOffsetX: f32 (4)
+// virtualWorldOffsetY: f32 (4)
+// boundaryMode: u32 (4)
+// particleRenderSize: f32 (4)
+// forceScale: f32 (4)
+// rSmooth: f32 (4)
+// flatForce: u32 (4) -> will be read as f32 in buffer if not careful, but WGSL u32 is fine
+// driftXPerSecond: f32 (4)
+// interTypeAttractionScale: f32 (4)
+// interTypeRadiusScale: f32 (4)
+// time: f32 (4)
+// -- Total so far: 19 * 4 = 76 bytes --
+// To ensure alignment for backgroundColor (vec3f), we might need padding.
+// Let's assume _padding0: f32 (4 bytes) to make it 20 * 4 = 80 bytes before backgroundColor.
+// backgroundColor: vec3f (3 * 4 = 12 bytes)
+// -- Total so far: 80 + 12 = 92 bytes --
+// To make it a multiple of 16, we need 4 more bytes of padding (_padding1: f32).
+// So, 92 + 4 = 96 bytes.
+// This corresponds to 24 floats (19 actual params + 1 for flatForce as u32, + 3 for color, + 1 padding0 + 1 padding1 if we consider them explicitly)
+// Or, more simply: 19 floats/u32s + 1 time_float + 3 color_floats + 1 padding_float = 24 floats.
+export const SIM_PARAMS_SIZE_BYTES = 24 * 4; // 96 bytes
+
+export const MAX_PARTICLE_TYPES = 16;
+
+export enum BoundaryMode { // Added export
+    Wrap = 0,
+    Bounce = 1,
+}

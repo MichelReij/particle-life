@@ -8,6 +8,7 @@ import vertWGSL from "./shaders/vert.wgsl?raw"; // Changed from .wgsl to .wgsl?r
 import fragWGSL from "./shaders/frag.wgsl?raw"; // Will need to be updated for particle rendering
 import backgroundVertWGSL from "./shaders/background_vert.wgsl?raw"; // New background vertex shader
 import backgroundFragWGSL from "./shaders/background_frag.wgsl?raw"; // New background fragment shader
+import { hsluvToRgb } from "hsluv-ts"; // Make sure this import is present
 
 import {
     Particle,
@@ -15,6 +16,7 @@ import {
     ParticleRules,
     SimulationParams,
     SIM_PARAMS_SIZE_BYTES, // Import the constant
+    BoundaryMode,
 } from "./particle-life-types";
 
 // --- Global Singleton & Canvas Setup (largely unchanged) ---
@@ -99,12 +101,37 @@ let backgroundRenderBindGroup: GPUBindGroup;
 
 let currentParticleBufferIndex = 0;
 let animationId: number | undefined;
-let lastFrameTime = 0; // Hoisted and initialized
+let lastFrameTime = 0;
+let currentTime = 0; // Tracks total elapsed time for animations
 
 // FPS calculation variables
 let frameCount = 0;
 let lastFPSTime = 0;
 let fpsDisplayElement: HTMLElement | null;
+
+// Simulation parameters object, matching the interface and shader struct
+let simParams: SimulationParams = {
+    deltaTime: 1 / 60, // Initial delta_time, will be updated each frame
+    friction: FRICTION,
+    numParticles: NUM_PARTICLES,
+    numTypes: NUM_TYPES,
+    virtualWorldWidth: 0, // Calculated in initWebGPU
+    virtualWorldHeight: 0, // Calculated in initWebGPU
+    canvasRenderWidth: 0, // Calculated in initWebGPU
+    canvasRenderHeight: 0, // Calculated in initWebGPU
+    virtualWorldOffsetX: 0, // Calculated in initWebGPU
+    virtualWorldOffsetY: 0, // Calculated in initWebGPU
+    boundaryMode: BoundaryMode.Wrap,
+    particleRenderSize: PARTICLE_RENDER_SIZE,
+    forceScale: FORCE_SCALE,
+    rSmooth: R_SMOOTH,
+    flatForce: false, // Default, will be converted to 0/1 for buffer
+    driftXPerSecond: DRIFT_X_PER_SECOND,
+    interTypeAttractionScale: INTER_TYPE_ATTRACTION_SCALE,
+    interTypeRadiusScale: INTER_TYPE_RADIUS_SCALE,
+    time: 0.0, // Current animation time, updated each frame
+    backgroundColor: [0.0, 0.0, 0.0], // Initial: black, updated by updateBackgroundColorAndDrift
+};
 
 // --- Helper Functions ---
 function createRandomRules(numTypes: number): InteractionRule[][] {
@@ -193,6 +220,36 @@ function createInitialParticles(
     return particleData;
 }
 
+// Function to update background color based on drift speed and update GPU buffer
+function updateBackgroundColorAndDrift(newDriftXPerSecond: number): void {
+    simParams.driftXPerSecond = newDriftXPerSecond;
+
+    const normalizedAbsDrift = Math.min(
+        1,
+        Math.abs(newDriftXPerSecond) / 100.0
+    );
+    const hue = 10 + 230 * (1 - normalizedAbsDrift); // 240 (blue) at 0 drift, to 10 (red) at 100 drift
+    const saturation = 66; // Full saturation
+    const lightness = 36; // Very dark
+
+    simParams.backgroundColor = hsluvToRgb([hue, saturation, lightness]);
+
+    if (device && simParamsBuffer) {
+        // Update driftXPerSecond (float at index 15)
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            15 * 4, // Byte offset for driftXPerSecond
+            new Float32Array([simParams.driftXPerSecond])
+        );
+        // Update backgroundColor (vec3<f32> starting at float index 20)
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            20 * 4, // Byte offset for backgroundColor
+            new Float32Array(simParams.backgroundColor)
+        );
+    }
+}
+
 async function initWebGPU() {
     if (!navigator.gpu) {
         throw new Error("WebGPU not supported on this browser.");
@@ -210,50 +267,68 @@ async function initWebGPU() {
     context.configure({
         device: device,
         format: presentationFormat,
-        alphaMode: "premultiplied", // Changed from 'opaque'
+        alphaMode: "premultiplied",
     });
 
-    // Create Simulation Parameters
-    const simParamsData = new ArrayBuffer(SIM_PARAMS_SIZE_BYTES); // Use imported constant
+    // Initialize fpsDisplayElement (ensure "fpsDisplay" ID exists in HTML)
+    fpsDisplayElement = document.getElementById("fpsDisplay");
+
+    // Update simParams with calculated dimensions
+    simParams.canvasRenderWidth = canvas.width;
+    simParams.canvasRenderHeight = canvas.height;
+    simParams.virtualWorldWidth =
+        simParams.canvasRenderWidth + 2 * VIRTUAL_WORLD_BORDER;
+    simParams.virtualWorldHeight =
+        simParams.canvasRenderHeight + 2 * VIRTUAL_WORLD_BORDER;
+    simParams.virtualWorldOffsetX = VIRTUAL_WORLD_BORDER;
+    simParams.virtualWorldOffsetY = VIRTUAL_WORLD_BORDER;
+    // simParams.time is initialized to 0.0 and updated in frame()
+    // simParams.driftXPerSecond is initialized from DRIFT_X_PER_SECOND
+
+    // Create Simulation Parameters Buffer Data (96 bytes / 24 floats)
+    // This ArrayBuffer will be used to initially populate simParamsBuffer.
+    const simParamsData = new ArrayBuffer(SIM_PARAMS_SIZE_BYTES);
     const simParamsViewF32 = new Float32Array(simParamsData);
     const simParamsViewU32 = new Uint32Array(simParamsData);
 
-    const canvasRenderWidth = canvas.width;
-    const canvasRenderHeight = canvas.height;
-    const virtualWorldWidth = canvasRenderWidth + 2 * VIRTUAL_WORLD_BORDER;
-    const virtualWorldHeight = canvasRenderHeight + 2 * VIRTUAL_WORLD_BORDER;
-    const virtualWorldOffsetX = VIRTUAL_WORLD_BORDER;
-    const virtualWorldOffsetY = VIRTUAL_WORLD_BORDER;
-
-    // Order matches SimParams struct in WGSL (now 20 fields total for 80 bytes with time)
-    simParamsViewF32[0] = 0.001; // delta_time (will be updated dynamically)
-    simParamsViewF32[1] = FRICTION; // friction
-    simParamsViewU32[2] = NUM_PARTICLES;
-    simParamsViewU32[3] = NUM_TYPES;
-    simParamsViewF32[4] = virtualWorldWidth; // virtual_world_width
-    simParamsViewF32[5] = virtualWorldHeight; // virtual_world_height
-    simParamsViewF32[6] = canvasRenderWidth; // canvas_render_width
-    simParamsViewF32[7] = canvasRenderHeight; // canvas_render_height
-    simParamsViewF32[8] = virtualWorldOffsetX; // virtual_world_offset_x
-    simParamsViewF32[9] = virtualWorldOffsetY; // virtual_world_offset_y
-    simParamsViewU32[10] = 0; // boundary_mode (0 for disappear/respawn, 1 for wrap)
-    simParamsViewF32[11] = PARTICLE_RENDER_SIZE; // particle_render_size
-    simParamsViewF32[12] = FORCE_SCALE; // force_scale
-    simParamsViewF32[13] = R_SMOOTH; // r_smooth
-    simParamsViewU32[14] = 0; // flat_force (0 for false, 1 for true)
-    simParamsViewF32[15] = DRIFT_X_PER_SECOND; // drift_x_per_second
-    simParamsViewF32[16] = INTER_TYPE_ATTRACTION_SCALE; // inter_type_attraction_scale
-    simParamsViewF32[17] = INTER_TYPE_RADIUS_SCALE; // inter_type_radius_scale
-    simParamsViewF32[18] = 0.0; // time - Initial time
-    // The 20th field (index 19) is for padding in the shader, matching SIM_PARAMS_SIZE_BYTES = 80
-    simParamsViewF32[19] = 0.0; // _padding_final (shader expects this to make struct 80 bytes)
+    // Populate simParamsData from the simParams object
+    // Order matches SimParams struct in WGSL
+    simParamsViewF32[0] = simParams.deltaTime;
+    simParamsViewF32[1] = simParams.friction;
+    simParamsViewU32[2] = simParams.numParticles;
+    simParamsViewU32[3] = simParams.numTypes;
+    simParamsViewF32[4] = simParams.virtualWorldWidth;
+    simParamsViewF32[5] = simParams.virtualWorldHeight;
+    simParamsViewF32[6] = simParams.canvasRenderWidth;
+    simParamsViewF32[7] = simParams.canvasRenderHeight;
+    simParamsViewF32[8] = simParams.virtualWorldOffsetX;
+    simParamsViewF32[9] = simParams.virtualWorldOffsetY;
+    simParamsViewU32[10] = simParams.boundaryMode;
+    simParamsViewF32[11] = simParams.particleRenderSize;
+    simParamsViewF32[12] = simParams.forceScale;
+    simParamsViewF32[13] = simParams.rSmooth;
+    simParamsViewU32[14] = simParams.flatForce ? 1 : 0; // Boolean to 0/1
+    simParamsViewF32[15] = simParams.driftXPerSecond;
+    simParamsViewF32[16] = simParams.interTypeAttractionScale;
+    simParamsViewF32[17] = simParams.interTypeRadiusScale;
+    simParamsViewF32[18] = simParams.time; // Initial time
+    simParamsViewF32[19] = 0.0; // _padding0
+    simParamsViewF32[20] = simParams.backgroundColor[0]; // R
+    simParamsViewF32[21] = simParams.backgroundColor[1]; // G
+    simParamsViewF32[22] = simParams.backgroundColor[2]; // B
+    simParamsViewF32[23] = 0.0; // _padding1
 
     simParamsBuffer = device.createBuffer({
         label: "Simulation Parameters Buffer",
-        size: SIM_PARAMS_SIZE_BYTES, // Use the imported constant
+        size: SIM_PARAMS_SIZE_BYTES, // Should be 96
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(simParamsBuffer, 0, simParamsData);
+
+    // Now that simParamsBuffer is created and initially populated,
+    // call updateBackgroundColorAndDrift to set the initial background color based on the initial drift.
+    // This will also write the initial drift and backgroundColor to the GPU buffer.
+    updateBackgroundColorAndDrift(simParams.driftXPerSecond);
 
     // Create Interaction Rules
     const rulesData = createRandomRules(NUM_TYPES);
@@ -271,8 +346,8 @@ async function initWebGPU() {
     const initialParticleData = createInitialParticles(
         NUM_PARTICLES,
         NUM_TYPES,
-        virtualWorldWidth, // Pass virtual dimensions for initial spawn
-        virtualWorldHeight
+        simParams.virtualWorldWidth, // Pass virtual dimensions for initial spawn
+        simParams.virtualWorldHeight
     );
     particleBuffers = [
         device.createBuffer({
@@ -483,45 +558,181 @@ async function initWebGPU() {
     });
 
     renderBindGroup = device.createBindGroup({
-        label: "Render Bind Group",
+        label: "Render BindGroup",
         layout: simParamsBindGroupLayout, // Use the common layout
         entries: [{ binding: 0, resource: { buffer: simParamsBuffer } }],
     });
+
+    // Start the animation loop once all setup is complete
+    animationId = requestAnimationFrame(frame);
 }
 
-let currentTime = 0; // Variable to track time for animation
+// TODO: Implement or connect the drift slider event listener.
+// The event listener should call:
+//   updateBackgroundColorAndDrift(newDriftValue);
+// Example:
+const driftSlider = document.getElementById("driftSlider") as HTMLInputElement;
+const driftValueDisplay = document.getElementById("driftValue");
+if (driftSlider && driftValueDisplay) {
+    driftSlider.value = simParams.driftXPerSecond.toString(); // Initialize slider position
+    driftValueDisplay.textContent = simParams.driftXPerSecond.toFixed(2);
 
-function frame(timestamp: number) {
-    if (!device || !quadVertexBuffer) {
-        // Check if quadVertexBuffer is initialized
-        animationId = requestAnimationFrame(frame);
-        return;
-    }
+    driftSlider.addEventListener("input", (event) => {
+        const newDrift = parseFloat((event.target as HTMLInputElement).value);
+        updateBackgroundColorAndDrift(newDrift);
+        driftValueDisplay.textContent = newDrift.toFixed(2);
+    });
+}
 
-    // Calculate deltaTime
-    const deltaTime = (timestamp - lastFrameTime) / 1000; // Convert to seconds
-    lastFrameTime = timestamp;
-    currentTime += deltaTime; // Increment current time
-
-    // FPS calculation
-    frameCount++;
-    if (timestamp - lastFPSTime >= 1000) {
-        // Update FPS every second
-        if (fpsDisplayElement) {
-            const fps = frameCount;
-            fpsDisplayElement.textContent = `FPS: ${fps}`;
+// Force Scale Slider
+const forceScaleSlider = document.getElementById(
+    "forceScaleSlider"
+) as HTMLInputElement;
+const forceScaleValueDisplay = document.getElementById("forceScaleValue");
+if (forceScaleSlider && forceScaleValueDisplay) {
+    forceScaleSlider.value = simParams.forceScale.toString();
+    forceScaleValueDisplay.textContent = simParams.forceScale.toFixed(2);
+    forceScaleSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        simParams.forceScale = newValue;
+        forceScaleValueDisplay.textContent = newValue.toFixed(2);
+        if (device && simParamsBuffer) {
+            device.queue.writeBuffer(
+                simParamsBuffer,
+                12 * 4, // Byte offset for forceScale (float at index 12)
+                new Float32Array([simParams.forceScale])
+            );
         }
-        frameCount = 0;
-        lastFPSTime = timestamp;
-    }
+    });
+}
 
-    // Update delta_time and time in simParamsBuffer
-    device.queue.writeBuffer(simParamsBuffer, 0, new Float32Array([deltaTime]));
+// Friction Slider
+const frictionSlider = document.getElementById(
+    "frictionSlider"
+) as HTMLInputElement;
+const frictionValueDisplay = document.getElementById("frictionValue");
+if (frictionSlider && frictionValueDisplay) {
+    frictionSlider.value = simParams.friction.toString();
+    frictionValueDisplay.textContent = simParams.friction.toFixed(2);
+    frictionSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        simParams.friction = newValue;
+        frictionValueDisplay.textContent = newValue.toFixed(2);
+        if (device && simParamsBuffer) {
+            device.queue.writeBuffer(
+                simParamsBuffer,
+                1 * 4, // Byte offset for friction (float at index 1)
+                new Float32Array([simParams.friction])
+            );
+        }
+    });
+}
+
+// R Smooth Slider
+const rSmoothSlider = document.getElementById(
+    "rSmoothSlider"
+) as HTMLInputElement;
+const rSmoothValueDisplay = document.getElementById("rSmoothValue");
+if (rSmoothSlider && rSmoothValueDisplay) {
+    rSmoothSlider.value = simParams.rSmooth.toString();
+    rSmoothValueDisplay.textContent = simParams.rSmooth.toFixed(2);
+    rSmoothSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        simParams.rSmooth = newValue;
+        rSmoothValueDisplay.textContent = newValue.toFixed(2);
+        if (device && simParamsBuffer) {
+            device.queue.writeBuffer(
+                simParamsBuffer,
+                13 * 4, // Byte offset for rSmooth (float at index 13)
+                new Float32Array([simParams.rSmooth])
+            );
+        }
+    });
+}
+
+// Inter-Type Attraction Scale Slider
+const interTypeAttractionScaleSlider = document.getElementById(
+    "interTypeAttractionScaleSlider"
+) as HTMLInputElement;
+const interTypeAttractionScaleValueDisplay = document.getElementById(
+    "interTypeAttractionScaleValue"
+);
+if (interTypeAttractionScaleSlider && interTypeAttractionScaleValueDisplay) {
+    interTypeAttractionScaleSlider.value =
+        simParams.interTypeAttractionScale.toString();
+    interTypeAttractionScaleValueDisplay.textContent =
+        simParams.interTypeAttractionScale.toFixed(2);
+    interTypeAttractionScaleSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        simParams.interTypeAttractionScale = newValue;
+        interTypeAttractionScaleValueDisplay.textContent = newValue.toFixed(2);
+        if (device && simParamsBuffer) {
+            device.queue.writeBuffer(
+                simParamsBuffer,
+                16 * 4, // Byte offset for interTypeAttractionScale (float at index 16)
+                new Float32Array([simParams.interTypeAttractionScale])
+            );
+        }
+    });
+}
+
+// Inter-Type Radius Scale Slider
+const interTypeRadiusScaleSlider = document.getElementById(
+    "interTypeRadiusScaleSlider"
+) as HTMLInputElement;
+const interTypeRadiusScaleValueDisplay = document.getElementById(
+    "interTypeRadiusScaleValue"
+);
+if (interTypeRadiusScaleSlider && interTypeRadiusScaleValueDisplay) {
+    interTypeRadiusScaleSlider.value =
+        simParams.interTypeRadiusScale.toString();
+    interTypeRadiusScaleValueDisplay.textContent =
+        simParams.interTypeRadiusScale.toFixed(2);
+    interTypeRadiusScaleSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        simParams.interTypeRadiusScale = newValue;
+        interTypeRadiusScaleValueDisplay.textContent = newValue.toFixed(2);
+        if (device && simParamsBuffer) {
+            device.queue.writeBuffer(
+                simParamsBuffer,
+                17 * 4, // Byte offset for interTypeRadiusScale (float at index 17)
+                new Float32Array([simParams.interTypeRadiusScale])
+            );
+        }
+    });
+}
+
+// --- Main Animation Loop ---
+function frame(timestamp?: number) {
+    // timestamp from requestAnimationFrame is not used here.
+    const now = performance.now();
+    let dt = (now - lastFrameTime) / 1000; // deltaTime in seconds
+    lastFrameTime = now;
+
+    // Clamp deltaTime to avoid large jumps (e.g., if tab was inactive)
+    // Also handle first frame where lastFrameTime is 0.
+    if (frameCount === 0) {
+        dt = 1 / 60; // Assume 60 FPS for the first frame's deltaTime
+    }
+    dt = Math.min(dt, 0.1); // Max deltaTime of 100ms
+
+    simParams.deltaTime = dt;
+    currentTime += dt; // Accumulate total time
+    simParams.time = currentTime;
+
+    // Update dynamic simParams in the GPU buffer
+    // deltaTime (float at index 0)
+    device.queue.writeBuffer(
+        simParamsBuffer,
+        0,
+        new Float32Array([simParams.deltaTime])
+    );
+    // time (float at index 18)
     device.queue.writeBuffer(
         simParamsBuffer,
         18 * 4,
-        new Float32Array([currentTime])
-    ); // Offset for time (18th f32 field)
+        new Float32Array([simParams.time])
+    );
 
     const commandEncoder = device.createCommandEncoder({
         label: "Particle Life Frame Encoder",
@@ -561,13 +772,13 @@ function frame(timestamp: number) {
     backgroundPass.draw(6, 1, 0, 0); // Draw the full-screen quad (6 vertices)
     backgroundPass.end();
 
-    // Particle Render Pass (now loads existing content)
+    // Particle Render Pass (re-enabled)
     const particleRenderPassDescriptor: GPURenderPassDescriptor = {
         label: "Particle Render Pass",
         colorAttachments: [
             {
                 view: textureView,
-                loadOp: "load", // Load the content from the background pass
+                loadOp: "load", // Ensure this is "load" to draw on top of the background
                 storeOp: "store",
             },
         ],
@@ -582,7 +793,7 @@ function frame(timestamp: number) {
     );
     particlePass.setVertexBuffer(1, quadVertexBuffer);
     particlePass.setBindGroup(0, renderBindGroup);
-    particlePass.draw(4, NUM_PARTICLES, 0, 0);
+    particlePass.draw(4, NUM_PARTICLES, 0, 0); // 4 vertices per quad, NUM_PARTICLES instances
     particlePass.end();
 
     device.queue.submit([commandEncoder.finish()]);
@@ -590,157 +801,24 @@ function frame(timestamp: number) {
     // Ping-pong buffers
     currentParticleBufferIndex = 1 - currentParticleBufferIndex;
 
-    animationId = requestAnimationFrame(frame);
+    // FPS calculation
+    frameCount++;
+    const fpsNow = performance.now();
+    if (fpsNow - lastFPSTime > 1000) {
+        // Update FPS display every second
+        const fps = frameCount / ((fpsNow - lastFPSTime) / 1000);
+        if (fpsDisplayElement) {
+            fpsDisplayElement.textContent = fps.toFixed(1);
+        }
+        frameCount = 0;
+        lastFPSTime = fpsNow;
+    }
+
+    animationId = requestAnimationFrame(frame); // Re-queue the next frame
 }
 
-function setupUIEventListeners() {
-    const driftSlider = document.getElementById(
-        "driftSlider"
-    ) as HTMLInputElement;
-    const driftValueDisplay = document.getElementById("driftValue");
-    if (driftSlider && driftValueDisplay) {
-        driftSlider.addEventListener("input", () => {
-            DRIFT_X_PER_SECOND = parseFloat(driftSlider.value);
-            if (driftValueDisplay)
-                driftValueDisplay.textContent = driftSlider.value;
-            if (device && simParamsBuffer) {
-                device.queue.writeBuffer(
-                    simParamsBuffer,
-                    15 * 4, // Offset for drift_x_per_second (15th f32 field)
-                    new Float32Array([DRIFT_X_PER_SECOND])
-                );
-            }
-        });
-    }
-
-    const forceScaleSlider = document.getElementById(
-        "forceScaleSlider"
-    ) as HTMLInputElement;
-    const forceScaleValueDisplay = document.getElementById("forceScaleValue");
-    if (forceScaleSlider && forceScaleValueDisplay) {
-        forceScaleSlider.addEventListener("input", () => {
-            FORCE_SCALE = parseFloat(forceScaleSlider.value);
-            if (forceScaleValueDisplay)
-                forceScaleValueDisplay.textContent = forceScaleSlider.value;
-            if (device && simParamsBuffer) {
-                device.queue.writeBuffer(
-                    simParamsBuffer,
-                    12 * 4, // Offset for force_scale (12th f32 field)
-                    new Float32Array([FORCE_SCALE])
-                );
-            }
-        });
-    }
-
-    const frictionSlider = document.getElementById(
-        "frictionSlider"
-    ) as HTMLInputElement;
-    const frictionValueDisplay = document.getElementById("frictionValue");
-    if (frictionSlider && frictionValueDisplay) {
-        frictionSlider.addEventListener("input", () => {
-            FRICTION = parseFloat(frictionSlider.value);
-            if (frictionValueDisplay)
-                frictionValueDisplay.textContent = frictionSlider.value;
-            if (device && simParamsBuffer) {
-                device.queue.writeBuffer(
-                    simParamsBuffer,
-                    1 * 4, // Offset for friction (1st f32 field)
-                    new Float32Array([FRICTION])
-                );
-            }
-        });
-    }
-
-    const rSmoothSlider = document.getElementById(
-        "rSmoothSlider"
-    ) as HTMLInputElement;
-    const rSmoothValueDisplay = document.getElementById("rSmoothValue");
-    if (rSmoothSlider && rSmoothValueDisplay) {
-        rSmoothSlider.addEventListener("input", () => {
-            R_SMOOTH = parseFloat(rSmoothSlider.value);
-            if (rSmoothValueDisplay)
-                rSmoothValueDisplay.textContent = rSmoothSlider.value;
-            if (device && simParamsBuffer) {
-                device.queue.writeBuffer(
-                    simParamsBuffer,
-                    13 * 4, // Offset for r_smooth (13th f32 field)
-                    new Float32Array([R_SMOOTH])
-                );
-            }
-        });
-    }
-
-    const interTypeAttractionScaleSlider = document.getElementById(
-        "interTypeAttractionScaleSlider"
-    ) as HTMLInputElement;
-    const interTypeAttractionScaleValueDisplay = document.getElementById(
-        "interTypeAttractionScaleValue"
-    );
-    if (
-        interTypeAttractionScaleSlider &&
-        interTypeAttractionScaleValueDisplay
-    ) {
-        interTypeAttractionScaleSlider.addEventListener("input", () => {
-            INTER_TYPE_ATTRACTION_SCALE = parseFloat(
-                interTypeAttractionScaleSlider.value
-            );
-            if (interTypeAttractionScaleValueDisplay)
-                interTypeAttractionScaleValueDisplay.textContent =
-                    interTypeAttractionScaleSlider.value;
-            if (device && simParamsBuffer) {
-                device.queue.writeBuffer(
-                    simParamsBuffer,
-                    16 * 4, // Offset for inter_type_attraction_scale (16th f32 field)
-                    new Float32Array([INTER_TYPE_ATTRACTION_SCALE])
-                );
-            }
-        });
-    }
-
-    const interTypeRadiusScaleSlider = document.getElementById(
-        "interTypeRadiusScaleSlider"
-    ) as HTMLInputElement;
-    const interTypeRadiusScaleValueDisplay = document.getElementById(
-        "interTypeRadiusScaleValue"
-    );
-    if (interTypeRadiusScaleSlider && interTypeRadiusScaleValueDisplay) {
-        interTypeRadiusScaleSlider.addEventListener("input", () => {
-            INTER_TYPE_RADIUS_SCALE = parseFloat(
-                interTypeRadiusScaleSlider.value
-            );
-            if (interTypeRadiusScaleValueDisplay)
-                interTypeRadiusScaleValueDisplay.textContent =
-                    interTypeRadiusScaleSlider.value;
-            if (device && simParamsBuffer) {
-                device.queue.writeBuffer(
-                    simParamsBuffer,
-                    17 * 4, // Offset for inter_type_radius_scale (17th f32 field)
-                    new Float32Array([INTER_TYPE_RADIUS_SCALE])
-                );
-            }
-        });
-    }
-}
-
-async function main() {
-    try {
-        await initWebGPU();
-        fpsDisplayElement = document.getElementById("fpsDisplay");
-        // lastFPSTime = performance.now(); // This is already initialized globally or within frame
-        lastFrameTime = performance.now(); // Initialize lastFrameTime before first frame call
-        setupUIEventListeners();
-        animationId = requestAnimationFrame(frame);
-    } catch (error) {
-        console.error("Failed to initialize Particle Life:", error);
-        const errorDiv = document.createElement("div");
-        errorDiv.innerHTML = `<h2>Error initializing WebGPU Particle Life</h2><p>${
-            (error as Error).message
-        }</p><p>Please ensure your browser supports WebGPU and it's enabled. Check the console for more details.</p>`;
-        document.body.appendChild(errorDiv);
-    }
-}
-
-main();
+// Initial setup
+initWebGPU(); // Call the correct initialization function
 
 // Add resize handling
 window.addEventListener("resize", () => {

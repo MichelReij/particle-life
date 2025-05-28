@@ -20,6 +20,8 @@ struct SimParams {
   inter_type_radius_scale: f32,   // New parameter
   time: f32, // Added time
   _padding0: f32, // Added padding to ensure 80 bytes (20 * 4)
+  backgroundColor: vec3<f32>, // New: background color
+  _padding1: f32, // Padding to make total size 96 bytes (24 * 4)
 }
 
 @group(0) @binding(0) var<uniform> sim_params: SimParams;
