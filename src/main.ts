@@ -10,6 +10,7 @@ import backgroundVertWGSL from "./shaders/background_vert.wgsl?raw"; // New back
 import backgroundFragWGSL from "./shaders/background_frag.wgsl?raw"; // New background fragment shader
 import { hsluvToRgb } from "hsluv-ts"; // Make sure this import is present
 import vignetteFragWGSL from "./shaders/vignette_frag.wgsl?raw"; // Import for vignette shader
+import gridFragWGSL from "./shaders/grid_frag.wgsl?raw"; // Import for grid shader
 
 import {
     Particle,
@@ -68,7 +69,7 @@ canvas.style.height = "800px";
 // === Particle Life Configuration ===
 const NUM_PARTICLES = 1600; // Number of particles
 const NUM_TYPES = 11; // Number of particle types
-const PARTICLE_RENDER_SIZE = 3.0;
+const PARTICLE_RENDER_SIZE = 4.0;
 const PARTICLE_SIZE_BYTES = 24; // pos(2f) + vel(2f) + type(1u) + padding(1f for alignment if needed, or size for individual particle size)
 // For PARTICLE_SIZE_BYTES = 24: pos(8) + vel(8) + type(4) + padding(4) to make it multiple of 16 for some platforms, or particle_size (f32)
 const RULE_SIZE_BYTES = 16; // attraction(f32), min_radius(f32), max_radius(f32), padding(f32)
@@ -101,6 +102,8 @@ let renderBindGroup: GPUBindGroup;
 let backgroundRenderBindGroup: GPUBindGroup;
 let vignetteRenderPipeline: GPURenderPipeline; // For vignette
 let vignetteRenderBindGroup: GPUBindGroup; // For vignette
+let gridRenderPipeline: GPURenderPipeline; // For oscilloscope grid
+let gridRenderBindGroup: GPUBindGroup; // For oscilloscope grid
 let sceneTexture: GPUTexture; // For multi-pass rendering
 let sceneSampler: GPUSampler; // For multi-pass rendering
 
@@ -234,8 +237,8 @@ function updateBackgroundColorAndDrift(newDriftXPerSecond: number): void {
         Math.abs(newDriftXPerSecond) / 100.0
     );
     const hue = 10 + 230 * (1 - normalizedAbsDrift); // 240 (blue) at 0 drift, to 10 (red) at 100 drift
-    const saturation = 66; // Full saturation
-    const lightness = 36; // Very dark
+    const saturation = 88; // Full saturation
+    const lightness = 50; // Very dark
 
     simParams.backgroundColor = hsluvToRgb([hue, saturation, lightness]);
 
@@ -643,6 +646,57 @@ async function initWebGPU() {
         ],
     });
 
+    // --- Oscilloscope Grid Render Pipeline ---
+    const gridShaderModuleFrag = device.createShaderModule({
+        code: gridFragWGSL,
+    });
+
+    // The grid pipeline will also use sim_params, so we can reuse simParamsBindGroupLayout
+    const gridPipelineLayout = device.createPipelineLayout({
+        bindGroupLayouts: [simParamsBindGroupLayout], // Reuse common layout for sim_params
+    });
+
+    gridRenderPipeline = device.createRenderPipeline({
+        label: "Grid Render Pipeline",
+        layout: gridPipelineLayout,
+        vertex: {
+            // Reuse the background's full-screen quad vertex shader
+            module: backgroundShaderModuleVert,
+            entryPoint: "main",
+        },
+        fragment: {
+            module: gridShaderModuleFrag,
+            entryPoint: "main",
+            targets: [
+                {
+                    format: presentationFormat,
+                    blend: {
+                        // Enable alpha blending for the grid
+                        color: {
+                            srcFactor: "src-alpha",
+                            dstFactor: "one-minus-src-alpha",
+                            operation: "add",
+                        },
+                        alpha: {
+                            srcFactor: "one", // Or "src-alpha" if grid alpha needs to blend
+                            dstFactor: "one-minus-src-alpha",
+                            operation: "add",
+                        },
+                    },
+                },
+            ],
+        },
+        primitive: {
+            topology: "triangle-list",
+        },
+    });
+
+    gridRenderBindGroup = device.createBindGroup({
+        label: "Grid Render Bind Group",
+        layout: simParamsBindGroupLayout, // Use the common layout for sim_params
+        entries: [{ binding: 0, resource: { buffer: simParamsBuffer } }],
+    });
+
     // Start the animation loop once all setup is complete
     animationId = requestAnimationFrame(frame);
 }
@@ -903,6 +957,23 @@ function frame(timestamp?: number) {
     vignettePass.setBindGroup(0, vignetteRenderBindGroup); // This uses sceneTexture
     vignettePass.draw(6, 1, 0, 0); // Draw a full-screen quad
     vignettePass.end();
+
+    // 4. Oscilloscope Grid Render Pass (to canvas, on top of vignette)
+    const gridPassDescriptor: GPURenderPassDescriptor = {
+        label: "Grid Pass to Canvas",
+        colorAttachments: [
+            {
+                view: canvasTextureView, // Render to the actual canvas
+                loadOp: "load", // Load the result of the vignette pass
+                storeOp: "store",
+            },
+        ],
+    };
+    const gridPass = commandEncoder.beginRenderPass(gridPassDescriptor);
+    gridPass.setPipeline(gridRenderPipeline);
+    gridPass.setBindGroup(0, gridRenderBindGroup);
+    gridPass.draw(6, 1, 0, 0); // Draw a full-screen quad
+    gridPass.end();
 
     device.queue.submit([commandEncoder.finish()]);
 
