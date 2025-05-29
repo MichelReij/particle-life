@@ -9,6 +9,7 @@ import fragWGSL from "./shaders/frag.wgsl?raw"; // Will need to be updated for p
 import backgroundVertWGSL from "./shaders/background_vert.wgsl?raw"; // New background vertex shader
 import backgroundFragWGSL from "./shaders/background_frag.wgsl?raw"; // New background fragment shader
 import { hsluvToRgb } from "hsluv-ts"; // Make sure this import is present
+import vignetteFragWGSL from "./shaders/vignette_frag.wgsl?raw"; // Import for vignette shader
 
 import {
     Particle,
@@ -98,6 +99,10 @@ let backgroundRenderPipeline: GPURenderPipeline; // New pipeline for the backgro
 let computeBindGroups: [GPUBindGroup, GPUBindGroup];
 let renderBindGroup: GPUBindGroup;
 let backgroundRenderBindGroup: GPUBindGroup;
+let vignetteRenderPipeline: GPURenderPipeline; // For vignette
+let vignetteRenderBindGroup: GPUBindGroup; // For vignette
+let sceneTexture: GPUTexture; // For multi-pass rendering
+let sceneSampler: GPUSampler; // For multi-pass rendering
 
 let currentParticleBufferIndex = 0;
 let animationId: number | undefined;
@@ -267,7 +272,8 @@ async function initWebGPU() {
     context.configure({
         device: device,
         format: presentationFormat,
-        alphaMode: "premultiplied",
+        // alphaMode: "premultiplied", // Changed for multi-pass
+        alphaMode: "opaque",
     });
 
     // Initialize fpsDisplayElement (ensure "fpsDisplay" ID exists in HTML)
@@ -329,6 +335,18 @@ async function initWebGPU() {
     // call updateBackgroundColorAndDrift to set the initial background color based on the initial drift.
     // This will also write the initial drift and backgroundColor to the GPU buffer.
     updateBackgroundColorAndDrift(simParams.driftXPerSecond);
+
+    // Create Scene Texture and Sampler for multi-pass rendering
+    sceneTexture = device.createTexture({
+        size: [canvas.width, canvas.height],
+        format: presentationFormat,
+        usage:
+            GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    sceneSampler = device.createSampler({
+        magFilter: "linear",
+        minFilter: "linear",
+    });
 
     // Create Interaction Rules
     const rulesData = createRandomRules(NUM_TYPES);
@@ -563,6 +581,68 @@ async function initWebGPU() {
         entries: [{ binding: 0, resource: { buffer: simParamsBuffer } }],
     });
 
+    // --- Vignette Render Pipeline ---
+    const vignetteShaderModuleFrag = device.createShaderModule({
+        code: vignetteFragWGSL,
+    });
+
+    const vignetteBindGroupLayout = device.createBindGroupLayout({
+        label: "Vignette BindGroupLayout",
+        entries: [
+            {
+                // sim_params
+                binding: 0,
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "uniform" },
+            },
+            {
+                // scene_sampler
+                binding: 1,
+                visibility: GPUShaderStage.FRAGMENT,
+                sampler: { type: "filtering" },
+            },
+            {
+                // scene_texture
+                binding: 2,
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: { sampleType: "float" },
+            },
+        ],
+    });
+
+    const vignettePipelineLayout = device.createPipelineLayout({
+        label: "Vignette Pipeline Layout",
+        bindGroupLayouts: [vignetteBindGroupLayout],
+    });
+
+    vignetteRenderPipeline = device.createRenderPipeline({
+        label: "Vignette Render Pipeline",
+        layout: vignettePipelineLayout,
+        vertex: {
+            // Reuse the background's full-screen quad vertex shader
+            module: backgroundShaderModuleVert,
+            entryPoint: "main",
+        },
+        fragment: {
+            module: vignetteShaderModuleFrag,
+            entryPoint: "main",
+            targets: [{ format: presentationFormat }], // Output to the canvas
+        },
+        primitive: {
+            topology: "triangle-list",
+        },
+    });
+
+    vignetteRenderBindGroup = device.createBindGroup({
+        label: "Vignette Render Bind Group",
+        layout: vignetteBindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: simParamsBuffer } },
+            { binding: 1, resource: sceneSampler },
+            { binding: 2, resource: sceneTexture.createView() },
+        ],
+    });
+
     // Start the animation loop once all setup is complete
     animationId = requestAnimationFrame(frame);
 }
@@ -749,18 +829,27 @@ function frame(timestamp?: number) {
     computePass.dispatchWorkgroups(numWorkgroups);
     computePass.end();
 
-    // Render Pass
-    const textureView = context.getCurrentTexture().createView();
+    // Render Pass (will be multi-pass now)
+    // const textureView = context.getCurrentTexture().createView(); // This is for the final pass to canvas
 
-    // Background Render Pass
+    // --- Render Passes ---
+    const sceneTextureView = sceneTexture.createView();
+
+    // 1. Background Render Pass (to sceneTexture)
     const backgroundPassDescriptor: GPURenderPassDescriptor = {
         label: "Background Render Pass",
         colorAttachments: [
             {
-                view: textureView,
-                loadOp: "clear", // Clear the canvas for the background
-                clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, // Clear to black, background shader will draw over it
-                storeOp: "store", // Store the result of the background pass
+                view: sceneTextureView, // Render to sceneTexture
+                loadOp: "clear",
+                // Clear with the dynamic background color
+                clearValue: {
+                    r: simParams.backgroundColor[0],
+                    g: simParams.backgroundColor[1],
+                    b: simParams.backgroundColor[2],
+                    a: 1.0,
+                },
+                storeOp: "store",
             },
         ],
     };
@@ -768,17 +857,17 @@ function frame(timestamp?: number) {
         backgroundPassDescriptor
     );
     backgroundPass.setPipeline(backgroundRenderPipeline);
-    backgroundPass.setBindGroup(0, backgroundRenderBindGroup); // Use the background's bind group
-    backgroundPass.draw(6, 1, 0, 0); // Draw the full-screen quad (6 vertices)
+    backgroundPass.setBindGroup(0, backgroundRenderBindGroup);
+    backgroundPass.draw(6, 1, 0, 0);
     backgroundPass.end();
 
-    // Particle Render Pass (re-enabled)
+    // 2. Particle Render Pass (to sceneTexture, on top of background)
     const particleRenderPassDescriptor: GPURenderPassDescriptor = {
         label: "Particle Render Pass",
         colorAttachments: [
             {
-                view: textureView,
-                loadOp: "load", // Ensure this is "load" to draw on top of the background
+                view: sceneTextureView, // Render to sceneTexture
+                loadOp: "load", // Load the background drawn in the previous pass
                 storeOp: "store",
             },
         ],
@@ -793,8 +882,27 @@ function frame(timestamp?: number) {
     );
     particlePass.setVertexBuffer(1, quadVertexBuffer);
     particlePass.setBindGroup(0, renderBindGroup);
-    particlePass.draw(4, NUM_PARTICLES, 0, 0); // 4 vertices per quad, NUM_PARTICLES instances
+    particlePass.draw(4, NUM_PARTICLES, 0, 0);
     particlePass.end();
+
+    // 3. Vignette Post-Processing Pass (from sceneTexture to canvas)
+    const canvasTextureView = context.getCurrentTexture().createView();
+    const vignettePassDescriptor: GPURenderPassDescriptor = {
+        label: "Vignette Pass to Canvas",
+        colorAttachments: [
+            {
+                view: canvasTextureView, // Render to the actual canvas
+                loadOp: "clear", // Clear canvas before drawing final scene + vignette
+                clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, // Clear to black
+                storeOp: "store",
+            },
+        ],
+    };
+    const vignettePass = commandEncoder.beginRenderPass(vignettePassDescriptor);
+    vignettePass.setPipeline(vignetteRenderPipeline);
+    vignettePass.setBindGroup(0, vignetteRenderBindGroup); // This uses sceneTexture
+    vignettePass.draw(6, 1, 0, 0); // Draw a full-screen quad
+    vignettePass.end();
 
     device.queue.submit([commandEncoder.finish()]);
 
