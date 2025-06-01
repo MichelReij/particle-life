@@ -70,16 +70,16 @@ canvas.style.width = "800px";
 canvas.style.height = "800px";
 
 // === Particle Life Configuration ===
-const NUM_PARTICLES = 1600; // Number of particles
-const NUM_TYPES = 8; // Number of particle types
-const PARTICLE_RENDER_SIZE = 14.0;
+const NUM_PARTICLES = 3200; // Number of particles - increased for stronger Lenia effects
+const NUM_TYPES = 5; // Number of particle types - reduced for more coherent Lenia patterns
+const PARTICLE_RENDER_SIZE = 12.0;
 const PARTICLE_SIZE_BYTES = 24; // pos(2f) + vel(2f) + type(1u) + padding(1f for alignment if needed, or size for individual particle size)
 // For PARTICLE_SIZE_BYTES = 24: pos(8) + vel(8) + type(4) + padding(4) to make it multiple of 16 for some platforms, or particle_size (f32)
 const RULE_SIZE_BYTES = 16; // attraction(f32), min_radius(f32), max_radius(f32), padding(f32)
 // SIM_PARAMS_SIZE_BYTES is now imported from particle-life-types.ts
 
 let VIRTUAL_WORLD_BORDER = 0; // No border: virtual world and render world both 2400x2400px. Now a let.
-let DRIFT_X_PER_SECOND = -60.0; // Pixels per second, negative for left drift. Now a let.
+let DRIFT_X_PER_SECOND = -10.0; // Pixels per second, negative for left drift. Now a let.
 let FORCE_SCALE = 400.0;
 let FRICTION = 0.1;
 let R_SMOOTH = 5.0;
@@ -151,6 +151,12 @@ let simParams: SimulationParams = {
     time: 0.0, // Current animation time, updated each frame
     fisheyeStrength: 3.0, // Default fisheye distortion strength
     backgroundColor: [0.0, 0.0, 0.0], // Initial: black, updated by updateBackgroundColorAndDrift
+
+    // Lenia-inspired parameters
+    leniaEnabled: true, // Start with Lenia enabled for immediate effect
+    leniaGrowthMu: 0.18, // Slightly higher for more dynamic growth
+    leniaGrowthSigma: 0.025, // Increased spread for more gradual transitions
+    leniaKernelRadius: 75.0, // Larger kernel for stronger long-range effects
 };
 
 // --- Helper Functions ---
@@ -246,14 +252,14 @@ function updateBackgroundColorAndDrift(newDriftXPerSecond: number): void {
 
     const normalizedAbsDrift = Math.min(
         1,
-        Math.abs(newDriftXPerSecond) / 150.0 // Changed from 100.0 to 150.0 for new range
+        Math.abs(newDriftXPerSecond) / 80.0 // Updated to match new drift range of ±80 px/s
     );
 
     // Use HSLuv for background color generation based on drift speed
     // Hue transitions from blue (240°) at no drift to red (0°) at max drift
     const hue = 190 - normalizedAbsDrift * 175; // 240° to 0° (blue 240 to red 10)
-    const saturation = 100; // Full saturation
-    const lightness = 66; // 20% to 50% lightness for dark backgrounds
+    const saturation = 66; // Full saturation
+    const lightness = 33; // 20% to 50% lightness for dark backgrounds
 
     // Convert HSLuv to RGB
     const [red, green, blue] = hsluvToRgb([hue, saturation, lightness]);
@@ -344,11 +350,17 @@ async function initWebGPU() {
     simParamsViewF32[20] = simParams.backgroundColor[0]; // R
     simParamsViewF32[21] = simParams.backgroundColor[1]; // G
     simParamsViewF32[22] = simParams.backgroundColor[2]; // B
-    simParamsViewF32[23] = 0.0; // _padding1
+
+    // Lenia parameters (starting at index 23)
+    simParamsViewU32[23] = simParams.leniaEnabled ? 1 : 0; // Boolean to 0/1
+    simParamsViewF32[24] = simParams.leniaGrowthMu; // μ parameter
+    simParamsViewF32[25] = simParams.leniaGrowthSigma; // σ parameter
+    simParamsViewF32[26] = simParams.leniaKernelRadius; // Kernel radius
+    simParamsViewF32[27] = 0.0; // _padding1
 
     simParamsBuffer = device.createBuffer({
         label: "Simulation Parameters Buffer",
-        size: SIM_PARAMS_SIZE_BYTES, // Should be 96
+        size: SIM_PARAMS_SIZE_BYTES, // Should be 112 bytes (28 floats)
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(simParamsBuffer, 0, simParamsData);
@@ -1072,6 +1084,93 @@ if (zoomSlider && zoomValueDisplay) {
                 zoomUniformsBuffer,
                 0, // Byte offset for zoom level
                 new Float32Array([currentZoomLevel])
+            );
+        }
+    });
+}
+
+// Lenia Controls
+const leniaEnabledCheckbox = document.getElementById(
+    "leniaEnabledCheckbox"
+) as HTMLInputElement;
+const leniaEnabledStatus = document.getElementById("leniaEnabledStatus");
+if (leniaEnabledCheckbox && leniaEnabledStatus) {
+    leniaEnabledCheckbox.checked = simParams.leniaEnabled;
+    leniaEnabledStatus.textContent = simParams.leniaEnabled ? "On" : "Off";
+    leniaEnabledCheckbox.addEventListener("change", (event) => {
+        const newValue = (event.target as HTMLInputElement).checked;
+        simParams.leniaEnabled = newValue;
+        leniaEnabledStatus.textContent = newValue ? "On" : "Off";
+        if (device && simParamsBuffer) {
+            device.queue.writeBuffer(
+                simParamsBuffer,
+                23 * 4, // Byte offset for leniaEnabled (u32 at index 23)
+                new Uint32Array([newValue ? 1 : 0])
+            );
+        }
+    });
+}
+
+const leniaGrowthMuSlider = document.getElementById(
+    "leniaGrowthMuSlider"
+) as HTMLInputElement;
+const leniaGrowthMuValue = document.getElementById("leniaGrowthMuValue");
+if (leniaGrowthMuSlider && leniaGrowthMuValue) {
+    leniaGrowthMuSlider.value = simParams.leniaGrowthMu.toString();
+    leniaGrowthMuValue.textContent = simParams.leniaGrowthMu.toFixed(3);
+    leniaGrowthMuSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        simParams.leniaGrowthMu = newValue;
+        leniaGrowthMuValue.textContent = newValue.toFixed(3);
+        if (device && simParamsBuffer) {
+            device.queue.writeBuffer(
+                simParamsBuffer,
+                24 * 4, // Byte offset for leniaGrowthMu (f32 at index 24)
+                new Float32Array([simParams.leniaGrowthMu])
+            );
+        }
+    });
+}
+
+const leniaGrowthSigmaSlider = document.getElementById(
+    "leniaGrowthSigmaSlider"
+) as HTMLInputElement;
+const leniaGrowthSigmaValue = document.getElementById("leniaGrowthSigmaValue");
+if (leniaGrowthSigmaSlider && leniaGrowthSigmaValue) {
+    leniaGrowthSigmaSlider.value = simParams.leniaGrowthSigma.toString();
+    leniaGrowthSigmaValue.textContent = simParams.leniaGrowthSigma.toFixed(3);
+    leniaGrowthSigmaSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        simParams.leniaGrowthSigma = newValue;
+        leniaGrowthSigmaValue.textContent = newValue.toFixed(3);
+        if (device && simParamsBuffer) {
+            device.queue.writeBuffer(
+                simParamsBuffer,
+                25 * 4, // Byte offset for leniaGrowthSigma (f32 at index 25)
+                new Float32Array([simParams.leniaGrowthSigma])
+            );
+        }
+    });
+}
+
+const leniaKernelRadiusSlider = document.getElementById(
+    "leniaKernelRadiusSlider"
+) as HTMLInputElement;
+const leniaKernelRadiusValue = document.getElementById(
+    "leniaKernelRadiusValue"
+);
+if (leniaKernelRadiusSlider && leniaKernelRadiusValue) {
+    leniaKernelRadiusSlider.value = simParams.leniaKernelRadius.toString();
+    leniaKernelRadiusValue.textContent = simParams.leniaKernelRadius.toFixed(1);
+    leniaKernelRadiusSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        simParams.leniaKernelRadius = newValue;
+        leniaKernelRadiusValue.textContent = newValue.toFixed(1);
+        if (device && simParamsBuffer) {
+            device.queue.writeBuffer(
+                simParamsBuffer,
+                26 * 4, // Byte offset for leniaKernelRadius (f32 at index 26)
+                new Float32Array([simParams.leniaKernelRadius])
             );
         }
     });

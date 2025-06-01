@@ -39,6 +39,12 @@ export interface SimulationParams {
     time: number; // Time in seconds for animation
     fisheyeStrength: number; // Fisheye distortion strength
     backgroundColor: [number, number, number]; // RGB color
+
+    // Lenia-inspired parameters
+    leniaEnabled: boolean; // Enable Lenia-style interactions
+    leniaGrowthMu: number; // Lenia growth function center (μ)
+    leniaGrowthSigma: number; // Lenia growth function spread (σ)
+    leniaKernelRadius: number; // Lenia kernel radius
     // _padding1 is implicit in WGSL if needed after backgroundColor for alignment
 }
 
@@ -67,10 +73,15 @@ export interface SimulationParams {
 // -- Total so far: 20 * 4 = 80 bytes --
 // backgroundColor: vec3f (3 * 4 = 12 bytes)
 // -- Total so far: 80 + 12 = 92 bytes --
+// leniaEnabled: u32 (4) - boolean as u32
+// leniaGrowthMu: f32 (4)
+// leniaGrowthSigma: f32 (4)
+// leniaKernelRadius: f32 (4)
+// -- Total so far: 92 + 16 = 108 bytes --
 // To make it a multiple of 16, we need 4 more bytes of padding (_padding1: f32).
-// So, 92 + 4 = 96 bytes.
-// This corresponds to 24 floats (20 actual params + 3 for color + 1 padding)
-export const SIM_PARAMS_SIZE_BYTES = 24 * 4; // 96 bytes
+// So, 108 + 4 = 112 bytes.
+// This corresponds to 28 floats (24 actual params + 3 for color + 1 padding)
+export const SIM_PARAMS_SIZE_BYTES = 28 * 4; // 112 bytes
 
 export const MAX_PARTICLE_TYPES = 16;
 

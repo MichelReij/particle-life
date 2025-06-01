@@ -22,8 +22,16 @@ struct SimulationParams {
     // Fisheye distortion strength
     backgroundColor: vec3<f32>,
     // New: background color
-    _padding1: f32,
-    // Padding to make total size 96 bytes (24 * 4)
+
+    // Lenia-inspired parameters
+    leniaEnabled: u32,
+    // Boolean as u32: enable Lenia-style interactions
+    leniaGrowthMu: f32,
+    // Lenia growth function center (μ)
+    leniaGrowthSigma: f32,
+    // Lenia growth function spread (σ)
+    leniaKernelRadius: f32,
+    // Lenia kernel radius in pixels
 }
 
 ;

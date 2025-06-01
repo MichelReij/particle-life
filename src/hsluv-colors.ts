@@ -1,13 +1,18 @@
 // Custom color palette for particle types
 const CUSTOM_COLORS = [
-    "#78729e",
-    "#cf9760",
-    "#698c61",
-    "#37597d",
-    "#287a8c",
-    "#a15064",
-    "#cf900a",
-    "#8196bd",
+    // "#78729e",
+    // "#cf9760",
+    // "#698c61",
+    // "#37597d",
+    // "#287a8c",
+    // "#a15064",
+    // "#cf900a",
+    // "#8196bd",
+    "#559167",
+    "#004e79",
+    "#8398a7",
+    "#99403a",
+    "#e0954f",
 ];
 
 // Convert hex color to RGB values (0-1 range)
@@ -37,7 +42,7 @@ function generateParticleColors(numTypes: number): Float32Array {
         colors[offset + 0] = r; // Red
         colors[offset + 1] = g; // Green
         colors[offset + 2] = b; // Blue
-        colors[offset + 3] = 0.7; // Alpha
+        colors[offset + 3] = 0.6; // Alpha
     }
 
     return colors;

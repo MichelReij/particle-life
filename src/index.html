@@ -29,7 +29,7 @@
                 position: fixed;
                 top: 10px;
                 left: 10px;
-                color: white;
+                color: #333;
                 font-family: Arial, sans-serif;
             }
             #controls {
@@ -53,8 +53,8 @@
                 <input
                     type="range"
                     id="driftSlider"
-                    min="-150"
-                    max="150"
+                    min="-80"
+                    max="80"
                     value="-20"
                     step="1"
                 />
@@ -141,12 +141,57 @@
                 <input
                     type="range"
                     id="zoomSlider"
-                    min="1.5"
-                    max="3.0"
-                    value="2.0"
-                    step="0.1"
+                    min="1.50"
+                    max="3.00"
+                    value="2.00"
+                    step="0.01"
                 />
                 <span id="zoomValue">1.4</span>x
+            </div>
+
+            <!-- Lenia Controls -->
+            <div>
+                <label for="leniaEnabledCheckbox">Enable Lenia:</label>
+                <input type="checkbox" id="leniaEnabledCheckbox" />
+                <span id="leniaEnabledStatus">Off</span>
+            </div>
+            <div>
+                <label for="leniaGrowthMuSlider">Lenia Growth μ:</label>
+                <input
+                    type="range"
+                    id="leniaGrowthMuSlider"
+                    min="0.05"
+                    max="0.3"
+                    value="0.15"
+                    step="0.01"
+                />
+                <span id="leniaGrowthMuValue">0.15</span>
+            </div>
+            <div>
+                <label for="leniaGrowthSigmaSlider">Lenia Growth σ:</label>
+                <input
+                    type="range"
+                    id="leniaGrowthSigmaSlider"
+                    min="0.005"
+                    max="0.05"
+                    value="0.017"
+                    step="0.001"
+                />
+                <span id="leniaGrowthSigmaValue">0.017</span>
+            </div>
+            <div>
+                <label for="leniaKernelRadiusSlider"
+                    >Lenia Kernel Radius:</label
+                >
+                <input
+                    type="range"
+                    id="leniaKernelRadiusSlider"
+                    min="20.0"
+                    max="100.0"
+                    value="50.0"
+                    step="5.0"
+                />
+                <span id="leniaKernelRadiusValue">50.0</span>
             </div>
         </div>
         <div id="fpsDisplay">FPS: --</div>

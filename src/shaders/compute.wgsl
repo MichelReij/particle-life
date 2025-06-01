@@ -57,8 +57,16 @@ struct SimParams {
     // Fisheye distortion strength
     backgroundColor: vec3<f32>,
     // New: background color
-    _padding1: f32,
-    // Padding to make total size 96 bytes (24 * 4)
+
+    // Lenia-inspired parameters
+    lenia_enabled: u32,
+    // Boolean as u32: enable Lenia-style interactions
+    lenia_growth_mu: f32,
+    // Lenia growth function center (μ)
+    lenia_growth_sigma: f32,
+    // Lenia growth function spread (σ)
+    lenia_kernel_radius: f32,
+    // Lenia kernel radius in pixels
 }
 
 // Particle data (input)
@@ -78,6 +86,58 @@ const PI: f32 = 3.141592653589793;
 const EPSILON: f32 = 0.001;
 // To avoid division by zero or sqrt(0)
 
+// === Lenia Functions ===
+
+// Lenia kernel function: K(r) = exp(-r²/2σ²)
+fn lenia_kernel(distance: f32, sigma: f32) -> f32 {
+    let normalized_dist = distance / sigma;
+    return exp(- 0.5 * normalized_dist * normalized_dist);
+}
+
+// Lenia growth function: μ(U) = 2 * exp(-(U-μ)²/2σ²) - 1
+fn lenia_growth_function(density: f32, mu: f32, sigma: f32) -> f32 {
+    let diff = density - mu;
+    return 2.0 * exp(- 0.5 * diff * diff / (sigma * sigma)) - 1.0;
+}
+
+// Calculate local density around a particle using Lenia kernel
+fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32) -> f32 {
+    var density = 0.0;
+    let kernel_radius = sim_params.lenia_kernel_radius;
+
+    for (var i: u32 = 0u; i < sim_params.num_particles; i = i + 1u) {
+        let other_particle = particles_in[i];
+        var diff = other_particle.pos - particle_pos;
+
+        // Apply world wrapping for density calculation
+        if (sim_params.boundary_mode == 1u) {
+            if (diff.x > sim_params.virtual_world_width * 0.5) {
+                diff.x = diff.x - sim_params.virtual_world_width;
+            }
+            else if (diff.x < - sim_params.virtual_world_width * 0.5) {
+                diff.x = diff.x + sim_params.virtual_world_width;
+            }
+            if (diff.y > sim_params.virtual_world_height * 0.5) {
+                diff.y = diff.y - sim_params.virtual_world_height;
+            }
+            else if (diff.y < - sim_params.virtual_world_height * 0.5) {
+                diff.y = diff.y + sim_params.virtual_world_height;
+            }
+        }
+
+        let distance = length(diff);
+
+        // Only consider particles within kernel radius
+        if (distance < kernel_radius && distance > EPSILON) {
+            let kernel_weight = lenia_kernel(distance, kernel_radius * 0.3);
+            density = density + kernel_weight;
+        }
+    }
+
+    // Normalize density by maximum possible (all particles at center)
+    return density / f32(sim_params.num_particles);
+}
+
 @compute @workgroup_size(64) // Example workgroup size, can be tuned
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let p_idx = global_id.x;
@@ -88,6 +148,33 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     var particle_p = particles_in[p_idx];
     var total_force = vec2<f32>(0.0, 0.0);
+
+    // Calculate Lenia forces if enabled
+    if (sim_params.lenia_enabled == 1u) {
+        // Calculate local density around this particle
+        let local_density = calculate_lenia_density(particle_p.pos, particle_p.ptype);
+
+        // Apply Lenia growth function to determine growth/decay
+        let growth_force = lenia_growth_function(local_density, sim_params.lenia_growth_mu, sim_params.lenia_growth_sigma);
+
+        // Calculate density gradient for directional force
+        let sample_radius = 5.0;
+        // Small radius for gradient calculation
+        let density_right = calculate_lenia_density(particle_p.pos + vec2<f32>(sample_radius, 0.0), particle_p.ptype);
+        let density_left = calculate_lenia_density(particle_p.pos - vec2<f32>(sample_radius, 0.0), particle_p.ptype);
+        let density_up = calculate_lenia_density(particle_p.pos + vec2<f32>(0.0, sample_radius), particle_p.ptype);
+        let density_down = calculate_lenia_density(particle_p.pos - vec2<f32>(0.0, sample_radius), particle_p.ptype);
+
+        // Calculate gradient (direction of steepest density increase)
+        let gradient_x = (density_right - density_left) / (2.0 * sample_radius);
+        let gradient_y = (density_up - density_down) / (2.0 * sample_radius);
+        let density_gradient = vec2<f32>(gradient_x, gradient_y);
+
+        // Apply growth-based movement (move toward favorable density if growth_force > 0)
+        let lenia_force = density_gradient * growth_force * 100.0;
+        // Scale factor for effect strength
+        total_force = total_force + lenia_force;
+    }
 
     for (var q_idx: u32 = 0u; q_idx < sim_params.num_particles; q_idx = q_idx + 1u) {
         if (p_idx == q_idx) {
@@ -187,6 +274,32 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             force_magnitude = sim_params.r_smooth * current_rule_min_radius * (1.0 / (current_rule_min_radius + sim_params.r_smooth) - 1.0 / (dist + sim_params.r_smooth));
         }
         total_force = total_force + norm_diff * force_magnitude;
+    }
+
+    // Add Lenia-inspired forces if enabled
+    if (sim_params.lenia_enabled == 1u) {
+        // Calculate local density and gradient
+        let local_density = calculate_lenia_density(particle_p.pos, particle_p.ptype);
+
+        // Calculate density gradient for directional movement
+        let gradient_step = 5.0;
+        // Small step for gradient calculation
+        let density_right = calculate_lenia_density(particle_p.pos + vec2<f32>(gradient_step, 0.0), particle_p.ptype);
+        let density_left = calculate_lenia_density(particle_p.pos - vec2<f32>(gradient_step, 0.0), particle_p.ptype);
+        let density_up = calculate_lenia_density(particle_p.pos + vec2<f32>(0.0, gradient_step), particle_p.ptype);
+        let density_down = calculate_lenia_density(particle_p.pos - vec2<f32>(0.0, gradient_step), particle_p.ptype);
+
+        let gradient_x = (density_right - density_left) / (2.0 * gradient_step);
+        let gradient_y = (density_up - density_down) / (2.0 * gradient_step);
+
+        // Apply growth function to determine movement direction
+        let growth_force = lenia_growth_function(local_density, sim_params.lenia_growth_mu, sim_params.lenia_growth_sigma);
+
+        // Move towards optimal density regions
+        let lenia_force = vec2<f32>(gradient_x, gradient_y) * growth_force * 200.0;
+        // Scale factor for visibility
+
+        total_force = total_force + lenia_force;
     }
 
     // Update velocity

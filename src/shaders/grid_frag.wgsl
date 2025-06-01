@@ -23,7 +23,12 @@ struct SimParams {
     fisheyeStrength: f32,
     // Fisheye distortion strength
     backgroundColor: vec3<f32>,
-    _padding1: f32,
+
+    // Lenia-inspired parameters
+    leniaEnabled: u32,
+    leniaGrowthMu: f32,
+    leniaGrowthSigma: f32,
+    leniaKernelRadius: f32,
 }
 
 ;

@@ -20,7 +20,12 @@ struct SimParams {
     time: f32,
     fisheyeStrength: f32,
     backgroundColor: vec3<f32>,
-    _padding1: f32,
+
+    // Lenia-inspired parameters
+    leniaEnabled: u32,
+    leniaGrowthMu: f32,
+    leniaGrowthSigma: f32,
+    leniaKernelRadius: f32,
 }
 
 ;
