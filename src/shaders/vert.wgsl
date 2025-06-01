@@ -34,6 +34,9 @@ struct SimParams {
 @group(0) @binding(0)
 var<uniform> sim_params: SimParams;
 
+@group(0) @binding(1)
+var<storage, read> particle_colors: array<vec4<f32>>;
+
 struct VertexInput {
     @location(3) quad_pos: vec2<f32>,
     // Vertex position of the quad (-1 to 1) - REVERTED from 4
@@ -60,56 +63,9 @@ struct VertexOutput {
 
 ;
 
-// Simple color palette (can be expanded or moved to a uniform buffer)
+// Get color for particle type from precomputed custom colors buffer
 fn getColorForType(ptype: u32, num_types: u32) -> vec4<f32> {
-    let hue_step = 360.0 / f32(num_types);
-    let hue = f32(ptype) * hue_step;
-
-    // Basic HSV to RGB conversion (simplified)
-    let s = 0.9;
-    let v = 0.95;
-
-    let c = v * s;
-    let h_prime = hue / 60.0;
-    let x = c * (1.0 - abs(fract(h_prime / 2.0) * 2.0 - 1.0));
-    var r_temp: f32 = 0.0;
-    var g_temp: f32 = 0.0;
-    var b_temp: f32 = 0.0;
-
-    if (h_prime < 1.0) {
-        r_temp = c;
-        g_temp = x;
-        b_temp = 0.0;
-    }
-    else if (h_prime < 2.0) {
-        r_temp = x;
-        g_temp = c;
-        b_temp = 0.0;
-    }
-    else if (h_prime < 3.0) {
-        r_temp = 0.0;
-        g_temp = c;
-        b_temp = x;
-    }
-    else if (h_prime < 4.0) {
-        r_temp = 0.0;
-        g_temp = x;
-        b_temp = c;
-    }
-    else if (h_prime < 5.0) {
-        r_temp = x;
-        g_temp = 0.0;
-        b_temp = c;
-    }
-    else {
-        r_temp = c;
-        g_temp = 0.0;
-        b_temp = x;
-    }
-
-    let m = v - c;
-    return vec4<f32>(r_temp + m, g_temp + m, b_temp + m, 0.5);
-    // Alpha set to 0.5 for semi-transparency
+    return particle_colors[ptype];
 }
 
 @vertex

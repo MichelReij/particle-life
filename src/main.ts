@@ -8,7 +8,8 @@ import vertWGSL from "./shaders/vert.wgsl?raw"; // Changed from .wgsl to .wgsl?r
 import fragWGSL from "./shaders/frag.wgsl?raw"; // Will need to be updated for particle rendering
 import backgroundVertWGSL from "./shaders/background_vert.wgsl?raw"; // New background vertex shader
 import backgroundFragWGSL from "./shaders/background_frag.wgsl?raw"; // New background fragment shader
-import { hsluvToRgb } from "hsluv-ts"; // Make sure this import is present
+import { generateParticleColors, logParticleColors } from "./hsluv-colors";
+import { hsluvToRgb } from "hsluv-ts"; // Import HSLuv for background color generation
 import vignetteFragWGSL from "./shaders/vignette_frag.wgsl?raw"; // Import for vignette shader
 import fisheyeFragWGSL from "./shaders/fisheye_frag.wgsl?raw"; // Import for fisheye shader
 import gridFragWGSL from "./shaders/grid_frag.wgsl?raw"; // Import for grid shader
@@ -70,17 +71,17 @@ canvas.style.height = "800px";
 
 // === Particle Life Configuration ===
 const NUM_PARTICLES = 1600; // Number of particles
-const NUM_TYPES = 11; // Number of particle types
+const NUM_TYPES = 8; // Number of particle types
 const PARTICLE_RENDER_SIZE = 14.0;
 const PARTICLE_SIZE_BYTES = 24; // pos(2f) + vel(2f) + type(1u) + padding(1f for alignment if needed, or size for individual particle size)
 // For PARTICLE_SIZE_BYTES = 24: pos(8) + vel(8) + type(4) + padding(4) to make it multiple of 16 for some platforms, or particle_size (f32)
 const RULE_SIZE_BYTES = 16; // attraction(f32), min_radius(f32), max_radius(f32), padding(f32)
 // SIM_PARAMS_SIZE_BYTES is now imported from particle-life-types.ts
 
-let VIRTUAL_WORLD_BORDER = 50; // Border for 2500px virtual world (2400px canvas + 2×50px). Now a let.
-let DRIFT_X_PER_SECOND = -20.0; // Pixels per second, negative for left drift. Now a let.
-let FORCE_SCALE = 250.0;
-let FRICTION = 0.15;
+let VIRTUAL_WORLD_BORDER = 0; // No border: virtual world and render world both 2400x2400px. Now a let.
+let DRIFT_X_PER_SECOND = -60.0; // Pixels per second, negative for left drift. Now a let.
+let FORCE_SCALE = 400.0;
+let FRICTION = 0.1;
 let R_SMOOTH = 5.0;
 let INTER_TYPE_ATTRACTION_SCALE = 1.0; // Default: no change to attraction
 let INTER_TYPE_RADIUS_SCALE = 1.0; // Default: no change to radii
@@ -94,6 +95,7 @@ let simParamsBuffer: GPUBuffer;
 let rulesBuffer: GPUBuffer;
 let particleBuffers: [GPUBuffer, GPUBuffer]; // Ping-pong buffers
 let quadVertexBuffer: GPUBuffer; // Hoisted declaration
+let particleColorsBuffer: GPUBuffer; // Buffer for precomputed HSLuv colors
 
 // Pipelines and Bind Groups
 let computePipeline: GPUComputePipeline;
@@ -119,7 +121,7 @@ let currentParticleBufferIndex = 0;
 let animationId: number | undefined;
 let lastFrameTime = 0;
 let currentTime = 0; // Tracks total elapsed time for animations
-let currentZoomLevel = 1.0; // Current zoom level (1x to 3x)
+let currentZoomLevel = 1.5; // Current zoom level (1x to 3x)
 
 // FPS calculation variables
 let frameCount = 0;
@@ -147,7 +149,7 @@ let simParams: SimulationParams = {
     interTypeAttractionScale: INTER_TYPE_ATTRACTION_SCALE,
     interTypeRadiusScale: INTER_TYPE_RADIUS_SCALE,
     time: 0.0, // Current animation time, updated each frame
-    fisheyeStrength: 0.8, // Lower default for natural barrel distortion with larger virtual world
+    fisheyeStrength: 3.0, // Default fisheye distortion strength
     backgroundColor: [0.0, 0.0, 0.0], // Initial: black, updated by updateBackgroundColorAndDrift
 };
 
@@ -244,13 +246,19 @@ function updateBackgroundColorAndDrift(newDriftXPerSecond: number): void {
 
     const normalizedAbsDrift = Math.min(
         1,
-        Math.abs(newDriftXPerSecond) / 100.0
+        Math.abs(newDriftXPerSecond) / 150.0 // Changed from 100.0 to 150.0 for new range
     );
-    const hue = 10 + 230 * (1 - normalizedAbsDrift); // 240 (blue) at 0 drift, to 10 (red) at 100 drift
-    const saturation = 88; // Full saturation
-    const lightness = 50; // Very dark
 
-    simParams.backgroundColor = hsluvToRgb([hue, saturation, lightness]);
+    // Use HSLuv for background color generation based on drift speed
+    // Hue transitions from blue (240°) at no drift to red (0°) at max drift
+    const hue = 190 - normalizedAbsDrift * 175; // 240° to 0° (blue 240 to red 10)
+    const saturation = 100; // Full saturation
+    const lightness = 66; // 20% to 50% lightness for dark backgrounds
+
+    // Convert HSLuv to RGB
+    const [red, green, blue] = hsluvToRgb([hue, saturation, lightness]);
+
+    simParams.backgroundColor = [red, green, blue];
 
     if (device && simParamsBuffer) {
         // Update driftXPerSecond (float at index 15)
@@ -382,6 +390,20 @@ async function initWebGPU() {
     });
     new Float32Array(rulesBuffer.getMappedRange()).set(flatRulesData);
     rulesBuffer.unmap();
+
+    // Create Particle Colors Buffer for custom colors
+    const particleColors = generateParticleColors(NUM_TYPES);
+    particleColorsBuffer = device.createBuffer({
+        label: "Particle Colors Buffer",
+        size: particleColors.byteLength,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        mappedAtCreation: true,
+    });
+    new Float32Array(particleColorsBuffer.getMappedRange()).set(particleColors);
+    particleColorsBuffer.unmap();
+
+    // Debug: Log the custom colors
+    logParticleColors(NUM_TYPES);
 
     // Create Particle Buffers
     const initialParticleData = createInitialParticles(
@@ -541,10 +563,26 @@ async function initWebGPU() {
     });
 
     // --- Render Pipeline (Particles) ---
+    // Create a new bind group layout for particle rendering that includes colors buffer
+    const particleRenderBindGroupLayout = device.createBindGroupLayout({
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+                buffer: { type: "uniform" },
+            },
+            {
+                binding: 1,
+                visibility: GPUShaderStage.VERTEX,
+                buffer: { type: "read-only-storage" },
+            },
+        ],
+    });
+
     renderPipeline = device.createRenderPipeline({
         label: "Particle Render Pipeline",
         layout: device.createPipelineLayout({
-            bindGroupLayouts: [simParamsBindGroupLayout],
+            bindGroupLayouts: [particleRenderBindGroupLayout],
         }), // Use the common layout
         vertex: {
             module: renderShaderModuleVert,
@@ -600,8 +638,11 @@ async function initWebGPU() {
 
     renderBindGroup = device.createBindGroup({
         label: "Render BindGroup",
-        layout: simParamsBindGroupLayout, // Use the common layout
-        entries: [{ binding: 0, resource: { buffer: simParamsBuffer } }],
+        layout: particleRenderBindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: simParamsBuffer } },
+            { binding: 1, resource: { buffer: particleColorsBuffer } },
+        ],
     });
 
     // --- Vignette Render Pipeline ---
