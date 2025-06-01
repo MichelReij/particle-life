@@ -18,11 +18,9 @@ struct SimParams {
     interTypeAttractionScale: f32,
     interTypeRadiusScale: f32,
     time: f32,
-    _padding0: f32,
-    // Padding to align backgroundColor
+    fisheyeStrength: f32,
     backgroundColor: vec3<f32>,
     _padding1: f32,
-    // Padding to make total size 96 bytes (24 * 4)
 }
 
 ;
@@ -36,22 +34,29 @@ var scene_texture: texture_2d<f32>;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    // Calculate UV coordinates for sampling the scene texture
-    let uv = frag_coord.xy / vec2<f32>(sim_params.canvasRenderWidth, sim_params.canvasRenderHeight);
-    let scene_color = textureSample(scene_texture, scene_sampler, uv);
+    // frag_coord.xy is in canvas coordinates (0 to canvasRenderWidth/Height)
+    // Convert to UV coordinates for sampling the intermediate texture
+    let canvas_uv = frag_coord.xy / vec2<f32>(sim_params.canvasRenderWidth, sim_params.canvasRenderHeight);
 
-    // Calculate the center of the canvas
+    // Convert canvas UV to intermediate texture coordinates
+    // The intermediate texture is virtual world sized, and canvas content is at offset
+    let intermediate_texture_x = canvas_uv.x * sim_params.canvasRenderWidth + sim_params.virtualWorldOffsetX;
+    let intermediate_texture_y = canvas_uv.y * sim_params.canvasRenderHeight + sim_params.virtualWorldOffsetY;
+    let intermediate_texture_uv = vec2<f32>(intermediate_texture_x / sim_params.virtualWorldWidth, intermediate_texture_y / sim_params.virtualWorldHeight);
+
+    let scene_color = textureSample(scene_texture, scene_sampler, intermediate_texture_uv);
+
+    // Calculate the center of the canvas for vignette effect
     let center = vec2<f32>(sim_params.canvasRenderWidth / 2.0, sim_params.canvasRenderHeight / 2.0);
 
     // Calculate the distance of the current fragment from the center
     let dist = distance(frag_coord.xy, center);
 
-    let vignette_radius = 400.0;
-    // Calculate vignette alpha: 0.0 at center, smoothly to 0.2 at vignette_radius (temporarily changed from 0.3)
-    // smoothstep(edge0, edge1, x) results in 0 if x < edge0, 1 if x > edge1, and smooth transition between.
+    // Make vignette radius relative to canvas size (50% of canvas width)
+    let vignette_radius = sim_params.canvasRenderWidth * 0.5;
+    // Calculate vignette alpha: 0.0 at center, smoothly to 0.3 at vignette_radius
     let vignette_alpha_factor = smoothstep(0.0, vignette_radius, dist);
-    let vignette_target_opacity = 0.3;
-    // Temporarily changed from 0.3 to 0.2
+    let vignette_target_opacity = 0.99;
     let current_vignette_alpha = vignette_alpha_factor * vignette_target_opacity;
 
     // The vignette color is black

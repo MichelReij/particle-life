@@ -10,6 +10,7 @@ import backgroundVertWGSL from "./shaders/background_vert.wgsl?raw"; // New back
 import backgroundFragWGSL from "./shaders/background_frag.wgsl?raw"; // New background fragment shader
 import { hsluvToRgb } from "hsluv-ts"; // Make sure this import is present
 import vignetteFragWGSL from "./shaders/vignette_frag.wgsl?raw"; // Import for vignette shader
+import fisheyeFragWGSL from "./shaders/fisheye_frag.wgsl?raw"; // Import for fisheye shader
 import gridFragWGSL from "./shaders/grid_frag.wgsl?raw"; // Import for grid shader
 
 import {
@@ -61,21 +62,21 @@ const canvas = document.createElement("canvas");
 canvas.id = CANVAS_ID;
 document.body.appendChild(canvas);
 
-canvas.width = 800;
-canvas.height = 800;
-canvas.style.width = "800px";
-canvas.style.height = "800px";
+canvas.width = 2400;
+canvas.height = 2400;
+canvas.style.width = "2400px";
+canvas.style.height = "2400px";
 
 // === Particle Life Configuration ===
 const NUM_PARTICLES = 1600; // Number of particles
 const NUM_TYPES = 11; // Number of particle types
-const PARTICLE_RENDER_SIZE = 4.0;
+const PARTICLE_RENDER_SIZE = 14.0;
 const PARTICLE_SIZE_BYTES = 24; // pos(2f) + vel(2f) + type(1u) + padding(1f for alignment if needed, or size for individual particle size)
 // For PARTICLE_SIZE_BYTES = 24: pos(8) + vel(8) + type(4) + padding(4) to make it multiple of 16 for some platforms, or particle_size (f32)
 const RULE_SIZE_BYTES = 16; // attraction(f32), min_radius(f32), max_radius(f32), padding(f32)
 // SIM_PARAMS_SIZE_BYTES is now imported from particle-life-types.ts
 
-let VIRTUAL_WORLD_BORDER = 100; // 100px border on each side. Now a let.
+let VIRTUAL_WORLD_BORDER = 200; // Reduced border for 2800px virtual world (2400px canvas + 2×200px). Now a let.
 let DRIFT_X_PER_SECOND = -20.0; // Pixels per second, negative for left drift. Now a let.
 let FORCE_SCALE = 250.0;
 let FRICTION = 0.15;
@@ -102,9 +103,12 @@ let renderBindGroup: GPUBindGroup;
 let backgroundRenderBindGroup: GPUBindGroup;
 let vignetteRenderPipeline: GPURenderPipeline; // For vignette
 let vignetteRenderBindGroup: GPUBindGroup; // For vignette
+let fisheyeRenderPipeline: GPURenderPipeline; // For fisheye distortion
+let fisheyeRenderBindGroup: GPUBindGroup; // For fisheye distortion
 let gridRenderPipeline: GPURenderPipeline; // For oscilloscope grid
 let gridRenderBindGroup: GPUBindGroup; // For oscilloscope grid
 let sceneTexture: GPUTexture; // For multi-pass rendering
+let intermediateTexture: GPUTexture; // For fisheye post-processing
 let sceneSampler: GPUSampler; // For multi-pass rendering
 
 let currentParticleBufferIndex = 0;
@@ -138,6 +142,7 @@ let simParams: SimulationParams = {
     interTypeAttractionScale: INTER_TYPE_ATTRACTION_SCALE,
     interTypeRadiusScale: INTER_TYPE_RADIUS_SCALE,
     time: 0.0, // Current animation time, updated each frame
+    fisheyeStrength: 0.8, // Lower default for natural barrel distortion with larger virtual world
     backgroundColor: [0.0, 0.0, 0.0], // Initial: black, updated by updateBackgroundColorAndDrift
 };
 
@@ -321,7 +326,7 @@ async function initWebGPU() {
     simParamsViewF32[16] = simParams.interTypeAttractionScale;
     simParamsViewF32[17] = simParams.interTypeRadiusScale;
     simParamsViewF32[18] = simParams.time; // Initial time
-    simParamsViewF32[19] = 0.0; // _padding0
+    simParamsViewF32[19] = simParams.fisheyeStrength; // Fisheye distortion strength
     simParamsViewF32[20] = simParams.backgroundColor[0]; // R
     simParamsViewF32[21] = simParams.backgroundColor[1]; // G
     simParamsViewF32[22] = simParams.backgroundColor[2]; // B
@@ -341,11 +346,20 @@ async function initWebGPU() {
 
     // Create Scene Texture and Sampler for multi-pass rendering
     sceneTexture = device.createTexture({
-        size: [canvas.width, canvas.height],
+        size: [simParams.virtualWorldWidth, simParams.virtualWorldHeight],
         format: presentationFormat,
         usage:
             GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
     });
+
+    // Create Intermediate Texture for fisheye post-processing
+    intermediateTexture = device.createTexture({
+        size: [simParams.virtualWorldWidth, simParams.virtualWorldHeight],
+        format: presentationFormat,
+        usage:
+            GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+
     sceneSampler = device.createSampler({
         magFilter: "linear",
         minFilter: "linear",
@@ -642,6 +656,69 @@ async function initWebGPU() {
         entries: [
             { binding: 0, resource: { buffer: simParamsBuffer } },
             { binding: 1, resource: sceneSampler },
+            { binding: 2, resource: intermediateTexture.createView() }, // Now reads from intermediate texture
+        ],
+    });
+
+    // --- Fisheye Render Pipeline ---
+    const fisheyeShaderModuleFrag = device.createShaderModule({
+        code: fisheyeFragWGSL,
+    });
+
+    // Fisheye uses the same bind group layout as vignette (sim_params, sampler, texture)
+    const fisheyeBindGroupLayout = device.createBindGroupLayout({
+        label: "Fisheye BindGroupLayout",
+        entries: [
+            {
+                // sim_params
+                binding: 0,
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "uniform" },
+            },
+            {
+                // scene_sampler
+                binding: 1,
+                visibility: GPUShaderStage.FRAGMENT,
+                sampler: { type: "filtering" },
+            },
+            {
+                // scene_texture
+                binding: 2,
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: { sampleType: "float" },
+            },
+        ],
+    });
+
+    const fisheyePipelineLayout = device.createPipelineLayout({
+        label: "Fisheye Pipeline Layout",
+        bindGroupLayouts: [fisheyeBindGroupLayout],
+    });
+
+    fisheyeRenderPipeline = device.createRenderPipeline({
+        label: "Fisheye Render Pipeline",
+        layout: fisheyePipelineLayout,
+        vertex: {
+            // Reuse the background's full-screen quad vertex shader
+            module: backgroundShaderModuleVert,
+            entryPoint: "main",
+        },
+        fragment: {
+            module: fisheyeShaderModuleFrag,
+            entryPoint: "main",
+            targets: [{ format: presentationFormat }], // Output to intermediate texture
+        },
+        primitive: {
+            topology: "triangle-list",
+        },
+    });
+
+    fisheyeRenderBindGroup = device.createBindGroup({
+        label: "Fisheye Render Bind Group",
+        layout: fisheyeBindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: simParamsBuffer } },
+            { binding: 1, resource: sceneSampler },
             { binding: 2, resource: sceneTexture.createView() },
         ],
     });
@@ -836,6 +913,31 @@ if (interTypeRadiusScaleSlider && interTypeRadiusScaleValueDisplay) {
     });
 }
 
+// Fisheye Strength Slider
+const fisheyeStrengthSlider = document.getElementById(
+    "fisheyeStrengthSlider"
+) as HTMLInputElement;
+const fisheyeStrengthValueDisplay = document.getElementById(
+    "fisheyeStrengthValue"
+);
+if (fisheyeStrengthSlider && fisheyeStrengthValueDisplay) {
+    fisheyeStrengthSlider.value = simParams.fisheyeStrength.toString();
+    fisheyeStrengthValueDisplay.textContent =
+        simParams.fisheyeStrength.toFixed(2);
+    fisheyeStrengthSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        simParams.fisheyeStrength = newValue;
+        fisheyeStrengthValueDisplay.textContent = newValue.toFixed(2);
+        if (device && simParamsBuffer) {
+            device.queue.writeBuffer(
+                simParamsBuffer,
+                19 * 4, // Byte offset for fisheyeStrength (float at index 19)
+                new Float32Array([simParams.fisheyeStrength])
+            );
+        }
+    });
+}
+
 // --- Main Animation Loop ---
 function frame(timestamp?: number) {
     // timestamp from requestAnimationFrame is not used here.
@@ -910,6 +1012,15 @@ function frame(timestamp?: number) {
     const backgroundPass = commandEncoder.beginRenderPass(
         backgroundPassDescriptor
     );
+    // Set viewport to render only to the canvas portion of the virtual world texture
+    backgroundPass.setViewport(
+        simParams.virtualWorldOffsetX, // x offset (350px)
+        simParams.virtualWorldOffsetY, // y offset (350px)
+        simParams.canvasRenderWidth, // width (800px)
+        simParams.canvasRenderHeight, // height (800px)
+        0.0, // minDepth
+        1.0 // maxDepth
+    );
     backgroundPass.setPipeline(backgroundRenderPipeline);
     backgroundPass.setBindGroup(0, backgroundRenderBindGroup);
     backgroundPass.draw(6, 1, 0, 0);
@@ -929,6 +1040,15 @@ function frame(timestamp?: number) {
     const particlePass = commandEncoder.beginRenderPass(
         particleRenderPassDescriptor
     );
+    // Set viewport to render only to the canvas portion of the virtual world texture
+    particlePass.setViewport(
+        simParams.virtualWorldOffsetX, // x offset (350px)
+        simParams.virtualWorldOffsetY, // y offset (350px)
+        simParams.canvasRenderWidth, // width (800px)
+        simParams.canvasRenderHeight, // height (800px)
+        0.0, // minDepth
+        1.0 // maxDepth
+    );
     particlePass.setPipeline(renderPipeline);
     particlePass.setVertexBuffer(
         0,
@@ -939,7 +1059,52 @@ function frame(timestamp?: number) {
     particlePass.draw(4, NUM_PARTICLES, 0, 0);
     particlePass.end();
 
-    // 3. Vignette Post-Processing Pass (from sceneTexture to canvas)
+    // 3. Grid Render Pass (to sceneTexture, on top of particles)
+    const gridPassDescriptor: GPURenderPassDescriptor = {
+        label: "Grid Pass to Scene Texture",
+        colorAttachments: [
+            {
+                view: sceneTextureView, // Render to sceneTexture (not canvas)
+                loadOp: "load", // Load the background and particles drawn in previous passes
+                storeOp: "store",
+            },
+        ],
+    };
+    const gridPass = commandEncoder.beginRenderPass(gridPassDescriptor);
+    // Set viewport to render only to the canvas portion of the virtual world texture
+    gridPass.setViewport(
+        simParams.virtualWorldOffsetX, // x offset (350px)
+        simParams.virtualWorldOffsetY, // y offset (350px)
+        simParams.canvasRenderWidth, // width (800px)
+        simParams.canvasRenderHeight, // height (800px)
+        0.0, // minDepth
+        1.0 // maxDepth
+    );
+    gridPass.setPipeline(gridRenderPipeline);
+    gridPass.setBindGroup(0, gridRenderBindGroup);
+    gridPass.draw(6, 1, 0, 0); // Draw a full-screen quad
+    gridPass.end();
+
+    // 4. Fisheye Post-Processing Pass (from sceneTexture with grid to intermediateTexture)
+    const intermediateTextureView = intermediateTexture.createView();
+    const fisheyePassDescriptor: GPURenderPassDescriptor = {
+        label: "Fisheye Pass to Intermediate Texture",
+        colorAttachments: [
+            {
+                view: intermediateTextureView, // Render to intermediateTexture
+                loadOp: "clear",
+                clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+                storeOp: "store",
+            },
+        ],
+    };
+    const fisheyePass = commandEncoder.beginRenderPass(fisheyePassDescriptor);
+    fisheyePass.setPipeline(fisheyeRenderPipeline);
+    fisheyePass.setBindGroup(0, fisheyeRenderBindGroup); // This uses sceneTexture (now with grid)
+    fisheyePass.draw(6, 1, 0, 0); // Draw a full-screen quad
+    fisheyePass.end();
+
+    // 5. Vignette Post-Processing Pass (from intermediateTexture to canvas)
     const canvasTextureView = context.getCurrentTexture().createView();
     const vignettePassDescriptor: GPURenderPassDescriptor = {
         label: "Vignette Pass to Canvas",
@@ -954,26 +1119,9 @@ function frame(timestamp?: number) {
     };
     const vignettePass = commandEncoder.beginRenderPass(vignettePassDescriptor);
     vignettePass.setPipeline(vignetteRenderPipeline);
-    vignettePass.setBindGroup(0, vignetteRenderBindGroup); // This uses sceneTexture
+    vignettePass.setBindGroup(0, vignetteRenderBindGroup); // This uses intermediateTexture
     vignettePass.draw(6, 1, 0, 0); // Draw a full-screen quad
     vignettePass.end();
-
-    // 4. Oscilloscope Grid Render Pass (to canvas, on top of vignette)
-    const gridPassDescriptor: GPURenderPassDescriptor = {
-        label: "Grid Pass to Canvas",
-        colorAttachments: [
-            {
-                view: canvasTextureView, // Render to the actual canvas
-                loadOp: "load", // Load the result of the vignette pass
-                storeOp: "store",
-            },
-        ],
-    };
-    const gridPass = commandEncoder.beginRenderPass(gridPassDescriptor);
-    gridPass.setPipeline(gridRenderPipeline);
-    gridPass.setBindGroup(0, gridRenderBindGroup);
-    gridPass.draw(6, 1, 0, 0); // Draw a full-screen quad
-    gridPass.end();
 
     device.queue.submit([commandEncoder.finish()]);
 
@@ -1002,8 +1150,8 @@ initWebGPU(); // Call the correct initialization function
 // Add resize handling
 window.addEventListener("resize", () => {
     if (device) {
-        const fixedWidth = 800;
-        const fixedHeight = 800;
+        const fixedWidth = 2400;
+        const fixedHeight = 2400;
 
         canvas.width = fixedWidth;
         canvas.height = fixedHeight;
@@ -1064,5 +1212,84 @@ window.addEventListener("resize", () => {
             virtualWorldOffsetYOffsetBytes,
             new Float32Array([newVirtualWorldOffsetY])
         );
+
+        // Recreate textures with new virtual world dimensions
+        sceneTexture.destroy();
+        intermediateTexture.destroy();
+
+        sceneTexture = device.createTexture({
+            size: [newVirtualWorldWidth, newVirtualWorldHeight],
+            format: presentationFormat,
+            usage:
+                GPUTextureUsage.TEXTURE_BINDING |
+                GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+
+        intermediateTexture = device.createTexture({
+            size: [newVirtualWorldWidth, newVirtualWorldHeight],
+            format: presentationFormat,
+            usage:
+                GPUTextureUsage.TEXTURE_BINDING |
+                GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+
+        // Update bind groups that reference the textures
+        vignetteRenderBindGroup = device.createBindGroup({
+            label: "Vignette Render Bind Group",
+            layout: device.createBindGroupLayout({
+                label: "Vignette BindGroupLayout",
+                entries: [
+                    {
+                        binding: 0,
+                        visibility: GPUShaderStage.FRAGMENT,
+                        buffer: { type: "uniform" },
+                    },
+                    {
+                        binding: 1,
+                        visibility: GPUShaderStage.FRAGMENT,
+                        sampler: { type: "filtering" },
+                    },
+                    {
+                        binding: 2,
+                        visibility: GPUShaderStage.FRAGMENT,
+                        texture: { sampleType: "float" },
+                    },
+                ],
+            }),
+            entries: [
+                { binding: 0, resource: { buffer: simParamsBuffer } },
+                { binding: 1, resource: sceneSampler },
+                { binding: 2, resource: intermediateTexture.createView() },
+            ],
+        });
+
+        fisheyeRenderBindGroup = device.createBindGroup({
+            label: "Fisheye Render Bind Group",
+            layout: device.createBindGroupLayout({
+                label: "Fisheye BindGroupLayout",
+                entries: [
+                    {
+                        binding: 0,
+                        visibility: GPUShaderStage.FRAGMENT,
+                        buffer: { type: "uniform" },
+                    },
+                    {
+                        binding: 1,
+                        visibility: GPUShaderStage.FRAGMENT,
+                        sampler: { type: "filtering" },
+                    },
+                    {
+                        binding: 2,
+                        visibility: GPUShaderStage.FRAGMENT,
+                        texture: { sampleType: "float" },
+                    },
+                ],
+            }),
+            entries: [
+                { binding: 0, resource: { buffer: simParamsBuffer } },
+                { binding: 1, resource: sceneSampler },
+                { binding: 2, resource: sceneTexture.createView() },
+            ],
+        });
     }
 });

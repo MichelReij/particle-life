@@ -37,7 +37,7 @@ export interface SimulationParams {
     interTypeAttractionScale: number; // Scales attraction between different types
     interTypeRadiusScale: number; // Scales interaction radii between different types
     time: number; // Time in seconds for animation
-    // _padding0 is implicit in WGSL if needed before backgroundColor for alignment
+    fisheyeStrength: number; // Fisheye distortion strength
     backgroundColor: [number, number, number]; // RGB color
     // _padding1 is implicit in WGSL if needed after backgroundColor for alignment
 }
@@ -63,15 +63,13 @@ export interface SimulationParams {
 // interTypeAttractionScale: f32 (4)
 // interTypeRadiusScale: f32 (4)
 // time: f32 (4)
-// -- Total so far: 19 * 4 = 76 bytes --
-// To ensure alignment for backgroundColor (vec3f), we might need padding.
-// Let's assume _padding0: f32 (4 bytes) to make it 20 * 4 = 80 bytes before backgroundColor.
+// fisheyeStrength: f32 (4)
+// -- Total so far: 20 * 4 = 80 bytes --
 // backgroundColor: vec3f (3 * 4 = 12 bytes)
 // -- Total so far: 80 + 12 = 92 bytes --
 // To make it a multiple of 16, we need 4 more bytes of padding (_padding1: f32).
 // So, 92 + 4 = 96 bytes.
-// This corresponds to 24 floats (19 actual params + 1 for flatForce as u32, + 3 for color, + 1 padding0 + 1 padding1 if we consider them explicitly)
-// Or, more simply: 19 floats/u32s + 1 time_float + 3 color_floats + 1 padding_float = 24 floats.
+// This corresponds to 24 floats (20 actual params + 3 for color + 1 padding)
 export const SIM_PARAMS_SIZE_BYTES = 24 * 4; // 96 bytes
 
 export const MAX_PARTICLE_TYPES = 16;

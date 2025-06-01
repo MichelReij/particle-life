@@ -20,7 +20,8 @@ struct SimParams {
     interTypeAttractionScale: f32,
     interTypeRadiusScale: f32,
     time: f32,
-    _padding0: f32,
+    fisheyeStrength: f32,
+    // Fisheye distortion strength
     backgroundColor: vec3<f32>,
     _padding1: f32,
 }
@@ -45,16 +46,20 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let line_alpha: f32 = 0.1;
     // Jouw huidige waarde
 
-    let center_x = sim_params.canvasRenderWidth / 2.0;
-    let center_y = sim_params.canvasRenderHeight / 2.0;
+    let center_x = sim_params.virtualWorldOffsetX + sim_params.canvasRenderWidth / 2.0;
+    let center_y = sim_params.virtualWorldOffsetY + sim_params.canvasRenderHeight / 2.0;
 
-    // Bereken afstand tot de dichtstbijzijnde reguliere verticale rasterlijn
-    let mod_x = frag_coord.x - spacing * floor(frag_coord.x / spacing);
-    let dist_to_regular_vertical_line = min(mod_x, spacing - mod_x);
+    // Calculate grid lines that are aligned with the center axes
+    // We need to find the grid spacing relative to the center position
+    let offset_from_center_x = frag_coord.x - center_x;
+    let offset_from_center_y = frag_coord.y - center_y;
 
-    // Bereken afstand tot de dichtstbijzijnde reguliere horizontale rasterlijn
-    let mod_y = frag_coord.y - spacing * floor(frag_coord.y / spacing);
-    let dist_to_regular_horizontal_line = min(mod_y, spacing - mod_y);
+    // Calculate distance to nearest grid line relative to center
+    let mod_x = offset_from_center_x - spacing * floor(offset_from_center_x / spacing);
+    let dist_to_regular_vertical_line = min(abs(mod_x), spacing - abs(mod_x));
+
+    let mod_y = offset_from_center_y - spacing * floor(offset_from_center_y / spacing);
+    let dist_to_regular_horizontal_line = min(abs(mod_y), spacing - abs(mod_y));
 
     var final_alpha: f32 = 0.0;
 

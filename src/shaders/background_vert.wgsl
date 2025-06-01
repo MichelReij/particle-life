@@ -17,24 +17,24 @@ struct SimulationParams {
     driftXPerSecond: f32,
     interTypeAttractionScale: f32,
     interTypeRadiusScale: f32,
-    time: f32, // Time in seconds for animation
-    // padding to ensure size is a multiple of 16 bytes, if necessary
-    // current size is 19 * 4 = 76 bytes. Add one more float for padding.
-    _padding0: f32,
-};
+    time: f32,
+    // Time in seconds for animation
+    fisheyeStrength: f32,
+    // Fisheye distortion strength
+    backgroundColor: vec3<f32>,
+    // RGB background color
+    _padding1: f32,
+    // Padding to make total size 96 bytes (24 * 4)
+}
 
-@group(0) @binding(0) var<uniform> sim_params: SimulationParams;
+;
+
+@group(0) @binding(0)
+var<uniform> sim_params: SimulationParams;
 
 @vertex
 fn main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
     // Create a full-screen quad
-    var pos = array<vec2<f32>, 6>(
-        vec2<f32>(-1.0, -1.0),
-        vec2<f32>(1.0, -1.0),
-        vec2<f32>(-1.0, 1.0),
-        vec2<f32>(-1.0, 1.0),
-        vec2<f32>(1.0, -1.0),
-        vec2<f32>(1.0, 1.0)
-    );
+    var pos = array<vec2<f32>, 6>(vec2<f32>(- 1.0, - 1.0), vec2<f32>(1.0, - 1.0), vec2<f32>(- 1.0, 1.0), vec2<f32>(- 1.0, 1.0), vec2<f32>(1.0, - 1.0), vec2<f32>(1.0, 1.0));
     return vec4<f32>(pos[vertex_index], 0.0, 1.0);
 }

@@ -12,7 +12,8 @@
     "main": "src/main.ts",
     "scripts": {
         "build": "webpack",
-        "start": "webpack serve"
+        "start": "webpack serve",
+        "dev": "webpack serve"
     },
     "dependencies": {
         "hsluv-ts": "^1.0.1",
