@@ -1,0 +1,64 @@
+@group(0) @binding(0)
+var scene_sampler: sampler;
+@group(0) @binding(1)
+var scene_texture: texture_2d<f32>;
+
+struct ZoomUniforms {
+    zoom_level: f32,
+}
+
+;
+
+@group(0) @binding(2)
+var<uniform> zoom_uniforms: ZoomUniforms;
+
+@fragment
+fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
+    // frag_coord.xy is in final canvas coordinates (0 to 800)
+    // We need to map this to a portion of the 2400x2400px rendered texture
+
+    // Calculate the size of the area to sample from the 2400x2400px texture
+    // At 1x zoom: sample full 2400x2400px
+    // At 2x zoom: sample center 1200x1200px
+    // At 3x zoom: sample center 800x800px
+    let sample_size = 2400.0 / zoom_uniforms.zoom_level;
+
+    // Calculate the center of the 2400x2400px texture
+    let texture_center = vec2<f32>(1200.0, 1200.0);
+
+    // Calculate the top-left corner of our sample area
+    let sample_top_left = texture_center - vec2<f32>(sample_size / 2.0, sample_size / 2.0);
+
+    // Map fragment coordinates (0-800) to sample area coordinates
+    let sample_pos = sample_top_left + (frag_coord.xy / 800.0) * sample_size;
+
+    // Convert to UV coordinates for the 2400x2400px texture
+    let sample_uv = sample_pos / vec2<f32>(2400.0, 2400.0);
+
+    // Sample the scene texture
+    let scene_color = textureSample(scene_texture, scene_sampler, sample_uv);
+
+    // Add vignette effect
+    // Convert fragment coordinates to UV coordinates in final canvas (0-1)
+    let canvas_uv = frag_coord.xy / vec2<f32>(800.0, 800.0);
+
+    // Center the UV coordinates around (0, 0) for vignette calculation
+    let centered_uv = canvas_uv - 0.5;
+    let dist_from_center = length(centered_uv);
+
+    // Vignette parameters (based on canvas size)
+    let vignette_radius = 0.5;
+    // Relative to canvas size (50% of canvas)
+    let vignette_softness = 0.2;
+    // Softness of the vignette transition
+    let max_vignette_alpha = 0.3;
+    // Maximum vignette opacity (50% as set previously)
+
+    // Calculate vignette alpha using smoothstep for smooth transition
+    let vignette_alpha = smoothstep(vignette_radius - vignette_softness, vignette_radius, dist_from_center) * max_vignette_alpha;
+
+    // Apply vignette (darken towards edges)
+    let final_rgb = scene_color.rgb * (1.0 - vignette_alpha);
+
+    return vec4<f32>(final_rgb, 1.0);
+}

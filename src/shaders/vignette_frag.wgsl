@@ -54,9 +54,9 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
 
     // Make vignette radius relative to canvas size (50% of canvas width)
     let vignette_radius = sim_params.canvasRenderWidth * 0.5;
-    // Calculate vignette alpha: 0.0 at center, smoothly to 0.3 at vignette_radius
+    // Calculate vignette alpha: 0.0 at center, smoothly to 0.5 at vignette_radius (50% transparent)
     let vignette_alpha_factor = smoothstep(0.0, vignette_radius, dist);
-    let vignette_target_opacity = 0.99;
+    let vignette_target_opacity = 0.5;
     let current_vignette_alpha = vignette_alpha_factor * vignette_target_opacity;
 
     // The vignette color is black

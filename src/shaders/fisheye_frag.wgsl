@@ -40,8 +40,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let canvas_pixel_y = frag_coord.y - sim_params.virtualWorldOffsetY;
 
     // Convert to canvas UV coordinates (0 to 1 within canvas area)
-    let canvas_uv = vec2<f32>(canvas_pixel_x / sim_params.canvasRenderWidth,
-                              canvas_pixel_y / sim_params.canvasRenderHeight);
+    let canvas_uv = vec2<f32>(canvas_pixel_x / sim_params.canvasRenderWidth, canvas_pixel_y / sim_params.canvasRenderHeight);
 
     // Center the UV coordinates around (0, 0) for distortion calculation
     let centered_uv = canvas_uv - 0.5;
@@ -61,28 +60,25 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     if (original_dist > 0.0) {
         // Apply the distortion and center back to [0,1] space
         distorted_canvas_uv = (centered_uv * distortion_factor) + 0.5;
-    } else {
-        distorted_canvas_uv = canvas_uv; // No distortion at the center
+    }
+    else {
+        distorted_canvas_uv = canvas_uv;
+        // No distortion at the center
     }
 
     // Convert distorted canvas UV to virtual world texture coordinates for sampling
     let virtual_texture_x = distorted_canvas_uv.x * sim_params.canvasRenderWidth + sim_params.virtualWorldOffsetX;
     let virtual_texture_y = distorted_canvas_uv.y * sim_params.canvasRenderHeight + sim_params.virtualWorldOffsetY;
-    let virtual_texture_uv = vec2<f32>(virtual_texture_x / sim_params.virtualWorldWidth,
-                                       virtual_texture_y / sim_params.virtualWorldHeight);
+    let virtual_texture_uv = vec2<f32>(virtual_texture_x / sim_params.virtualWorldWidth, virtual_texture_y / sim_params.virtualWorldHeight);
 
     // Sample the scene texture using the virtual world texture coordinates (always executed)
     let scene_color = textureSample(scene_texture, scene_sampler, virtual_texture_uv);
 
     // Check if we're outside the canvas area and create boundary conditions
-    let is_outside_canvas = canvas_pixel_x < 0.0 || canvas_pixel_x >= sim_params.canvasRenderWidth ||
-                           canvas_pixel_y < 0.0 || canvas_pixel_y >= sim_params.canvasRenderHeight;
+    let is_outside_canvas = canvas_pixel_x < 0.0 || canvas_pixel_x >= sim_params.canvasRenderWidth || canvas_pixel_y < 0.0 || canvas_pixel_y >= sim_params.canvasRenderHeight;
 
     // Create a smooth boundary mask to fade to black at edges
-    let boundary_mask = smoothstep(0.0, 0.05, distorted_canvas_uv.x) *
-                       smoothstep(0.0, 0.05, distorted_canvas_uv.y) *
-                       smoothstep(0.0, 0.05, 1.0 - distorted_canvas_uv.x) *
-                       smoothstep(0.0, 0.05, 1.0 - distorted_canvas_uv.y);
+    let boundary_mask = smoothstep(0.0, 0.05, distorted_canvas_uv.x) * smoothstep(0.0, 0.05, distorted_canvas_uv.y) * smoothstep(0.0, 0.05, 1.0 - distorted_canvas_uv.x) * smoothstep(0.0, 0.05, 1.0 - distorted_canvas_uv.y);
 
     // Optional vignetting effect to complement the fisheye
     let vignette_strength = 0.15;

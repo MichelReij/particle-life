@@ -12,6 +12,7 @@ import { hsluvToRgb } from "hsluv-ts"; // Make sure this import is present
 import vignetteFragWGSL from "./shaders/vignette_frag.wgsl?raw"; // Import for vignette shader
 import fisheyeFragWGSL from "./shaders/fisheye_frag.wgsl?raw"; // Import for fisheye shader
 import gridFragWGSL from "./shaders/grid_frag.wgsl?raw"; // Import for grid shader
+import zoomFragWGSL from "./shaders/zoom_frag.wgsl?raw"; // Import for zoom shader
 
 import {
     Particle,
@@ -62,10 +63,10 @@ const canvas = document.createElement("canvas");
 canvas.id = CANVAS_ID;
 document.body.appendChild(canvas);
 
-canvas.width = 2400;
-canvas.height = 2400;
-canvas.style.width = "2400px";
-canvas.style.height = "2400px";
+canvas.width = 800;
+canvas.height = 800;
+canvas.style.width = "800px";
+canvas.style.height = "800px";
 
 // === Particle Life Configuration ===
 const NUM_PARTICLES = 1600; // Number of particles
@@ -76,7 +77,7 @@ const PARTICLE_SIZE_BYTES = 24; // pos(2f) + vel(2f) + type(1u) + padding(1f for
 const RULE_SIZE_BYTES = 16; // attraction(f32), min_radius(f32), max_radius(f32), padding(f32)
 // SIM_PARAMS_SIZE_BYTES is now imported from particle-life-types.ts
 
-let VIRTUAL_WORLD_BORDER = 200; // Reduced border for 2800px virtual world (2400px canvas + 2×200px). Now a let.
+let VIRTUAL_WORLD_BORDER = 50; // Border for 2500px virtual world (2400px canvas + 2×50px). Now a let.
 let DRIFT_X_PER_SECOND = -20.0; // Pixels per second, negative for left drift. Now a let.
 let FORCE_SCALE = 250.0;
 let FRICTION = 0.15;
@@ -107,6 +108,9 @@ let fisheyeRenderPipeline: GPURenderPipeline; // For fisheye distortion
 let fisheyeRenderBindGroup: GPUBindGroup; // For fisheye distortion
 let gridRenderPipeline: GPURenderPipeline; // For oscilloscope grid
 let gridRenderBindGroup: GPUBindGroup; // For oscilloscope grid
+let zoomRenderPipeline: GPURenderPipeline; // For zoom
+let zoomRenderBindGroup: GPUBindGroup; // For zoom
+let zoomUniformsBuffer: GPUBuffer; // For zoom level
 let sceneTexture: GPUTexture; // For multi-pass rendering
 let intermediateTexture: GPUTexture; // For fisheye post-processing
 let sceneSampler: GPUSampler; // For multi-pass rendering
@@ -115,6 +119,7 @@ let currentParticleBufferIndex = 0;
 let animationId: number | undefined;
 let lastFrameTime = 0;
 let currentTime = 0; // Tracks total elapsed time for animations
+let currentZoomLevel = 1.0; // Current zoom level (1x to 3x)
 
 // FPS calculation variables
 let frameCount = 0;
@@ -288,8 +293,9 @@ async function initWebGPU() {
     fpsDisplayElement = document.getElementById("fpsDisplay");
 
     // Update simParams with calculated dimensions
-    simParams.canvasRenderWidth = canvas.width;
-    simParams.canvasRenderHeight = canvas.height;
+    // Canvas size for display (800x800px) but render at higher resolution (2400x2400px)
+    simParams.canvasRenderWidth = 2400; // Render resolution, not canvas display size
+    simParams.canvasRenderHeight = 2400; // Render resolution, not canvas display size
     simParams.virtualWorldWidth =
         simParams.canvasRenderWidth + 2 * VIRTUAL_WORLD_BORDER;
     simParams.virtualWorldHeight =
@@ -774,6 +780,78 @@ async function initWebGPU() {
         entries: [{ binding: 0, resource: { buffer: simParamsBuffer } }],
     });
 
+    // --- Zoom Pipeline Setup ---
+    // Create zoom uniforms buffer
+    zoomUniformsBuffer = device.createBuffer({
+        label: "Zoom Uniforms Buffer",
+        size: 4, // Single f32 for zoom level
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    // Write initial zoom level
+    device.queue.writeBuffer(
+        zoomUniformsBuffer,
+        0,
+        new Float32Array([currentZoomLevel])
+    );
+
+    const zoomShaderModuleFrag = device.createShaderModule({
+        code: zoomFragWGSL,
+    });
+
+    const zoomBindGroupLayout = device.createBindGroupLayout({
+        label: "Zoom BindGroupLayout",
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.FRAGMENT,
+                sampler: { type: "filtering" },
+            },
+            {
+                binding: 1,
+                visibility: GPUShaderStage.FRAGMENT,
+                texture: { sampleType: "float" },
+            },
+            {
+                binding: 2,
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "uniform" },
+            },
+        ],
+    });
+
+    const zoomPipelineLayout = device.createPipelineLayout({
+        label: "Zoom Pipeline Layout",
+        bindGroupLayouts: [zoomBindGroupLayout],
+    });
+
+    zoomRenderPipeline = device.createRenderPipeline({
+        label: "Zoom Render Pipeline",
+        layout: zoomPipelineLayout,
+        vertex: {
+            module: backgroundShaderModuleVert, // Reuse full-screen quad vertex shader
+            entryPoint: "main",
+        },
+        fragment: {
+            module: zoomShaderModuleFrag,
+            entryPoint: "main",
+            targets: [{ format: presentationFormat }],
+        },
+        primitive: {
+            topology: "triangle-list",
+        },
+    });
+
+    zoomRenderBindGroup = device.createBindGroup({
+        label: "Zoom Render Bind Group",
+        layout: zoomBindGroupLayout,
+        entries: [
+            { binding: 0, resource: sceneSampler },
+            { binding: 1, resource: intermediateTexture.createView() }, // Sample from the final 2400x2400 rendered result
+            { binding: 2, resource: { buffer: zoomUniformsBuffer } },
+        ],
+    });
+
     // Start the animation loop once all setup is complete
     animationId = requestAnimationFrame(frame);
 }
@@ -938,6 +1016,26 @@ if (fisheyeStrengthSlider && fisheyeStrengthValueDisplay) {
     });
 }
 
+// Zoom slider setup
+const zoomSlider = document.getElementById("zoomSlider") as HTMLInputElement;
+const zoomValueDisplay = document.getElementById("zoomValue");
+if (zoomSlider && zoomValueDisplay) {
+    zoomSlider.value = currentZoomLevel.toString();
+    zoomValueDisplay.textContent = currentZoomLevel.toFixed(1);
+    zoomSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        currentZoomLevel = newValue;
+        zoomValueDisplay.textContent = newValue.toFixed(1);
+        if (device && zoomUniformsBuffer) {
+            device.queue.writeBuffer(
+                zoomUniformsBuffer,
+                0, // Byte offset for zoom level
+                new Float32Array([currentZoomLevel])
+            );
+        }
+    });
+}
+
 // --- Main Animation Loop ---
 function frame(timestamp?: number) {
     // timestamp from requestAnimationFrame is not used here.
@@ -1014,10 +1112,10 @@ function frame(timestamp?: number) {
     );
     // Set viewport to render only to the canvas portion of the virtual world texture
     backgroundPass.setViewport(
-        simParams.virtualWorldOffsetX, // x offset (350px)
-        simParams.virtualWorldOffsetY, // y offset (350px)
-        simParams.canvasRenderWidth, // width (800px)
-        simParams.canvasRenderHeight, // height (800px)
+        simParams.virtualWorldOffsetX, // x offset (50px)
+        simParams.virtualWorldOffsetY, // y offset (50px)
+        simParams.canvasRenderWidth, // width (2400px)
+        simParams.canvasRenderHeight, // height (2400px)
         0.0, // minDepth
         1.0 // maxDepth
     );
@@ -1042,10 +1140,10 @@ function frame(timestamp?: number) {
     );
     // Set viewport to render only to the canvas portion of the virtual world texture
     particlePass.setViewport(
-        simParams.virtualWorldOffsetX, // x offset (350px)
-        simParams.virtualWorldOffsetY, // y offset (350px)
-        simParams.canvasRenderWidth, // width (800px)
-        simParams.canvasRenderHeight, // height (800px)
+        simParams.virtualWorldOffsetX, // x offset (50px)
+        simParams.virtualWorldOffsetY, // y offset (50px)
+        simParams.canvasRenderWidth, // width (2400px)
+        simParams.canvasRenderHeight, // height (2400px)
         0.0, // minDepth
         1.0 // maxDepth
     );
@@ -1073,10 +1171,10 @@ function frame(timestamp?: number) {
     const gridPass = commandEncoder.beginRenderPass(gridPassDescriptor);
     // Set viewport to render only to the canvas portion of the virtual world texture
     gridPass.setViewport(
-        simParams.virtualWorldOffsetX, // x offset (350px)
-        simParams.virtualWorldOffsetY, // y offset (350px)
-        simParams.canvasRenderWidth, // width (800px)
-        simParams.canvasRenderHeight, // height (800px)
+        simParams.virtualWorldOffsetX, // x offset (50px)
+        simParams.virtualWorldOffsetY, // y offset (50px)
+        simParams.canvasRenderWidth, // width (2400px)
+        simParams.canvasRenderHeight, // height (2400px)
         0.0, // minDepth
         1.0 // maxDepth
     );
@@ -1104,24 +1202,24 @@ function frame(timestamp?: number) {
     fisheyePass.draw(6, 1, 0, 0); // Draw a full-screen quad
     fisheyePass.end();
 
-    // 5. Vignette Post-Processing Pass (from intermediateTexture to canvas)
+    // 5. Zoom Post-Processing Pass (from intermediateTexture to canvas)
     const canvasTextureView = context.getCurrentTexture().createView();
-    const vignettePassDescriptor: GPURenderPassDescriptor = {
-        label: "Vignette Pass to Canvas",
+    const zoomPassDescriptor: GPURenderPassDescriptor = {
+        label: "Zoom Pass to Canvas",
         colorAttachments: [
             {
-                view: canvasTextureView, // Render to the actual canvas
-                loadOp: "clear", // Clear canvas before drawing final scene + vignette
+                view: canvasTextureView, // Render to the actual canvas (800x800px)
+                loadOp: "clear", // Clear canvas before drawing zoomed scene
                 clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, // Clear to black
                 storeOp: "store",
             },
         ],
     };
-    const vignettePass = commandEncoder.beginRenderPass(vignettePassDescriptor);
-    vignettePass.setPipeline(vignetteRenderPipeline);
-    vignettePass.setBindGroup(0, vignetteRenderBindGroup); // This uses intermediateTexture
-    vignettePass.draw(6, 1, 0, 0); // Draw a full-screen quad
-    vignettePass.end();
+    const zoomPass = commandEncoder.beginRenderPass(zoomPassDescriptor);
+    zoomPass.setPipeline(zoomRenderPipeline);
+    zoomPass.setBindGroup(0, zoomRenderBindGroup); // This uses intermediateTexture
+    zoomPass.draw(6, 1, 0, 0); // Draw a full-screen quad
+    zoomPass.end();
 
     device.queue.submit([commandEncoder.finish()]);
 
