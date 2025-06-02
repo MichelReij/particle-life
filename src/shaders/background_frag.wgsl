@@ -44,7 +44,9 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     var final_color = vec4<f32>(sim_params.backgroundColor, 1.0);
     // Base color
 
-    let num_gradients = 24;
+    // Temporarily disable clouds by setting num_gradients to 0
+    let num_gradients = 0;
+    // Changed from 24 to 0 to disable clouds
     let PI = 3.14159265359;
 
     for (var i = 0; i < num_gradients; i = i + 1) {

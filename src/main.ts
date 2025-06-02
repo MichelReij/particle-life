@@ -257,9 +257,9 @@ function updateBackgroundColorAndDrift(newDriftXPerSecond: number): void {
 
     // Use HSLuv for background color generation based on drift speed
     // Hue transitions from blue (240°) at no drift to red (0°) at max drift
-    const hue = 190 - normalizedAbsDrift * 175; // 240° to 0° (blue 240 to red 10)
-    const saturation = 66; // Full saturation
-    const lightness = 33; // 20% to 50% lightness for dark backgrounds
+    const hue = 215 - normalizedAbsDrift * 200; // 240° to 0° (blue 240 to red 10)
+    const saturation = 33; // Full saturation
+    const lightness = 55; // 20% to 50% lightness for dark backgrounds
 
     // Convert HSLuv to RGB
     const [red, green, blue] = hsluvToRgb([hue, saturation, lightness]);
