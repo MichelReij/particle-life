@@ -140,6 +140,186 @@ function loadFromLocalStorage(key: string, defaultValue: number): number {
     return defaultValue;
 }
 
+// Temperature mapping functions
+function temperatureToDrift(temp: number): number {
+    // Linear mapping: temp [3, 40] → drift [0, -80]
+    // At temp = 3°C: drift = 0 px/s
+    // At temp = 40°C: drift = -80 px/s
+    return -((temp - 3) * 80) / 37;
+}
+
+function temperatureToFriction(temp: number): number {
+    // Linear mapping: temp [3, 40] → friction [0.30, 0.01]
+    // At temp = 3°C: friction = 0.30 (highest)
+    // At temp = 40°C: friction = 0.01 (lowest)
+    return 0.3 - ((temp - 3) * 0.29) / 37;
+}
+
+function updateDriftAndFrictionFromTemperature(temp: number): void {
+    const newDrift = temperatureToDrift(temp);
+    const newFriction = temperatureToFriction(temp);
+
+    // Update drift using existing function (handles background color and GPU buffer)
+    updateBackgroundColorAndDrift(newDrift);
+
+    // Update friction parameter and GPU buffer
+    simParams.friction = newFriction;
+    if (device && simParamsBuffer) {
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            1 * 4, // Byte offset for friction (float at index 1)
+            new Float32Array([simParams.friction])
+        );
+    }
+
+    // Update drift slider and display
+    const driftSlider = document.getElementById(
+        "driftSlider"
+    ) as HTMLInputElement;
+    const driftValueDisplay = document.getElementById("driftValue");
+    if (driftSlider && driftValueDisplay) {
+        driftSlider.value = newDrift.toString();
+        driftValueDisplay.textContent = newDrift.toFixed(2);
+    }
+
+    // Update friction slider and display
+    const frictionSlider = document.getElementById(
+        "frictionSlider"
+    ) as HTMLInputElement;
+    const frictionValueDisplay = document.getElementById("frictionValue");
+    if (frictionSlider && frictionValueDisplay) {
+        frictionSlider.value = newFriction.toString();
+        frictionValueDisplay.textContent = newFriction.toFixed(2);
+    }
+}
+
+// Pressure mapping functions
+function pressureToRSmooth(pressure: number): number {
+    // Linear mapping: pressure [0, 350] → rSmooth [20, 0.1]
+    // At pressure = 0: rSmooth = 20 (highest)
+    // At pressure = 350: rSmooth = 0.1 (lowest)
+    return 20 - (pressure * 19.9) / 350;
+}
+
+function pressureToForceScale(pressure: number): number {
+    // Linear mapping: pressure [0, 350] → forceScale [100, 800]
+    // At pressure = 0: forceScale = 100 (lowest)
+    // At pressure = 350: forceScale = 800 (highest)
+    return 100 + (pressure * 700) / 350;
+}
+
+function pressureToInterTypeRadiusScale(pressure: number): number {
+    // Linear mapping: pressure [0, 350] → interTypeRadiusScale [1.3, 0.50]
+    // At pressure = 0: interTypeRadiusScale = 1.3 (highest)
+    // At pressure = 350: interTypeRadiusScale = 0.50 (lowest)
+    return 1.3 - (pressure * 0.8) / 350;
+}
+
+function pressureToInterTypeAttractionScale(pressure: number): number {
+    // Linear mapping: pressure [0, 350] → interTypeAttractionScale [0.8, 2.0]
+    // At pressure = 0: interTypeAttractionScale = 0.8 (lowest)
+    // At pressure = 350: interTypeAttractionScale = 2.0 (highest)
+    return 0.8 + (pressure * 1.2) / 350;
+}
+
+function updateParametersFromPressure(pressure: number): void {
+    const newRSmooth = pressureToRSmooth(pressure);
+    const newForceScale = pressureToForceScale(pressure);
+    const newInterTypeRadiusScale = pressureToInterTypeRadiusScale(pressure);
+    const newInterTypeAttractionScale =
+        pressureToInterTypeAttractionScale(pressure);
+
+    // Update R Smooth parameter and GPU buffer
+    simParams.rSmooth = newRSmooth;
+    if (device && simParamsBuffer) {
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            13 * 4, // Byte offset for rSmooth (float at index 13)
+            new Float32Array([simParams.rSmooth])
+        );
+    }
+
+    // Update Force Scale parameter and GPU buffer
+    simParams.forceScale = newForceScale;
+    if (device && simParamsBuffer) {
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            12 * 4, // Byte offset for forceScale (float at index 12)
+            new Float32Array([simParams.forceScale])
+        );
+    }
+
+    // Update Inter-Type Radius Scale parameter and GPU buffer
+    simParams.interTypeRadiusScale = newInterTypeRadiusScale;
+    if (device && simParamsBuffer) {
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            17 * 4, // Byte offset for interTypeRadiusScale (float at index 17)
+            new Float32Array([simParams.interTypeRadiusScale])
+        );
+    }
+
+    // Update Inter-Type Attraction Scale parameter and GPU buffer
+    simParams.interTypeAttractionScale = newInterTypeAttractionScale;
+    if (device && simParamsBuffer) {
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            16 * 4, // Byte offset for interTypeAttractionScale (float at index 16)
+            new Float32Array([simParams.interTypeAttractionScale])
+        );
+    }
+
+    // Update R Smooth slider and display
+    const rSmoothSlider = document.getElementById(
+        "rSmoothSlider"
+    ) as HTMLInputElement;
+    const rSmoothValueDisplay = document.getElementById("rSmoothValue");
+    if (rSmoothSlider && rSmoothValueDisplay) {
+        rSmoothSlider.value = newRSmooth.toString();
+        rSmoothValueDisplay.textContent = newRSmooth.toFixed(2);
+    }
+
+    // Update Force Scale slider and display
+    const forceScaleSlider = document.getElementById(
+        "forceScaleSlider"
+    ) as HTMLInputElement;
+    const forceScaleValueDisplay = document.getElementById("forceScaleValue");
+    if (forceScaleSlider && forceScaleValueDisplay) {
+        forceScaleSlider.value = newForceScale.toString();
+        forceScaleValueDisplay.textContent = newForceScale.toFixed(2);
+    }
+
+    // Update Inter-Type Radius Scale slider and display
+    const interTypeRadiusScaleSlider = document.getElementById(
+        "interTypeRadiusScaleSlider"
+    ) as HTMLInputElement;
+    const interTypeRadiusScaleValueDisplay = document.getElementById(
+        "interTypeRadiusScaleValue"
+    );
+    if (interTypeRadiusScaleSlider && interTypeRadiusScaleValueDisplay) {
+        interTypeRadiusScaleSlider.value = newInterTypeRadiusScale.toString();
+        interTypeRadiusScaleValueDisplay.textContent =
+            newInterTypeRadiusScale.toFixed(2);
+    }
+
+    // Update Inter-Type Attraction Scale slider and display
+    const interTypeAttractionScaleSlider = document.getElementById(
+        "interTypeAttractionScaleSlider"
+    ) as HTMLInputElement;
+    const interTypeAttractionScaleValueDisplay = document.getElementById(
+        "interTypeAttractionScaleValue"
+    );
+    if (
+        interTypeAttractionScaleSlider &&
+        interTypeAttractionScaleValueDisplay
+    ) {
+        interTypeAttractionScaleSlider.value =
+            newInterTypeAttractionScale.toString();
+        interTypeAttractionScaleValueDisplay.textContent =
+            newInterTypeAttractionScale.toFixed(2);
+    }
+}
+
 let device: GPUDevice;
 let presentationFormat: GPUTextureFormat;
 let context: GPUCanvasContext;
@@ -1312,11 +1492,17 @@ if (tempSlider && tempValueDisplay) {
     tempSlider.value = temperature.toString();
     tempValueDisplay.textContent = temperature.toString();
 
+    // Apply initial temperature-based parameters on page load
+    updateDriftAndFrictionFromTemperature(temperature);
+
     tempSlider.addEventListener("input", (event) => {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
         temperature = newValue;
         tempValueDisplay.textContent = newValue.toString();
         saveToLocalStorage(STORAGE_KEYS.temperature, newValue);
+
+        // Update drift and friction parameters based on temperature
+        updateDriftAndFrictionFromTemperature(newValue);
     });
 }
 
@@ -1363,11 +1549,17 @@ if (presSlider && presValueDisplay) {
     presSlider.value = pressure.toString();
     presValueDisplay.textContent = pressure.toString();
 
+    // Apply initial pressure-based parameters on page load
+    updateParametersFromPressure(pressure);
+
     presSlider.addEventListener("input", (event) => {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
         pressure = newValue;
         presValueDisplay.textContent = newValue.toString();
         saveToLocalStorage(STORAGE_KEYS.pressure, newValue);
+
+        // Update physics parameters based on pressure
+        updateParametersFromPressure(newValue);
     });
 }
 
