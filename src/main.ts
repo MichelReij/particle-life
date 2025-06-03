@@ -273,7 +273,9 @@ function updateParametersFromUV(uv: number): void {
     const leniaGrowthSigmaSlider = document.getElementById(
         "leniaGrowthSigmaSlider"
     ) as HTMLInputElement;
-    const leniaGrowthSigmaValue = document.getElementById("leniaGrowthSigmaValue");
+    const leniaGrowthSigmaValue = document.getElementById(
+        "leniaGrowthSigmaValue"
+    );
     if (leniaGrowthSigmaSlider && leniaGrowthSigmaValue) {
         leniaGrowthSigmaSlider.value = newLeniaGrowthSigma.toString();
         leniaGrowthSigmaValue.textContent = newLeniaGrowthSigma.toFixed(3);
