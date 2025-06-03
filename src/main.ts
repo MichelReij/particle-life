@@ -149,10 +149,16 @@ function temperatureToDrift(temp: number): number {
 }
 
 function temperatureToFriction(temp: number): number {
-    // Linear mapping: temp [3, 40] → friction [0.30, 0.01]
-    // At temp = 3°C: friction = 0.30 (highest)
-    // At temp = 40°C: friction = 0.01 (lowest)
-    return 0.3 - ((temp - 3) * 0.29) / 37;
+    // Non-linear exponential mapping: temp [3, 40] → friction [0.50, 0.005]
+    // At temp = 3°C: friction = 0.50 (highest)
+    // At temp = 40°C: friction = 0.005 (lowest)
+
+    // Normalize temperature to [0, 1] range
+    const normalizedTemp = (temp - 3) / (40 - 3);
+
+    // Exponential decay: friction = 0.5 * exp(-4.6 * normalizedTemp)
+    // The factor -4.6 gives us: exp(-4.6 * 1) ≈ 0.01, so 0.5 * 0.01 = 0.005
+    return 0.5 * Math.exp(-4.6 * normalizedTemp);
 }
 
 function updateDriftAndFrictionFromTemperature(temp: number): void {
@@ -552,7 +558,7 @@ function updateBackgroundColorAndDrift(newDriftXPerSecond: number): void {
     // Use HSLuv for background color generation based on drift speed
     // Hue transitions from blue (240°) at no drift to red (0°) at max drift
     const hue = 215 - normalizedAbsDrift * 200; // 240° to 0° (blue 240 to red 10)
-    const saturation = 44;
+    const saturation = 66;
     const lightness = 66;
 
     // Convert HSLuv to RGB
