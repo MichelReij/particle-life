@@ -6,47 +6,45 @@
             name="viewport"
             content="width=device-width, initial-scale=1, shrink-to-fit=no"
         />
-        <title>webgpu-samples: gameOfLife</title>
-        <style>
-            :root {
-                color-scheme: light dark;
-            }
-            html,
-            body {
-                margin: 0; /* remove default margin */
-                height: 100%; /* make body fill the browser window */
-                display: flex;
-                place-content: center center;
-            }
-            canvas {
-                width: 800px;
-                height: 800px;
-                max-width: 100%;
-                display: block;
-                border-radius: 50%;
-            }
-            #fpsDisplay {
-                position: fixed;
-                top: 10px;
-                left: 10px;
-                color: #333;
-                font-family: Arial, sans-serif;
-            }
-            #controls {
-                position: fixed;
-                bottom: 10px;
-                left: 10px;
-                color: white;
-                font-family: Arial, sans-serif;
-                background-color: rgba(0, 0, 0, 0.5);
-                padding: 10px;
-                border-radius: 5px;
-            }
-        </style>
-        <script defer src="bundle.js" type="module"></script>
+        <title>Origin of Life Simulation</title>
+        <!-- JoyStick Library -->
+        <script src="joy.js"></script>
     </head>
     <body>
-        <canvas id="__webgpu_particle_life_canvas__"></canvas>
+        <div id="Dashboard">
+            <div id="Zoom">
+                <label for="zoomSlider">Zoom:</label>
+                <input
+                    type="range"
+                    id="zoomSlider"
+                    min="1.50"
+                    max="6.00"
+                    value="2.00"
+                    step="0.01"
+                />
+                <span id="zoomValue">2.00</span>
+            </div>
+            <div id="canvasContainer"></div>
+            <div id="Joystick">
+                <label>Navigation:</label>
+                <div id="joyDiv"></div>
+                <div
+                    id="zoomCenterInfo"
+                    style="
+                        margin-top: 10px;
+                        text-align: center;
+                        font-size: 12px;
+                        color: #e3c463;
+                    "
+                >
+                    Center: (1200, 1200)
+                    <br />
+                    Range: 0
+                </div>
+            </div>
+            <div id="fpsDisplay">FPS: --</div>
+        </div>
+
         <div id="controls">
             <div>
                 <label for="driftSlider">Drift Speed:</label>
@@ -136,18 +134,6 @@
                 />
                 <span id="fisheyeStrengthValue">1.90</span>
             </div>
-            <div>
-                <label for="zoomSlider">Zoom:</label>
-                <input
-                    type="range"
-                    id="zoomSlider"
-                    min="1.50"
-                    max="3.00"
-                    value="2.00"
-                    step="0.01"
-                />
-                <span id="zoomValue">1.4</span>x
-            </div>
 
             <!-- Lenia Controls -->
             <div>
@@ -194,6 +180,5 @@
                 <span id="leniaKernelRadiusValue">50.0</span>
             </div>
         </div>
-        <div id="fpsDisplay">FPS: --</div>
     </body>
 </html>

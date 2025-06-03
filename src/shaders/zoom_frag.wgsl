@@ -5,6 +5,10 @@ var scene_texture: texture_2d<f32>;
 
 struct ZoomUniforms {
     zoom_level: f32,
+    center_x: f32,
+    center_y: f32,
+    padding: f32,
+    // Padding to align to 16 bytes
 }
 
 ;
@@ -21,10 +25,11 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     // At 1x zoom: sample full 2400x2400px
     // At 2x zoom: sample center 1200x1200px
     // At 3x zoom: sample center 800x800px
+    // At 6x zoom: sample center 400x400px
     let sample_size = 2400.0 / zoom_uniforms.zoom_level;
 
-    // Calculate the center of the 2400x2400px texture
-    let texture_center = vec2<f32>(1200.0, 1200.0);
+    // Use the dynamic zoom center from uniforms
+    let texture_center = vec2<f32>(zoom_uniforms.center_x, zoom_uniforms.center_y);
 
     // Calculate the top-left corner of our sample area
     let sample_top_left = texture_center - vec2<f32>(sample_size / 2.0, sample_size / 2.0);

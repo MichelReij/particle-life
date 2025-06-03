@@ -62,7 +62,16 @@ if (oldCanvas && oldCanvas.parentNode) {
 }
 const canvas = document.createElement("canvas");
 canvas.id = CANVAS_ID;
-document.body.appendChild(canvas);
+
+// Add canvas to the canvasContainer div in the Dashboard
+const canvasContainer = document.getElementById("canvasContainer");
+if (canvasContainer) {
+    canvasContainer.appendChild(canvas);
+} else {
+    // Fallback to body if canvasContainer not found
+    document.body.appendChild(canvas);
+    console.warn("canvasContainer not found, adding canvas to body");
+}
 
 canvas.width = 800;
 canvas.height = 800;
@@ -258,8 +267,8 @@ function updateBackgroundColorAndDrift(newDriftXPerSecond: number): void {
     // Use HSLuv for background color generation based on drift speed
     // Hue transitions from blue (240°) at no drift to red (0°) at max drift
     const hue = 215 - normalizedAbsDrift * 200; // 240° to 0° (blue 240 to red 10)
-    const saturation = 33; // Full saturation
-    const lightness = 55; // 20% to 50% lightness for dark backgrounds
+    const saturation = 44;
+    const lightness = 66;
 
     // Convert HSLuv to RGB
     const [red, green, blue] = hsluvToRgb([hue, saturation, lightness]);
@@ -837,15 +846,15 @@ async function initWebGPU() {
     // Create zoom uniforms buffer
     zoomUniformsBuffer = device.createBuffer({
         label: "Zoom Uniforms Buffer",
-        size: 4, // Single f32 for zoom level
+        size: 16, // 4 floats: zoom_level, center_x, center_y, padding
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    // Write initial zoom level
+    // Write initial zoom uniforms (zoom level and center position)
     device.queue.writeBuffer(
         zoomUniformsBuffer,
         0,
-        new Float32Array([currentZoomLevel])
+        new Float32Array([currentZoomLevel, zoomCenterX, zoomCenterY, 0.0]) // zoom_level, center_x, center_y, padding
     );
 
     const zoomShaderModuleFrag = device.createShaderModule({
@@ -1079,11 +1088,34 @@ if (zoomSlider && zoomValueDisplay) {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
         currentZoomLevel = newValue;
         zoomValueDisplay.textContent = newValue.toFixed(1);
+
+        // Constrain zoom center based on new zoom level
+        constrainZoomCenter();
+
+        // Update zoom center info display
+        const zoomCenterInfo = document.getElementById("zoomCenterInfo");
+        if (zoomCenterInfo) {
+            const maxMovementRange = Math.max(
+                0,
+                111.24 * currentZoomLevel - 122.29
+            );
+            zoomCenterInfo.innerHTML = `Center: (${zoomCenterX.toFixed(
+                0
+            )}, ${zoomCenterY.toFixed(0)})<br>Range: ${maxMovementRange.toFixed(
+                0
+            )}`;
+        }
+
         if (device && zoomUniformsBuffer) {
             device.queue.writeBuffer(
                 zoomUniformsBuffer,
-                0, // Byte offset for zoom level
-                new Float32Array([currentZoomLevel])
+                0, // Write all zoom uniforms
+                new Float32Array([
+                    currentZoomLevel,
+                    zoomCenterX,
+                    zoomCenterY,
+                    0.0,
+                ])
             );
         }
     });
@@ -1531,3 +1563,165 @@ window.addEventListener("resize", () => {
         });
     }
 });
+
+// === JoyStick Implementation ===
+
+// JoyStick types (inline to avoid import issues)
+interface JoyStickData {
+    xPosition: number;
+    yPosition: number;
+    cardinalDirection: string;
+    x: number;
+    y: number;
+}
+
+// JoyStick variables
+let joystick: any;
+let joystickForceX = 0.0;
+let joystickForceY = 0.0;
+let joystickInfluence = 200.0; // Maximum force influence from joystick
+
+// Zoom center variables for joystick navigation
+let zoomCenterX = 1200.0; // Center X coordinate in 2400x2400 world (default: center)
+let zoomCenterY = 1200.0; // Center Y coordinate in 2400x2400 world (default: center)
+
+// Function to constrain zoom center based on zoom level
+function constrainZoomCenter() {
+    // Calculate maximum movement range based on zoom factor
+    // f(x) ≈ 111.24·x - 122.29, where x = zoom factor
+    const maxMovementRange = Math.max(0, 111.24 * currentZoomLevel - 122.29);
+
+    // Calculate current distance from center (1200, 1200)
+    const currentDistanceX = zoomCenterX - 1200.0;
+    const currentDistanceY = zoomCenterY - 1200.0;
+    const currentDistance = Math.sqrt(
+        currentDistanceX * currentDistanceX +
+            currentDistanceY * currentDistanceY
+    );
+
+    // If current position is beyond the allowed range, scale it back
+    if (currentDistance > maxMovementRange && maxMovementRange > 0) {
+        const scale = maxMovementRange / currentDistance;
+        zoomCenterX = 1200.0 + currentDistanceX * scale;
+        zoomCenterY = 1200.0 + currentDistanceY * scale;
+    }
+
+    // Clamp to world bounds as extra safety
+    zoomCenterX = Math.max(0, Math.min(2400, zoomCenterX));
+    zoomCenterY = Math.max(0, Math.min(2400, zoomCenterY));
+}
+
+async function initJoyStick() {
+    console.log("Initializing JoyStick...");
+
+    try {
+        // Wait for the JoyStick library to be available globally
+        if (typeof (window as any).JoyStick === "undefined") {
+            console.log("Waiting for JoyStick library to load...");
+            // Wait up to 5 seconds for the library to load
+            for (let i = 0; i < 50; i++) {
+                await new Promise((resolve) => setTimeout(resolve, 100));
+                if (typeof (window as any).JoyStick !== "undefined") {
+                    break;
+                }
+            }
+        }
+
+        const JoyStickConstructor = (window as any).JoyStick;
+
+        if (!JoyStickConstructor) {
+            throw new Error("JoyStick constructor not found after waiting");
+        }
+
+        console.log("JoyStick constructor found, creating instance...");
+
+        // Initialize JoyStick with callback function
+        joystick = new JoyStickConstructor(
+            "joyDiv",
+            {
+                width: 150,
+                height: 150,
+                internalFillColor: "#E3C463",
+                internalStrokeColor: "#B8A150",
+                externalStrokeColor: "#E3C463",
+                autoReturnToCenter: true,
+            },
+            function (stickData: JoyStickData) {
+                // Calculate maximum movement range based on zoom factor
+                // f(x) ≈ 111.24·x - 122.29, where x = zoom factor
+                const maxMovementRange = Math.max(
+                    0,
+                    112 * currentZoomLevel - 150
+                );
+
+                // Convert joystick input (-100 to +100) to movement within the calculated range
+                // Center is always (1200, 1200) and movement is limited by maxMovementRange
+                const moveX = (stickData.x / 100.0) * maxMovementRange;
+                const moveY = -(stickData.y / 100.0) * maxMovementRange; // Inverted Y-axis for intuitive navigation
+
+                // Calculate new zoom center positions
+                zoomCenterX = 1200.0 + moveX;
+                zoomCenterY = 1200.0 + moveY;
+
+                // Clamp values to stay within the 2400x2400 world (extra safety)
+                // zoomCenterX = Math.max(0, Math.min(2400, zoomCenterX));
+                // zoomCenterY = Math.max(0, Math.min(2400, zoomCenterY));
+
+                // Update zoom uniforms buffer with new center position
+                if (device && zoomUniformsBuffer) {
+                    device.queue.writeBuffer(
+                        zoomUniformsBuffer,
+                        0,
+                        new Float32Array([
+                            currentZoomLevel,
+                            zoomCenterX,
+                            zoomCenterY,
+                            0.0,
+                        ])
+                    );
+                }
+
+                // Update zoom center info display (separate from drift/force displays)
+                const zoomCenterInfo =
+                    document.getElementById("zoomCenterInfo");
+                if (zoomCenterInfo) {
+                    zoomCenterInfo.innerHTML = `Center: (${zoomCenterX.toFixed(
+                        0
+                    )}, ${zoomCenterY.toFixed(
+                        0
+                    )})<br>Range: ${maxMovementRange.toFixed(0)}`;
+                }
+            }
+        );
+
+        console.log("JoyStick initialized successfully");
+    } catch (error) {
+        console.error("Failed to initialize JoyStick:", error);
+
+        // Show error message to user
+        const joyDiv = document.getElementById("joyDiv");
+        if (joyDiv) {
+            joyDiv.innerHTML =
+                '<div style="color: red; text-align: center; padding: 20px;">JoyStick failed to load</div>';
+        }
+    }
+}
+
+// Initialize JoyStick after DOM and libraries are loaded
+setTimeout(() => {
+    initJoyStick();
+
+    // Initialize zoom center info display
+    const zoomCenterInfo = document.getElementById("zoomCenterInfo");
+    if (zoomCenterInfo) {
+        const maxMovementRange = Math.max(
+            0,
+            111.24 * currentZoomLevel - 122.29
+        );
+        zoomCenterInfo.innerHTML = `Center: (${zoomCenterX.toFixed(
+            0
+        )}, ${zoomCenterY.toFixed(0)})<br>Range: ${maxMovementRange.toFixed(
+            0
+        )}`;
+    }
+}, 2000); // Increased delay to ensure script loading
