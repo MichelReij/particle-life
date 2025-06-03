@@ -18,10 +18,10 @@ body {
 
 #Dashboard {
     display              : grid;
-    grid-template-columns: max-content 1fr max-content; // two equal columns
-    grid-template-areas  : "zoom canvas joystick"
-        "fps sliders tbd";
-    column-gap      : 5rem;
+    grid-template-columns: max-content 1fr 1fr 1fr 1fr max-content;
+    grid-template-areas  : "zoom canvas canvas canvas canvas joystick"
+        "fps temp pres uv elec tbd";
+    column-gap      : 3rem;
     row-gap         : 2rem;
     color           : #dddddd;
     background-color: #202225;
@@ -31,14 +31,12 @@ body {
     box-shadow      : 1rem 1rem 2rem rgba(0, 0, 0, 0.5);
     height          : max-content;
 
-
-    #Zoom {
-        grid-area      : zoom;
+    .vertical-slider-container {
         display        : flex;
         flex-direction : column;
         align-items    : center;
         justify-content: center;
-        padding        : 20px 10px;
+        padding        : 1rem 0.5rem;
 
         label {
             margin-bottom: 15px;
@@ -46,7 +44,7 @@ body {
             text-align   : center;
         }
 
-        #zoomSlider {
+        input[type="range"] {
             writing-mode : vertical-lr;
             direction    : rtl; // Makes the slider go from bottom (low) to top (high)
             width        : 20px;
@@ -104,19 +102,55 @@ body {
             }
         }
 
-        #zoomValue {
+        span {
             margin-top : 15px;
             font-weight: bold;
             color      : #333;
             text-align : center;
             color      : var(--accent-color);
-
-            &::after {
-                content: "x";
-            }
         }
     }
 
+    #Zoom {
+        grid-area: zoom;
+
+        #zoomValue::after {
+            content: "x";
+        }
+    }
+
+
+    #Temp {
+        grid-area: temp;
+
+        #tempValue::after {
+            content: "°C";
+        }
+    }
+
+    #Elec {
+        grid-area: elec;
+
+        #elecValue::after {
+            content: " kJ/m²/day";
+        }
+    }
+
+    #Pres {
+        grid-area: pres;
+
+        #presValue::after {
+            content: " bar";
+        }
+    }
+
+    #UV {
+        grid-area: uv;
+
+        #uvValue::after {
+            content: " MJ/m²/day";
+        }
+    }
 
     #canvasContainer {
         grid-area: canvas;
@@ -153,19 +187,17 @@ body {
             text-align   : center;
         }
 
-        #joyDiv {
-            width           : 200px;
-            height          : 200px;
-            margin          : 15px 0;
-            border-radius   : 50%;
-            // box-shadow   : 0 4px 8px rgba(0, 0, 0, 0.3);
-        }
 
         // Custom styling for the joystick canvas
         #joystick {
-            border          : 2px solid var(--accent-color);
-            border-radius   : 50%;
-            // box-shadow   : 0 2px 4px rgba(0, 0, 0, 0.2);
+            border       : 2px solid var(--accent-color);
+            border-radius: 50%;
+        }
+
+        #zoomCenterInfo {
+            display   : none;
+            text-align: center;
+            color     : var(--accent-color);
         }
     }
 }

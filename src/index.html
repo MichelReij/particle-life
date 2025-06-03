@@ -12,7 +12,7 @@
     </head>
     <body>
         <div id="Dashboard">
-            <div id="Zoom">
+            <div id="Zoom" class="vertical-slider-container">
                 <label for="zoomSlider">Zoom:</label>
                 <input
                     type="range"
@@ -28,21 +28,64 @@
             <div id="Joystick">
                 <label>Navigation:</label>
                 <div id="joyDiv"></div>
-                <div
-                    id="zoomCenterInfo"
-                    style="
-                        margin-top: 10px;
-                        text-align: center;
-                        font-size: 12px;
-                        color: #e3c463;
-                    "
-                >
+                <div id="zoomCenterInfo">
                     Center: (1200, 1200)
                     <br />
                     Range: 0
                 </div>
             </div>
             <div id="fpsDisplay">FPS: --</div>
+            <div id="Temp" class="vertical-slider-container">
+                <label for="tempSlider">Temperature:</label>
+                <input
+                    type="range"
+                    id="tempSlider"
+                    min="-10"
+                    max="50"
+                    value="20"
+                    step="1"
+                />
+                <span id="tempValue">20</span>
+            </div>
+
+            <div id="Elec" class="vertical-slider-container">
+                <label for="elecSlider">Electrical activity:</label>
+                <input
+                    type="range"
+                    id="elecSlider"
+                    min="0"
+                    max="2"
+                    value="0.68"
+                    step="0.01"
+                />
+                <span id="elecValue">0.68</span>
+            </div>
+
+            <div id="UV" class="vertical-slider-container">
+                <label for="tempSlider">UV light:</label>
+                <input
+                    type="range"
+                    id="uvSlider"
+                    min="0"
+                    max="50"
+                    value="25"
+                    step="1"
+                />
+                <span id="uvValue">25</span>
+            </div>
+
+            <div id="Pres" class="vertical-slider-container">
+                <label for="pressureSlider">Pressure:</label>
+                <input
+                    type="range"
+                    id="presSlider"
+                    min="0"
+                    max="350"
+                    value="1"
+                    step="1"
+                />
+                <span id="presValue">1</span>
+            </div>
         </div>
 
         <div id="controls">
