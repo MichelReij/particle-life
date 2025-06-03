@@ -95,6 +95,51 @@ let R_SMOOTH = 5.0;
 let INTER_TYPE_ATTRACTION_SCALE = 1.0; // Default: no change to attraction
 let INTER_TYPE_RADIUS_SCALE = 1.0; // Default: no change to radii
 
+// Environmental parameters for the new sliders
+let temperature = 20; // Default temperature
+let electricalActivity = 0.68; // Default electrical activity
+let uvLight = 25; // Default UV light
+let pressure = 1; // Default pressure
+
+// localStorage functionality for persistent settings
+const STORAGE_KEYS = {
+    temperature: "particleLife_temperature",
+    electricalActivity: "particleLife_electricalActivity",
+    uvLight: "particleLife_uvLight",
+    pressure: "particleLife_pressure",
+    zoom: "particleLife_zoom",
+    drift: "particleLife_drift",
+    forceScale: "particleLife_forceScale",
+    friction: "particleLife_friction",
+    rSmooth: "particleLife_rSmooth",
+    interTypeAttractionScale: "particleLife_interTypeAttractionScale",
+    interTypeRadiusScale: "particleLife_interTypeRadiusScale",
+    fisheyeStrength: "particleLife_fisheyeStrength",
+};
+
+function saveToLocalStorage(key: string, value: number): void {
+    try {
+        localStorage.setItem(key, value.toString());
+    } catch (e) {
+        console.warn("Failed to save to localStorage:", e);
+    }
+}
+
+function loadFromLocalStorage(key: string, defaultValue: number): number {
+    try {
+        const stored = localStorage.getItem(key);
+        if (stored !== null) {
+            const parsed = parseFloat(stored);
+            if (!isNaN(parsed)) {
+                return parsed;
+            }
+        }
+    } catch (e) {
+        console.warn("Failed to load from localStorage:", e);
+    }
+    return defaultValue;
+}
+
 let device: GPUDevice;
 let presentationFormat: GPUTextureFormat;
 let context: GPUCanvasContext;
@@ -925,13 +970,21 @@ async function initWebGPU() {
 const driftSlider = document.getElementById("driftSlider") as HTMLInputElement;
 const driftValueDisplay = document.getElementById("driftValue");
 if (driftSlider && driftValueDisplay) {
-    driftSlider.value = simParams.driftXPerSecond.toString(); // Initialize slider position
-    driftValueDisplay.textContent = simParams.driftXPerSecond.toFixed(2);
+    // Load saved value or use default
+    const savedDrift = loadFromLocalStorage(
+        STORAGE_KEYS.drift,
+        simParams.driftXPerSecond
+    );
+    simParams.driftXPerSecond = savedDrift;
+    updateBackgroundColorAndDrift(savedDrift);
+    driftSlider.value = savedDrift.toString();
+    driftValueDisplay.textContent = savedDrift.toFixed(2);
 
     driftSlider.addEventListener("input", (event) => {
         const newDrift = parseFloat((event.target as HTMLInputElement).value);
         updateBackgroundColorAndDrift(newDrift);
         driftValueDisplay.textContent = newDrift.toFixed(2);
+        saveToLocalStorage(STORAGE_KEYS.drift, newDrift);
     });
 }
 
@@ -941,12 +994,18 @@ const forceScaleSlider = document.getElementById(
 ) as HTMLInputElement;
 const forceScaleValueDisplay = document.getElementById("forceScaleValue");
 if (forceScaleSlider && forceScaleValueDisplay) {
+    // Load saved value or use default
+    simParams.forceScale = loadFromLocalStorage(
+        STORAGE_KEYS.forceScale,
+        simParams.forceScale
+    );
     forceScaleSlider.value = simParams.forceScale.toString();
     forceScaleValueDisplay.textContent = simParams.forceScale.toFixed(2);
     forceScaleSlider.addEventListener("input", (event) => {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
         simParams.forceScale = newValue;
         forceScaleValueDisplay.textContent = newValue.toFixed(2);
+        saveToLocalStorage(STORAGE_KEYS.forceScale, newValue);
         if (device && simParamsBuffer) {
             device.queue.writeBuffer(
                 simParamsBuffer,
@@ -963,12 +1022,18 @@ const frictionSlider = document.getElementById(
 ) as HTMLInputElement;
 const frictionValueDisplay = document.getElementById("frictionValue");
 if (frictionSlider && frictionValueDisplay) {
+    // Load saved value or use default
+    simParams.friction = loadFromLocalStorage(
+        STORAGE_KEYS.friction,
+        simParams.friction
+    );
     frictionSlider.value = simParams.friction.toString();
     frictionValueDisplay.textContent = simParams.friction.toFixed(2);
     frictionSlider.addEventListener("input", (event) => {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
         simParams.friction = newValue;
         frictionValueDisplay.textContent = newValue.toFixed(2);
+        saveToLocalStorage(STORAGE_KEYS.friction, newValue);
         if (device && simParamsBuffer) {
             device.queue.writeBuffer(
                 simParamsBuffer,
@@ -985,12 +1050,18 @@ const rSmoothSlider = document.getElementById(
 ) as HTMLInputElement;
 const rSmoothValueDisplay = document.getElementById("rSmoothValue");
 if (rSmoothSlider && rSmoothValueDisplay) {
+    // Load saved value or use default
+    simParams.rSmooth = loadFromLocalStorage(
+        STORAGE_KEYS.rSmooth,
+        simParams.rSmooth
+    );
     rSmoothSlider.value = simParams.rSmooth.toString();
     rSmoothValueDisplay.textContent = simParams.rSmooth.toFixed(2);
     rSmoothSlider.addEventListener("input", (event) => {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
         simParams.rSmooth = newValue;
         rSmoothValueDisplay.textContent = newValue.toFixed(2);
+        saveToLocalStorage(STORAGE_KEYS.rSmooth, newValue);
         if (device && simParamsBuffer) {
             device.queue.writeBuffer(
                 simParamsBuffer,
@@ -1009,6 +1080,11 @@ const interTypeAttractionScaleValueDisplay = document.getElementById(
     "interTypeAttractionScaleValue"
 );
 if (interTypeAttractionScaleSlider && interTypeAttractionScaleValueDisplay) {
+    // Load saved value or use default
+    simParams.interTypeAttractionScale = loadFromLocalStorage(
+        STORAGE_KEYS.interTypeAttractionScale,
+        simParams.interTypeAttractionScale
+    );
     interTypeAttractionScaleSlider.value =
         simParams.interTypeAttractionScale.toString();
     interTypeAttractionScaleValueDisplay.textContent =
@@ -1017,6 +1093,7 @@ if (interTypeAttractionScaleSlider && interTypeAttractionScaleValueDisplay) {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
         simParams.interTypeAttractionScale = newValue;
         interTypeAttractionScaleValueDisplay.textContent = newValue.toFixed(2);
+        saveToLocalStorage(STORAGE_KEYS.interTypeAttractionScale, newValue);
         if (device && simParamsBuffer) {
             device.queue.writeBuffer(
                 simParamsBuffer,
@@ -1035,6 +1112,11 @@ const interTypeRadiusScaleValueDisplay = document.getElementById(
     "interTypeRadiusScaleValue"
 );
 if (interTypeRadiusScaleSlider && interTypeRadiusScaleValueDisplay) {
+    // Load saved value or use default
+    simParams.interTypeRadiusScale = loadFromLocalStorage(
+        STORAGE_KEYS.interTypeRadiusScale,
+        simParams.interTypeRadiusScale
+    );
     interTypeRadiusScaleSlider.value =
         simParams.interTypeRadiusScale.toString();
     interTypeRadiusScaleValueDisplay.textContent =
@@ -1043,6 +1125,7 @@ if (interTypeRadiusScaleSlider && interTypeRadiusScaleValueDisplay) {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
         simParams.interTypeRadiusScale = newValue;
         interTypeRadiusScaleValueDisplay.textContent = newValue.toFixed(2);
+        saveToLocalStorage(STORAGE_KEYS.interTypeRadiusScale, newValue);
         if (device && simParamsBuffer) {
             device.queue.writeBuffer(
                 simParamsBuffer,
@@ -1061,6 +1144,11 @@ const fisheyeStrengthValueDisplay = document.getElementById(
     "fisheyeStrengthValue"
 );
 if (fisheyeStrengthSlider && fisheyeStrengthValueDisplay) {
+    // Load saved value or use default
+    simParams.fisheyeStrength = loadFromLocalStorage(
+        STORAGE_KEYS.fisheyeStrength,
+        simParams.fisheyeStrength
+    );
     fisheyeStrengthSlider.value = simParams.fisheyeStrength.toString();
     fisheyeStrengthValueDisplay.textContent =
         simParams.fisheyeStrength.toFixed(2);
@@ -1068,6 +1156,7 @@ if (fisheyeStrengthSlider && fisheyeStrengthValueDisplay) {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
         simParams.fisheyeStrength = newValue;
         fisheyeStrengthValueDisplay.textContent = newValue.toFixed(2);
+        saveToLocalStorage(STORAGE_KEYS.fisheyeStrength, newValue);
         if (device && simParamsBuffer) {
             device.queue.writeBuffer(
                 simParamsBuffer,
@@ -1082,12 +1171,18 @@ if (fisheyeStrengthSlider && fisheyeStrengthValueDisplay) {
 const zoomSlider = document.getElementById("zoomSlider") as HTMLInputElement;
 const zoomValueDisplay = document.getElementById("zoomValue");
 if (zoomSlider && zoomValueDisplay) {
+    // Load saved value or use default
+    currentZoomLevel = loadFromLocalStorage(
+        STORAGE_KEYS.zoom,
+        currentZoomLevel
+    );
     zoomSlider.value = currentZoomLevel.toString();
     zoomValueDisplay.textContent = currentZoomLevel.toFixed(1);
     zoomSlider.addEventListener("input", (event) => {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
         currentZoomLevel = newValue;
         zoomValueDisplay.textContent = newValue.toFixed(1);
+        saveToLocalStorage(STORAGE_KEYS.zoom, newValue);
 
         // Constrain zoom center based on new zoom level
         constrainZoomCenter();
@@ -1205,6 +1300,74 @@ if (leniaKernelRadiusSlider && leniaKernelRadiusValue) {
                 new Float32Array([simParams.leniaKernelRadius])
             );
         }
+    });
+}
+
+// Environmental sliders (Temperature, Electrical Activity, UV Light, Pressure)
+const tempSlider = document.getElementById("tempSlider") as HTMLInputElement;
+const tempValueDisplay = document.getElementById("tempValue");
+if (tempSlider && tempValueDisplay) {
+    // Load saved value or use default
+    temperature = loadFromLocalStorage(STORAGE_KEYS.temperature, temperature);
+    tempSlider.value = temperature.toString();
+    tempValueDisplay.textContent = temperature.toString();
+
+    tempSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        temperature = newValue;
+        tempValueDisplay.textContent = newValue.toString();
+        saveToLocalStorage(STORAGE_KEYS.temperature, newValue);
+    });
+}
+
+const elecSlider = document.getElementById("elecSlider") as HTMLInputElement;
+const elecValueDisplay = document.getElementById("elecValue");
+if (elecSlider && elecValueDisplay) {
+    // Load saved value or use default
+    electricalActivity = loadFromLocalStorage(
+        STORAGE_KEYS.electricalActivity,
+        electricalActivity
+    );
+    elecSlider.value = electricalActivity.toString();
+    elecValueDisplay.textContent = electricalActivity.toFixed(2);
+
+    elecSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        electricalActivity = newValue;
+        elecValueDisplay.textContent = newValue.toFixed(2);
+        saveToLocalStorage(STORAGE_KEYS.electricalActivity, newValue);
+    });
+}
+
+const uvSlider = document.getElementById("uvSlider") as HTMLInputElement;
+const uvValueDisplay = document.getElementById("uvValue");
+if (uvSlider && uvValueDisplay) {
+    // Load saved value or use default
+    uvLight = loadFromLocalStorage(STORAGE_KEYS.uvLight, uvLight);
+    uvSlider.value = uvLight.toString();
+    uvValueDisplay.textContent = uvLight.toString();
+
+    uvSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        uvLight = newValue;
+        uvValueDisplay.textContent = newValue.toString();
+        saveToLocalStorage(STORAGE_KEYS.uvLight, newValue);
+    });
+}
+
+const presSlider = document.getElementById("presSlider") as HTMLInputElement;
+const presValueDisplay = document.getElementById("presValue");
+if (presSlider && presValueDisplay) {
+    // Load saved value or use default
+    pressure = loadFromLocalStorage(STORAGE_KEYS.pressure, pressure);
+    presSlider.value = pressure.toString();
+    presValueDisplay.textContent = pressure.toString();
+
+    presSlider.addEventListener("input", (event) => {
+        const newValue = parseFloat((event.target as HTMLInputElement).value);
+        pressure = newValue;
+        presValueDisplay.textContent = newValue.toString();
+        saveToLocalStorage(STORAGE_KEYS.pressure, newValue);
     });
 }
 
