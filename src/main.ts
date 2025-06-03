@@ -222,6 +222,64 @@ function pressureToInterTypeAttractionScale(pressure: number): number {
     return 0.8 + (pressure * 1.2) / 350;
 }
 
+// UV Light mapping functions
+function uvToLeniaGrowthMu(uv: number): number {
+    // Map UV [0,50] to leniaGrowthMu [0.05, 0.35]
+    // More UV light should promote more growth
+    return 0.05 + (uv / 50.0) * (0.35 - 0.05);
+}
+
+function uvToLeniaGrowthSigma(uv: number): number {
+    // Map UV [0,50] to leniaGrowthSigma [0.01, 0.05]
+    // More UV light means broader growth conditions
+    return 0.01 + (uv / 50.0) * (0.05 - 0.01);
+}
+
+function updateParametersFromUV(uv: number): void {
+    const newLeniaGrowthMu = uvToLeniaGrowthMu(uv);
+    const newLeniaGrowthSigma = uvToLeniaGrowthSigma(uv);
+
+    // Update Lenia Growth Mu parameter and GPU buffer
+    simParams.leniaGrowthMu = newLeniaGrowthMu;
+    if (device && simParamsBuffer) {
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            24 * 4, // Byte offset for leniaGrowthMu (f32 at index 24)
+            new Float32Array([simParams.leniaGrowthMu])
+        );
+    }
+
+    // Update Lenia Growth Sigma parameter and GPU buffer
+    simParams.leniaGrowthSigma = newLeniaGrowthSigma;
+    if (device && simParamsBuffer) {
+        device.queue.writeBuffer(
+            simParamsBuffer,
+            25 * 4, // Byte offset for leniaGrowthSigma (f32 at index 25)
+            new Float32Array([simParams.leniaGrowthSigma])
+        );
+    }
+
+    // Update Lenia Growth Mu slider and display
+    const leniaGrowthMuSlider = document.getElementById(
+        "leniaGrowthMuSlider"
+    ) as HTMLInputElement;
+    const leniaGrowthMuValue = document.getElementById("leniaGrowthMuValue");
+    if (leniaGrowthMuSlider && leniaGrowthMuValue) {
+        leniaGrowthMuSlider.value = newLeniaGrowthMu.toString();
+        leniaGrowthMuValue.textContent = newLeniaGrowthMu.toFixed(3);
+    }
+
+    // Update Lenia Growth Sigma slider and display
+    const leniaGrowthSigmaSlider = document.getElementById(
+        "leniaGrowthSigmaSlider"
+    ) as HTMLInputElement;
+    const leniaGrowthSigmaValue = document.getElementById("leniaGrowthSigmaValue");
+    if (leniaGrowthSigmaSlider && leniaGrowthSigmaValue) {
+        leniaGrowthSigmaSlider.value = newLeniaGrowthSigma.toString();
+        leniaGrowthSigmaValue.textContent = newLeniaGrowthSigma.toFixed(3);
+    }
+}
+
 function updateParametersFromPressure(pressure: number): void {
     const newRSmooth = pressureToRSmooth(pressure);
     const newForceScale = pressureToForceScale(pressure);
@@ -1533,11 +1591,17 @@ if (uvSlider && uvValueDisplay) {
     uvSlider.value = uvLight.toString();
     uvValueDisplay.textContent = uvLight.toString();
 
+    // Apply initial UV-based parameters on page load
+    updateParametersFromUV(uvLight);
+
     uvSlider.addEventListener("input", (event) => {
         const newValue = parseFloat((event.target as HTMLInputElement).value);
         uvLight = newValue;
         uvValueDisplay.textContent = newValue.toString();
         saveToLocalStorage(STORAGE_KEYS.uvLight, newValue);
+
+        // Update Lenia Growth parameters based on UV light
+        updateParametersFromUV(newValue);
     });
 }
 
