@@ -201,10 +201,16 @@ function updateDriftAndFrictionFromTemperature(temp: number): void {
 
 // Pressure mapping functions
 function pressureToRSmooth(pressure: number): number {
-    // Linear mapping: pressure [0, 350] → rSmooth [20, 0.1]
-    // At pressure = 0: rSmooth = 20 (highest)
-    // At pressure = 350: rSmooth = 0.1 (lowest)
-    return 20 - (pressure * 19.9) / 350;
+    // Non-linear exponential mapping: pressure [0, 350] → rSmooth [20, 0.1]
+    // At pressure = 0: rSmooth = 20 (highest resistance)
+    // At pressure = 350: rSmooth = 0.1 (lowest resistance)
+    
+    // Normalize pressure to [0, 1] range
+    const normalizedPressure = pressure / 350;
+    
+    // Exponential decay: rSmooth = 20 * exp(-5.3 * normalizedPressure)
+    // The factor -5.3 gives us: exp(-5.3 * 1) ≈ 0.005, so 20 * 0.005 = 0.1
+    return 20 * Math.exp(-5.3 * normalizedPressure);
 }
 
 function pressureToForceScale(pressure: number): number {
