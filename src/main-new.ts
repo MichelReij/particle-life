@@ -6,12 +6,9 @@ import {
     initializeParticleLeniaEngine,
     renderFrame,
     startAnimation,
-    updateSimulationParameterAuto,
-    updateBackgroundColorAndDrift,
+    updateSimulationParameter,
     updateZoom,
 } from "./particle-lenia";
-
-import { SimulationParams } from "./particle-life-types";
 
 import {
     setupCanvas,
@@ -43,16 +40,13 @@ async function initializeApplication(): Promise<void> {
         setParameterUpdateCallbacks({
             updateDriftAndBackground: (value: number) => {
                 if (engine) {
-                    updateBackgroundColorAndDrift(engine, value);
+                    updateSimulationParameter(engine, "driftXPerSecond", value);
+                    // TODO: Add background color update based on drift
                 }
             },
             updateSimulationParameter: (paramName: string, value: number) => {
                 if (engine) {
-                    updateSimulationParameterAuto(
-                        engine,
-                        paramName as keyof SimulationParams,
-                        value
-                    );
+                    updateSimulationParameter(engine, paramName, value);
                 }
             },
             updateZoom: (level: number, centerX?: number, centerY?: number) => {
