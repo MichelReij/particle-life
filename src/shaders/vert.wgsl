@@ -46,8 +46,8 @@ var<uniform> sim_params: SimParams;
 var<storage, read> particle_colors: array<vec4<f32>>;
 
 struct VertexInput {
-    @location(3) quad_pos: vec2<f32>,
-    // Vertex position of the quad (-1 to 1) - REVERTED from 4
+    @location(4) quad_pos: vec2<f32>,
+    // Vertex position of the quad (-1 to 1) - Updated to location 4
     @builtin(instance_index) instance_idx: u32,
 }
 
@@ -57,7 +57,7 @@ struct ParticleInstanceInput {
     @location(0) particle_pos: vec2<f32>,
     @location(1) particle_vel: vec2<f32>,
     @location(2) particle_type: u32,
-    // @location(3) particle_size: f32, // REVERTED
+    @location(3) particle_size: f32,
 }
 
 ;
@@ -93,8 +93,8 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
         return out;
     }
 
-    // Use global particle_render_size from sim_params
-    let particle_radius_pixels = sim_params.particle_render_size;
+    // Use per-particle size instead of global particle_render_size
+    let particle_radius_pixels = particle_attrs.particle_size;
 
     // Particle position is in virtual world coordinates.
     // Translate to canvas-relative coordinates before normalizing.

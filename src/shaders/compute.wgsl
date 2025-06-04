@@ -4,7 +4,7 @@ struct Particle {
     // type will be used to index into the rules array
     // and for coloring in the render pass.
     ptype: u32,
-    // size: f32, // REVERTED
+    size: f32,
 }
 
 struct InteractionRule {

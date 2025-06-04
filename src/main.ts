@@ -81,10 +81,19 @@ canvas.style.height = "800px";
 // === Particle Life Configuration ===
 const NUM_PARTICLES = 3200; // Number of particles - increased for stronger Lenia effects
 const NUM_TYPES = 5; // Number of particle types - reduced for more coherent Lenia patterns
-const PARTICLE_RENDER_SIZE = 12.0;
-const PARTICLE_SIZE_BYTES = 24; // pos(2f) + vel(2f) + type(1u) + padding(1f for alignment if needed, or size for individual particle size)
-// For PARTICLE_SIZE_BYTES = 24: pos(8) + vel(8) + type(4) + padding(4) to make it multiple of 16 for some platforms, or particle_size (f32)
+const PARTICLE_RENDER_SIZE = 12.0; // Base particle size (used as reference)
+const PARTICLE_SIZE_BYTES = 24; // pos(2f) + vel(2f) + type(1u) + size(1f) = 6 * 4 = 24 bytes
+// Structure: pos(8) + vel(8) + type(4) + size(4) = 24 bytes total
 const RULE_SIZE_BYTES = 16; // attraction(f32), min_radius(f32), max_radius(f32), padding(f32)
+
+// Size ranges for each particle type (multipliers of base size)
+const PARTICLE_TYPE_SIZE_RANGES = [
+    { min: 1.4, max: 1.6 }, // Type 0: Blue   - large, dominant
+    { min: 1.1, max: 1.3 }, // Type 1: Orange - medium-large
+    { min: 0.6, max: 0.8 }, // Type 2: Red    - small, agile
+    { min: 0.8, max: 1.0 }, // Type 3: Purple - smaller, compact
+    { min: 0.9, max: 1.1 }, // Type 4: Green  - medium, balanced
+];
 // SIM_PARAMS_SIZE_BYTES is now imported from particle-life-types.ts
 
 let VIRTUAL_WORLD_BORDER = 0; // No border: virtual world and render world both 2400x2400px. Now a let.
@@ -543,11 +552,12 @@ function createInitialParticles(
         const particleType = Math.floor(Math.random() * numTypes);
         particleViewU32[bufferOffsetU32 + 4] = particleType;
 
-        // Size (f32) - Stored after type -- REVERTED
-        // const sizeRange = typeSizeRanges[particleType];
-        // particleViewF32[bufferOffsetF32 + 5] =
-        //     Math.random() * (sizeRange.max - sizeRange.min) + sizeRange.min;
-        // particleViewU32[bufferOffsetU32 + 5] is padding if PARTICLE_SIZE_BYTES is 24
+        // Size (f32) - Stored after type, varies by particle type
+        const sizeRange = PARTICLE_TYPE_SIZE_RANGES[particleType];
+        const sizeMultiplier =
+            Math.random() * (sizeRange.max - sizeRange.min) + sizeRange.min;
+        particleViewF32[bufferOffsetF32 + 5] =
+            PARTICLE_RENDER_SIZE * sizeMultiplier;
     }
     return particleData;
 }
@@ -914,6 +924,7 @@ async function initWebGPU() {
                         { shaderLocation: 0, offset: 0, format: "float32x2" }, // Particle position (offset 0)
                         { shaderLocation: 1, offset: 8, format: "float32x2" }, // Particle velocity (offset 8)
                         { shaderLocation: 2, offset: 16, format: "uint32" }, // Particle type (offset 16)
+                        { shaderLocation: 3, offset: 20, format: "float32" }, // Particle size (offset 20)
                     ],
                 },
                 {
@@ -921,8 +932,8 @@ async function initWebGPU() {
                     arrayStride: 2 * Float32Array.BYTES_PER_ELEMENT, // vec2f
                     stepMode: "vertex",
                     attributes: [
-                        // Location 3 for quad_pos in vert.wgsl
-                        { shaderLocation: 3, offset: 0, format: "float32x2" },
+                        // Location 4 for quad_pos in vert.wgsl
+                        { shaderLocation: 4, offset: 0, format: "float32x2" },
                     ],
                 },
             ],
