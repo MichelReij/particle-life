@@ -24,7 +24,11 @@ import {
 import { generateParticleColors, logParticleColors } from "./hsluv-colors";
 
 // === Configuration Constants ===
-export const NUM_PARTICLES = 3200;
+// Particle density constants for safe pressure-based scaling
+export const MAX_PARTICLES = 6400; // Maximum particles (buffer allocation size)
+export const MIN_PARTICLES = 1600; // Minimum particles (safety limit)
+export const DEFAULT_PARTICLES = 3200; // Default active particle count
+export const NUM_PARTICLES = MAX_PARTICLES; // Buffer allocation size (for backward compatibility)
 export const NUM_TYPES = 5;
 export const PARTICLE_RENDER_SIZE = 12.0;
 export const PARTICLE_SIZE_BYTES = 24; // pos(8) + vel(8) + type(4) + size(4) = 24 bytes
@@ -226,7 +230,7 @@ export async function initializeParticleLeniaEngine(
     const simParams: SimulationParams = {
         deltaTime: 1 / 60,
         friction: 0.1,
-        numParticles: NUM_PARTICLES,
+        numParticles: DEFAULT_PARTICLES, // Start with default, not max
         numTypes: NUM_TYPES,
         virtualWorldWidth: 2400 + 2 * virtualWorldBorder,
         virtualWorldHeight: 2400 + 2 * virtualWorldBorder,
@@ -341,7 +345,7 @@ export async function initializeParticleLeniaEngine(
 
     // Create particle buffers
     const initialParticleData = createInitialParticles(
-        NUM_PARTICLES,
+        MAX_PARTICLES, // Allocate buffer for maximum particles
         NUM_TYPES,
         simParams.virtualWorldWidth,
         simParams.virtualWorldHeight
@@ -964,7 +968,7 @@ export function renderFrame(engine: ParticleLeniaEngine): void {
         0,
         engine.computeBindGroups[engine.currentParticleBufferIndex]
     );
-    const numWorkgroups = Math.ceil(NUM_PARTICLES / 64);
+    const numWorkgroups = Math.ceil(engine.simParams.numParticles / 64);
     computePass.dispatchWorkgroups(numWorkgroups);
     computePass.end();
 
@@ -1033,7 +1037,7 @@ export function renderFrame(engine: ParticleLeniaEngine): void {
     );
     particlePass.setVertexBuffer(1, engine.quadVertexBuffer);
     particlePass.setBindGroup(0, engine.renderBindGroup);
-    particlePass.draw(4, NUM_PARTICLES, 0, 0);
+    particlePass.draw(4, engine.simParams.numParticles, 0, 0);
     particlePass.end();
 
     // 3. Grid Render Pass
@@ -1180,4 +1184,255 @@ export function destroyEngine(engine: ParticleLeniaEngine): void {
     if (typeof engine.device.destroy === "function") {
         engine.device.destroy();
     }
+}
+
+/**
+ * Initializes newly activated particles when particle count is increased
+ * Ensures particles beyond the previous count have proper positions, velocities, and types
+ */
+function initializeNewParticles(
+    engine: ParticleLeniaEngine,
+    startIndex: number,
+    endIndex: number
+): void {
+    try {
+        const particleCount = endIndex - startIndex;
+        if (particleCount <= 0) return;
+
+        console.log(
+            `🚀 Initializing ${particleCount} new particles (indices ${startIndex} to ${
+                endIndex - 1
+            })`
+        );
+
+        // Create properly initialized particle data for the new particles
+        const newParticleData = new ArrayBuffer(
+            particleCount * PARTICLE_SIZE_BYTES
+        );
+        const particleViewF32 = new Float32Array(newParticleData);
+        const particleViewU32 = new Uint32Array(newParticleData);
+
+        for (let i = 0; i < particleCount; i++) {
+            const bufferOffsetF32 = i * (PARTICLE_SIZE_BYTES / 4);
+            const bufferOffsetU32 = bufferOffsetF32;
+
+            // Position (vec2f) - spawn randomly within virtual world
+            particleViewF32[bufferOffsetF32 + 0] =
+                Math.random() * engine.simParams.virtualWorldWidth;
+            particleViewF32[bufferOffsetF32 + 1] =
+                Math.random() * engine.simParams.virtualWorldHeight;
+
+            // Velocity (vec2f) - small random initial velocity
+            particleViewF32[bufferOffsetF32 + 2] = (Math.random() - 0.5) * 2.0;
+            particleViewF32[bufferOffsetF32 + 3] = (Math.random() - 0.5) * 2.0;
+
+            // Type (u32) - random type for diversity
+            const particleType = Math.floor(Math.random() * NUM_TYPES);
+            particleViewU32[bufferOffsetU32 + 4] = particleType;
+
+            // Size (f32) - varies by particle type
+            const sizeRange = PARTICLE_TYPE_SIZE_RANGES[particleType];
+            const sizeMultiplier =
+                Math.random() * (sizeRange.max - sizeRange.min) + sizeRange.min;
+            particleViewF32[bufferOffsetF32 + 5] =
+                PARTICLE_RENDER_SIZE * sizeMultiplier;
+        }
+
+        // Update both particle buffers with the new particle data
+        const startByteOffset = startIndex * PARTICLE_SIZE_BYTES;
+
+        // Update buffer A
+        engine.device.queue.writeBuffer(
+            engine.particleBuffers[0],
+            startByteOffset,
+            newParticleData
+        );
+
+        // Update buffer B
+        engine.device.queue.writeBuffer(
+            engine.particleBuffers[1],
+            startByteOffset,
+            newParticleData
+        );
+
+        console.log(
+            `✅ Successfully initialized ${particleCount} new particles`
+        );
+    } catch (error) {
+        console.error("💥 Error initializing new particles:", error);
+    }
+}
+
+// === Pressure-Based Particle Density Functions ===
+
+/**
+ * Maps pressure value (0-350) to particle count (MIN_PARTICLES to MAX_PARTICLES)
+ * Uses conservative mapping with extensive safety validation
+ */
+export function pressureToParticleCount(pressure: number): number {
+    try {
+        // Validate input range
+        if (typeof pressure !== "number" || !isFinite(pressure)) {
+            console.warn(
+                `⚠️ Invalid pressure value: ${pressure}, using default`
+            );
+            return DEFAULT_PARTICLES;
+        }
+
+        // Clamp pressure to valid range
+        const clampedPressure = Math.max(0, Math.min(350, pressure));
+        if (clampedPressure !== pressure) {
+            console.warn(
+                `⚠️ Pressure ${pressure} clamped to ${clampedPressure}`
+            );
+        }
+
+        // Map pressure to particle count with conservative scaling
+        // Pressure 0 -> MIN_PARTICLES, Pressure 350 -> MAX_PARTICLES
+        const ratio = clampedPressure / 350;
+        const rawParticleCount =
+            MIN_PARTICLES + (MAX_PARTICLES - MIN_PARTICLES) * ratio;
+
+        // Round to nearest multiple of 64 for optimal GPU workgroup dispatch
+        const particleCount = Math.round(rawParticleCount / 64) * 64;
+
+        // Final safety bounds check
+        const safeParticleCount = Math.max(
+            MIN_PARTICLES,
+            Math.min(MAX_PARTICLES, particleCount)
+        );
+
+        console.log(
+            `🔢 Pressure ${clampedPressure} → ${safeParticleCount} particles`
+        );
+        return safeParticleCount;
+    } catch (error) {
+        console.error("💥 Error in pressureToParticleCount:", error);
+        return DEFAULT_PARTICLES;
+    }
+}
+
+/**
+ * Safely updates the particle count in the simulation with validation and rate limiting
+ */
+export function updateParticleCount(
+    engine: ParticleLeniaEngine,
+    newParticleCount: number
+): boolean {
+    try {
+        // Validate engine state
+        if (!engine || !engine.simParams) {
+            console.error("💥 Invalid engine state for particle count update");
+            return false;
+        }
+
+        // Validate new count
+        if (
+            typeof newParticleCount !== "number" ||
+            !isFinite(newParticleCount)
+        ) {
+            console.error(`💥 Invalid particle count: ${newParticleCount}`);
+            return false;
+        }
+
+        // Safety bounds check
+        const safeCount = Math.max(
+            MIN_PARTICLES,
+            Math.min(MAX_PARTICLES, newParticleCount)
+        );
+        if (safeCount !== newParticleCount) {
+            console.warn(
+                `⚠️ Particle count ${newParticleCount} clamped to ${safeCount}`
+            );
+        }
+
+        const currentCount = engine.simParams.numParticles;
+
+        // Rate limiting: max 50% change per operation
+        const maxChange = Math.floor(currentCount * 0.5);
+        const maxIncrease = currentCount + maxChange;
+        const maxDecrease = currentCount - maxChange;
+
+        let targetCount = safeCount;
+        if (safeCount > maxIncrease) {
+            targetCount = maxIncrease;
+            console.log(
+                `⚡ Rate limited: ${safeCount} → ${targetCount} (max increase)`
+            );
+        } else if (safeCount < maxDecrease) {
+            targetCount = maxDecrease;
+            console.log(
+                `⚡ Rate limited: ${safeCount} → ${targetCount} (max decrease)`
+            );
+        }
+
+        // Round to workgroup boundary
+        targetCount = Math.round(targetCount / 64) * 64;
+        targetCount = Math.max(
+            MIN_PARTICLES,
+            Math.min(MAX_PARTICLES, targetCount)
+        );
+
+        // Skip if no change needed
+        if (targetCount === currentCount) {
+            return true;
+        }
+
+        console.log(
+            `🔄 Updating particle count: ${currentCount} → ${targetCount}`
+        );
+
+        // Update simulation parameters
+        engine.simParams.numParticles = targetCount;
+
+        // CRITICAL FIX: Immediately update the GPU buffer with new numParticles value
+        // This ensures the compute shader uses the updated particle count
+        engine.device.queue.writeBuffer(
+            engine.simParamsBuffer,
+            PARAMETER_OFFSETS.numParticles, // Offset: 2 * 4 = 8 bytes
+            new Uint32Array([targetCount])
+        );
+
+        // If we're increasing particle count, ensure newly activated particles are properly initialized
+        if (targetCount > currentCount) {
+            console.log(
+                `🔄 Initializing particles ${currentCount} to ${
+                    targetCount - 1
+                }`
+            );
+            initializeNewParticles(engine, currentCount, targetCount);
+        }
+
+        console.log(
+            `✅ Particle count updated successfully to ${targetCount} (GPU buffer updated)`
+        );
+        return true;
+    } catch (error) {
+        console.error("💥 Error updating particle count:", error);
+        return false;
+    }
+}
+
+/**
+ * Validates that particle count changes are safe for GPU processing
+ */
+export function validateParticleCountChange(
+    currentCount: number,
+    newCount: number
+): boolean {
+    // Basic validation
+    if (typeof currentCount !== "number" || typeof newCount !== "number")
+        return false;
+    if (!isFinite(currentCount) || !isFinite(newCount)) return false;
+
+    // Bounds check
+    if (newCount < MIN_PARTICLES || newCount > MAX_PARTICLES) return false;
+    if (currentCount < MIN_PARTICLES || currentCount > MAX_PARTICLES)
+        return false;
+
+    // Rate limiting check (50% max change)
+    const maxChange = Math.floor(currentCount * 0.5);
+    if (Math.abs(newCount - currentCount) > maxChange) return false;
+
+    return true;
 }

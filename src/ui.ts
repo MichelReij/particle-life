@@ -2,6 +2,8 @@
 // This module handles all HTML/DOM interactions, slider controls, and localStorage
 
 import { SimulationParams, BoundaryMode } from "./particle-life-types";
+// Import pressure-to-particle mapping for UI display
+import { pressureToParticleCount } from "./particle-lenia";
 
 // Environmental parameters for the UI controls
 let temperature = 20; // Default temperature
@@ -139,12 +141,14 @@ let parameterUpdateCallbacks = {
     updateDriftAndBackground: (value: number) => {},
     updateSimulationParameter: (paramName: string, value: number) => {},
     updateZoom: (level: number, centerX?: number, centerY?: number) => {},
+    updateParticleCount: (pressure: number) => {},
 };
 
 export function setParameterUpdateCallbacks(callbacks: {
     updateDriftAndBackground: (value: number) => void;
     updateSimulationParameter: (paramName: string, value: number) => void;
     updateZoom: (level: number, centerX?: number, centerY?: number) => void;
+    updateParticleCount: (pressure: number) => void;
 }) {
     parameterUpdateCallbacks = callbacks;
 }
@@ -188,6 +192,12 @@ function updateParametersFromPressure(pressure: number): void {
     const newInterTypeRadiusScale = pressureToInterTypeRadiusScale(pressure);
     const newInterTypeAttractionScale =
         pressureToInterTypeAttractionScale(pressure);
+
+    // Update particle density based on pressure (new feature!)
+    parameterUpdateCallbacks.updateParticleCount(pressure);
+
+    // Update particle count display
+    updateParticleCountDisplay(pressure);
 
     // Update parameters using callbacks
     parameterUpdateCallbacks.updateSimulationParameter("rSmooth", newRSmooth);
@@ -268,6 +278,17 @@ function updateSliderDisplay(
     if (slider && display) {
         slider.value = value.toString();
         display.textContent = value.toFixed(precision);
+    }
+}
+
+/**
+ * Updates the particle count display in the UI
+ */
+function updateParticleCountDisplay(pressure: number): void {
+    const particleCountElement = document.getElementById("particleCount");
+    if (particleCountElement) {
+        const particleCount = pressureToParticleCount(pressure);
+        particleCountElement.textContent = particleCount.toString();
     }
 }
 

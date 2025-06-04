@@ -9,6 +9,8 @@ import {
     updateSimulationParameterAuto,
     updateBackgroundColorAndDrift,
     updateZoom,
+    pressureToParticleCount,
+    updateParticleCount,
 } from "./particle-lenia";
 
 import { SimulationParams } from "./particle-life-types";
@@ -58,6 +60,22 @@ async function initializeApplication(): Promise<void> {
             updateZoom: (level: number, centerX?: number, centerY?: number) => {
                 if (engine) {
                     updateZoom(engine, level, centerX, centerY);
+                }
+            },
+            updateParticleCount: (pressure: number) => {
+                if (engine) {
+                    const targetParticleCount =
+                        pressureToParticleCount(pressure);
+                    const success = updateParticleCount(
+                        engine,
+                        targetParticleCount
+                    );
+                    if (!success) {
+                        console.error(
+                            "💥 Failed to update particle count for pressure:",
+                            pressure
+                        );
+                    }
                 }
             },
         });
