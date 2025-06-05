@@ -100,7 +100,7 @@ function temperatureToFriction(temp: number): number {
     return 0.25 * Math.exp(-2.3 * normalizedTemp); // Exponential decay
 }
 
-// Pressure mapping functions
+// Pressure mapping functions - NOW ONLY CONTROLS rSmooth, forceScale, and particle count
 function pressureToRSmooth(pressure: number): number {
     // Non-linear exponential mapping: pressure [0, 350] → rSmooth [20, 0.1]
     // At pressure = 0: rSmooth = 20 (highest resistance)
@@ -114,25 +114,22 @@ function pressureToForceScale(pressure: number): number {
     return 100 + (pressure * 700) / 350;
 }
 
-function pressureToInterTypeRadiusScale(pressure: number): number {
-    // Linear mapping: pressure [0, 350] → interTypeRadiusScale [1.3, 0.50]
-    return 1.3 - (pressure * 0.8) / 350;
+// UV Light mapping functions - NOW CONTROLS ONLY RADIUS SCALE
+function uvToInterTypeRadiusScale(uv: number): number {
+    // Linear mapping: UV [0, 50] → interTypeRadiusScale [0.1, 2.0]
+    // At UV = 0: interTypeRadiusScale = 0.1 (minimum radius)
+    // At UV = 50: interTypeRadiusScale = 2.0 (maximum radius)
+    return 0.1 + (uv / 50.0) * (2.0 - 0.1);
 }
 
-function pressureToInterTypeAttractionScale(pressure: number): number {
-    // Linear mapping: pressure [0, 350] → interTypeAttractionScale [0.8, 2.0]
-    return 0.8 + (pressure * 1.2) / 350;
-}
-
-// UV Light mapping functions
-function uvToLeniaGrowthMu(uv: number): number {
-    // Map UV [0,50] to leniaGrowthMu [0.05, 0.35]
-    return 0.05 + (uv / 50.0) * (0.35 - 0.05);
-}
-
-function uvToLeniaGrowthSigma(uv: number): number {
-    // Map UV [0,50] to leniaGrowthSigma [0.01, 0.05]
-    return 0.01 + (uv / 50.0) * (0.05 - 0.01);
+// Electrical Activity mapping functions - NOW CONTROLS ATTRACTION SCALE
+function electricalActivityToInterTypeAttractionScale(
+    electricalActivity: number
+): number {
+    // Linear mapping: Electrical Activity [0, 2] → interTypeAttractionScale [-2.0, 2.0]
+    // At electricalActivity = 0: interTypeAttractionScale = -2.0 (minimum attraction)
+    // At electricalActivity = 2: interTypeAttractionScale = 2.0 (maximum attraction)
+    return -2.0 + (electricalActivity / 2.0) * (2.0 - -2.0);
 }
 
 // === Parameter Update Callbacks ===
@@ -189,9 +186,14 @@ function updateDriftAndFrictionFromTemperature(temp: number): void {
 function updateParametersFromPressure(pressure: number): void {
     const newRSmooth = pressureToRSmooth(pressure);
     const newForceScale = pressureToForceScale(pressure);
-    const newInterTypeRadiusScale = pressureToInterTypeRadiusScale(pressure);
-    const newInterTypeAttractionScale =
-        pressureToInterTypeAttractionScale(pressure);
+    // REMOVED: Inter-type parameters are now controlled by UV slider
+
+    // Add debug logging to track pressure changes
+    console.log(
+        `🎚️ Pressure slider changed: ${pressure} → particle count will be: ${pressureToParticleCount(
+            pressure
+        )}`
+    );
 
     // Update particle density based on pressure (new feature!)
     parameterUpdateCallbacks.updateParticleCount(pressure);
@@ -199,22 +201,14 @@ function updateParametersFromPressure(pressure: number): void {
     // Update particle count display
     updateParticleCountDisplay(pressure);
 
-    // Update parameters using callbacks
+    // Update parameters using callbacks (REMOVED inter-type parameters)
     parameterUpdateCallbacks.updateSimulationParameter("rSmooth", newRSmooth);
     parameterUpdateCallbacks.updateSimulationParameter(
         "forceScale",
         newForceScale
     );
-    parameterUpdateCallbacks.updateSimulationParameter(
-        "interTypeRadiusScale",
-        newInterTypeRadiusScale
-    );
-    parameterUpdateCallbacks.updateSimulationParameter(
-        "interTypeAttractionScale",
-        newInterTypeAttractionScale
-    );
 
-    // Update UI displays
+    // Update UI displays (REMOVED inter-type parameter displays)
     updateSliderDisplay("rSmoothSlider", "rSmoothValue", newRSmooth, 2);
     updateSliderDisplay(
         "forceScaleSlider",
@@ -222,46 +216,44 @@ function updateParametersFromPressure(pressure: number): void {
         newForceScale,
         2
     );
+}
+
+function updateParametersFromUV(uv: number): void {
+    const newInterTypeRadiusScale = uvToInterTypeRadiusScale(uv);
+
+    // Update inter-type radius scale using callback (UV now only controls radius scale)
+    parameterUpdateCallbacks.updateSimulationParameter(
+        "interTypeRadiusScale",
+        newInterTypeRadiusScale
+    );
+
+    // Update UI display for radius scale
     updateSliderDisplay(
         "interTypeRadiusScaleSlider",
         "interTypeRadiusScaleValue",
         newInterTypeRadiusScale,
         2
     );
+}
+
+function updateParametersFromElectricalActivity(
+    electricalActivity: number
+): void {
+    const newInterTypeAttractionScale =
+        electricalActivityToInterTypeAttractionScale(electricalActivity);
+
+    // Update inter-type attraction scale using callback (Electrical Activity now controls attraction scale)
+    parameterUpdateCallbacks.updateSimulationParameter(
+        "interTypeAttractionScale",
+        newInterTypeAttractionScale
+    );
+
+    // Update UI display for attraction scale
     updateSliderDisplay(
         "interTypeAttractionScaleSlider",
         "interTypeAttractionScaleValue",
         newInterTypeAttractionScale,
         2
-    );
-}
-
-function updateParametersFromUV(uv: number): void {
-    const newLeniaGrowthMu = uvToLeniaGrowthMu(uv);
-    const newLeniaGrowthSigma = uvToLeniaGrowthSigma(uv);
-
-    // Update Lenia Growth parameters using callbacks
-    parameterUpdateCallbacks.updateSimulationParameter(
-        "leniaGrowthMu",
-        newLeniaGrowthMu
-    );
-    parameterUpdateCallbacks.updateSimulationParameter(
-        "leniaGrowthSigma",
-        newLeniaGrowthSigma
-    );
-
-    // Update UI displays
-    updateSliderDisplay(
-        "leniaGrowthMuSlider",
-        "leniaGrowthMuValue",
-        newLeniaGrowthMu,
-        3
-    );
-    updateSliderDisplay(
-        "leniaGrowthSigmaSlider",
-        "leniaGrowthSigmaValue",
-        newLeniaGrowthSigma,
-        3
     );
 }
 
@@ -908,6 +900,9 @@ function initializeEnvironmentalSliders(): void {
         elecSlider.value = electricalActivity.toString();
         elecValueDisplay.textContent = electricalActivity.toFixed(2);
 
+        // Apply initial electrical activity-based parameters on page load
+        updateParametersFromElectricalActivity(electricalActivity);
+
         elecSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
                 (event.target as HTMLInputElement).value
@@ -915,6 +910,7 @@ function initializeEnvironmentalSliders(): void {
             electricalActivity = newValue;
             elecValueDisplay.textContent = newValue.toFixed(2);
             saveToLocalStorage(STORAGE_KEYS.electricalActivity, newValue);
+            updateParametersFromElectricalActivity(newValue);
         });
     }
 

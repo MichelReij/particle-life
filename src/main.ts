@@ -66,6 +66,24 @@ async function initializeApplication(): Promise<void> {
                 if (engine) {
                     const targetParticleCount =
                         pressureToParticleCount(pressure);
+                    const currentParticleCount = engine.simParams.numParticles;
+
+                    console.log(
+                        `🎯 updateParticleCount callback: pressure=${pressure} → target=${targetParticleCount}, current=${currentParticleCount}`
+                    );
+
+                    if (targetParticleCount > currentParticleCount) {
+                        console.log(
+                            `📈 GROW: ${currentParticleCount} → ${targetParticleCount}`
+                        );
+                    } else if (targetParticleCount < currentParticleCount) {
+                        console.log(
+                            `📉 SHRINK: ${currentParticleCount} → ${targetParticleCount}`
+                        );
+                    } else {
+                        console.log(`➡️ NO CHANGE: ${currentParticleCount}`);
+                    }
+
                     const success = updateParticleCount(
                         engine,
                         targetParticleCount
