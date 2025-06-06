@@ -7,7 +7,7 @@ import { pressureToParticleCount } from "./particle-lenia";
 
 // Environmental parameters for the UI controls
 let temperature = 20; // Default temperature
-let electricalActivity = 0.68; // Default electrical activity
+let electricalActivity = 1.02; // Default electrical activity
 let uvLight = 25; // Default UV light
 let pressure = 1; // Default pressure
 
@@ -126,10 +126,10 @@ function uvToInterTypeRadiusScale(uv: number): number {
 function electricalActivityToInterTypeAttractionScale(
     electricalActivity: number
 ): number {
-    // Linear mapping: Electrical Activity [0, 2] → interTypeAttractionScale [-2.0, 2.0]
-    // At electricalActivity = 0: interTypeAttractionScale = -2.0 (minimum attraction)
-    // At electricalActivity = 2: interTypeAttractionScale = 2.0 (maximum attraction)
-    return -2.0 + (electricalActivity / 2.0) * (2.0 - -2.0);
+    // Direct 1:1 mapping: Electrical Activity [0, 3] → interTypeAttractionScale [0, 3]
+    // At electricalActivity = 0: interTypeAttractionScale = 0 (minimum attraction)
+    // At electricalActivity = 3: interTypeAttractionScale = 3 (maximum attraction)
+    return electricalActivity;
 }
 
 // === Parameter Update Callbacks ===

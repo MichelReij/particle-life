@@ -19,8 +19,9 @@ body {
 #Dashboard {
     display              : grid;
     grid-template-columns: max-content 1fr 1fr 1fr 1fr max-content;
-    grid-template-areas  : "zoom canvas canvas canvas canvas joystick"
-        "fps temp pres uv elec tbd";
+    grid-template-areas  :
+        "zoom canvas canvas canvas canvas joystick"
+        " fps  temp   pres    uv    elec    tbd   ";
     column-gap      : 3rem;
     row-gap         : 2rem;
     color           : #dddddd;
@@ -31,7 +32,7 @@ body {
     box-shadow      : 1rem 1rem 2rem rgba(0, 0, 0, 0.5);
     height          : max-content;
 
-    .vertical-slider-container {
+    .slider-container {
         display        : flex;
         flex-direction : column;
         align-items    : center;
@@ -45,10 +46,16 @@ body {
         }
 
         input[type="range"] {
-            writing-mode : vertical-lr;
-            direction    : rtl; // Makes the slider go from bottom (low) to top (high)
-            width        : 20px;
-            height       : 200px;
+
+            &.vertical-slider {
+                writing-mode: vertical-lr;
+                direction   : rtl; // Makes the slider go from bottom (low) to top (high)
+                width       : 20px;
+                height      : 200px;
+            }
+
+            width        : 200px;
+            height       : 20px;
             background   : #999;
             outline      : none;
             opacity      : 0.8;
@@ -151,6 +158,14 @@ body {
             content: " MJ/m²/day";
         }
     }
+
+    // #pH {
+    //     grid-area: ph;
+
+    //     #phValue::after {
+    //         content: " pH";
+    //     }
+    // }
 
     #canvasContainer {
         grid-area: canvas;
