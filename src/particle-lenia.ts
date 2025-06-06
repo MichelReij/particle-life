@@ -22,6 +22,7 @@ import {
     BoundaryMode,
 } from "./particle-life-types";
 import { generateParticleColors, logParticleColors } from "./hsluv-colors";
+import { updateFPS } from "./ui";
 
 // === Configuration Constants ===
 // Particle density constants for safe pressure-based scaling
@@ -961,6 +962,9 @@ export function renderFrame(engine: ParticleLeniaEngine): void {
     if (dt === 0 || dt > 0.1) {
         dt = 1 / 60; // Assume 60 FPS
     }
+
+    // Update FPS display
+    updateFPS(dt);
 
     engine.simParams.deltaTime = dt;
     engine.currentTime += dt;

@@ -126,10 +126,16 @@ function uvToInterTypeRadiusScale(uv: number): number {
 function electricalActivityToInterTypeAttractionScale(
     electricalActivity: number
 ): number {
-    // Direct 1:1 mapping: Electrical Activity [0, 3] → interTypeAttractionScale [0, 3]
-    // At electricalActivity = 0: interTypeAttractionScale = 0 (minimum attraction)
-    // At electricalActivity = 3: interTypeAttractionScale = 3 (maximum attraction)
-    return electricalActivity;
+    // Non-linear cubic mapping: Electrical Activity [0, 3] → interTypeAttractionScale [0, 3]
+    // This creates a very pronounced acceleration curve where:
+    // - Low electrical activity has very minimal effect on attraction
+    // - Medium electrical activity has moderate effect
+    // - High electrical activity has extremely dramatic effect on attraction
+    // Formula: ITAS = (electricalActivity/3)³ × 3
+    const normalizedElectrical = electricalActivity / 3.0; // Normalize to [0, 1]
+    const cubicValue =
+        normalizedElectrical * normalizedElectrical * normalizedElectrical; // Cube for strong non-linearity
+    return cubicValue * 3.0; // Scale back to [0, 3]
 }
 
 // === Parameter Update Callbacks ===
@@ -444,7 +450,7 @@ export function updateFPS(deltaTime: number): void {
         }
 
         if (fpsDisplayElement) {
-            fpsDisplayElement.textContent = `FPS: ${fps}`;
+            fpsDisplayElement.textContent = `${fps}`;
         }
 
         frameCount = 0;

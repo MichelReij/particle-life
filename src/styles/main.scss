@@ -159,13 +159,7 @@ body {
         }
     }
 
-    // #pH {
-    //     grid-area: ph;
 
-    //     #phValue::after {
-    //         content: " pH";
-    //     }
-    // }
 
     #canvasContainer {
         grid-area: canvas;
@@ -181,10 +175,16 @@ body {
     }
 
     #fpsDisplay {
+        grid-area  : fps;
         color      : #E3C463;
         font-family: Arial, sans-serif;
         font-size  : large;
         font-weight: 700;
+
+        &::after {
+            content: " FPS";
+            color  : var(--primary-color);
+        }
     }
 
 
