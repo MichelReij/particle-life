@@ -40,7 +40,7 @@ async function initializeApplication(): Promise<void> {
         setParameterUpdateCallbacks({
             updateDriftAndBackground: (value: number) => {
                 if (engine) {
-                    updateSimulationParameter(engine, 'driftXPerSecond', value);
+                    updateSimulationParameter(engine, "driftXPerSecond", value);
                     // TODO: Add background color update based on drift
                 }
             },
@@ -75,7 +75,7 @@ async function main(): Promise<void> {
         await initializeApplication();
     } catch (error) {
         console.error("Application startup failed:", error);
-        
+
         // Show error message to user
         const canvasContainer = document.getElementById("canvasContainer");
         if (canvasContainer) {
@@ -83,7 +83,9 @@ async function main(): Promise<void> {
                 <div style="color: red; text-align: center; padding: 20px; border: 1px solid red; border-radius: 5px;">
                     <h3>Failed to Initialize WebGPU</h3>
                     <p>Your browser may not support WebGPU, or there was an error initializing the graphics context.</p>
-                    <p>Error: ${error instanceof Error ? error.message : String(error)}</p>
+                    <p>Error: ${
+                        error instanceof Error ? error.message : String(error)
+                    }</p>
                 </div>
             `;
         }
@@ -199,16 +201,16 @@ function temperatureToDrift(temp: number): number {
 }
 
 function temperatureToFriction(temp: number): number {
-    // Non-linear exponential mapping: temp [3, 40] → friction [0.50, 0.005]
-    // At temp = 3°C: friction = 0.50 (highest)
-    // At temp = 40°C: friction = 0.005 (lowest)
+    // Non-linear exponential mapping: temp [3, 40] → friction [0.98, 0.05]
+    // At temp = 3°C: friction = 0.98 (highest, near total fixation)
+    // At temp = 40°C: friction = 0.05 (lowest)
 
     // Normalize temperature to [0, 1] range
     const normalizedTemp = (temp - 3) / (40 - 3);
 
-    // Exponential decay: friction = 0.5 * exp(-4.6 * normalizedTemp)
-    // The factor -4.6 gives us: exp(-4.6 * 1) ≈ 0.01, so 0.5 * 0.01 = 0.005
-    return 0.5 * Math.exp(-4.6 * normalizedTemp);
+    // Exponential decay: friction = 0.98 * exp(-3.0 * normalizedTemp)
+    // The factor -3.0 gives us: exp(-3.0 * 1) ≈ 0.0498, so 0.98 * 0.0498 ≈ 0.049
+    return 0.98 * Math.exp(-3.0 * normalizedTemp);
 }
 
 function updateDriftAndFrictionFromTemperature(temp: number): void {
