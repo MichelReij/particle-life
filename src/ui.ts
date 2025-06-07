@@ -93,11 +93,11 @@ function temperatureToDrift(temp: number): number {
 }
 
 function temperatureToFriction(temp: number): number {
-    // Exponential mapping: temp [3, 40] → friction [0.25, 0.05]
-    // At temp = 3°C: friction = 0.25 (highest resistance)
+    // Exponential mapping: temp [3, 40] → friction [1.0, 0.05]
+    // At temp = 3°C: friction = 1.0 (highest resistance)
     // At temp = 40°C: friction = 0.05 (lowest resistance)
     const normalizedTemp = (temp - 3) / 37; // Normalize to [0, 1]
-    return 0.25 * Math.exp(-2.3 * normalizedTemp); // Exponential decay
+    return 1.0 * Math.exp(-2.3 * normalizedTemp); // Exponential decay
 }
 
 // Pressure mapping functions - NOW ONLY CONTROLS rSmooth, forceScale, and particle count

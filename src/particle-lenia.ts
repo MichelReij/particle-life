@@ -104,6 +104,7 @@ interface ParticleTransition {
     duration: number; // in seconds
     type: "grow" | "shrink";
     targetSizes: Float32Array; // Target sizes for each particle
+    needsPostComputeFinalization?: boolean; // For grow transitions that need post-compute completion
 }
 
 // Track active particle transitions
@@ -112,6 +113,45 @@ const TRANSITION_DURATION = 1.5; // 1.5 seconds for smooth transitions
 
 // Track the actual GPU particle count during transitions
 let gpuParticleCount: number = 0;
+
+/**
+ * Cancels any existing transitions that overlap with the specified particle range
+ * This prevents interference when quickly changing pressure up/down
+ */
+function cancelOverlappingTransitions(
+    startIndex: number,
+    endIndex: number
+): void {
+    const indicesToRemove: number[] = [];
+
+    for (let i = 0; i < activeTransitions.length; i++) {
+        const transition = activeTransitions[i];
+
+        // Check if ranges overlap
+        // Two ranges [a,b] and [c,d] overlap if: max(a,c) < min(b,d)
+        const overlapStart = Math.max(transition.startIndex, startIndex);
+        const overlapEnd = Math.min(transition.endIndex, endIndex);
+
+        if (overlapStart < overlapEnd) {
+            // Ranges overlap - cancel this transition
+            console.log(
+                `🚫 Cancelling overlapping ${transition.type} transition for particles ${transition.startIndex}-${transition.endIndex} (conflicts with new range ${startIndex}-${endIndex})`
+            );
+            indicesToRemove.push(i);
+        }
+    }
+
+    // Remove overlapping transitions (in reverse order to avoid index issues)
+    for (let i = indicesToRemove.length - 1; i >= 0; i--) {
+        activeTransitions.splice(indicesToRemove[i], 1);
+    }
+
+    if (indicesToRemove.length > 0) {
+        console.log(
+            `🧹 Cancelled ${indicesToRemove.length} overlapping transitions, ${activeTransitions.length} remain active`
+        );
+    }
+}
 
 // === Core Functions ===
 
@@ -982,11 +1022,22 @@ export function renderFrame(engine: ParticleLeniaEngine): void {
         new Float32Array([engine.simParams.time])
     );
 
+    // Update particle transitions BEFORE compute pass and ensure GPU writes are flushed
+    // CRITICAL: We need to update particle sizes before the compute shader runs, but ensure
+    // that the GPU buffer writes are properly synchronized.
+    updateParticleTransitions(engine);
+
+    // Force GPU queue submission to ensure transition buffer writes complete before compute shader
+    const transitionCommandEncoder = engine.device.createCommandEncoder({
+        label: "Transition Buffer Sync",
+    });
+    engine.device.queue.submit([transitionCommandEncoder.finish()]);
+
     const commandEncoder = engine.device.createCommandEncoder({
         label: "Particle Life Frame Encoder",
     });
 
-    // Compute Pass - MUST run before updateParticleTransitions
+    // Compute Pass - now runs after transition updates are guaranteed to be flushed
     const computePass = commandEncoder.beginComputePass({
         label: "Particle Compute Pass",
     });
@@ -1000,13 +1051,11 @@ export function renderFrame(engine: ParticleLeniaEngine): void {
     computePass.dispatchWorkgroups(numWorkgroups);
     computePass.end();
 
-    // Update particle transitions AFTER compute pass to prevent compute shader from overwriting our size changes
-    // CRITICAL: The compute shader copies the entire particle struct (including size) from input to output,
-    // so any size modifications we make before the compute pass will be lost. We must update sizes after
-    // the compute shader has finished processing to ensure our transitions are actually visible.
-    updateParticleTransitions(engine);
+    // CRITICAL: Handle any completed grow transitions IMMEDIATELY after compute pass
+    // This ensures final sizes are written to the correct buffers before buffer swap
+    finalizePostComputeTransitions(engine);
 
-    // Render Passes
+    // Render Passes - compute shader has naturally copied all particle data including correct sizes
     const sceneTextureView = engine.sceneTexture.createView();
 
     // 1. Background Render Pass
@@ -1144,6 +1193,79 @@ export function renderFrame(engine: ParticleLeniaEngine): void {
 }
 
 /**
+ * Handles post-compute finalization of grow transitions
+ * This runs AFTER the compute shader to prevent size override issues
+ */
+function finalizePostComputeTransitions(engine: ParticleLeniaEngine): void {
+    const transitionsToFinalize: number[] = [];
+
+    for (let i = 0; i < activeTransitions.length; i++) {
+        const transition = activeTransitions[i];
+
+        if (transition.needsPostComputeFinalization) {
+            const particleCount = transition.endIndex - transition.startIndex;
+
+            console.log(
+                `🌱 Post-compute finalizing grow transition for ${particleCount} particles`
+            );
+
+            // CRITICAL: Ensure particle counts are consistent before finalizing sizes
+            const expectedMaxIndex = transition.endIndex;
+            if (engine.simParams.numParticles < expectedMaxIndex) {
+                console.warn(
+                    `⚠️ Post-compute grow completion: engine.numParticles (${engine.simParams.numParticles}) < expectedMaxIndex (${expectedMaxIndex}), fixing...`
+                );
+                engine.simParams.numParticles = expectedMaxIndex;
+                engine.device.queue.writeBuffer(
+                    engine.simParamsBuffer,
+                    PARAMETER_OFFSETS.numParticles,
+                    new Uint32Array([expectedMaxIndex])
+                );
+            }
+            if (gpuParticleCount < expectedMaxIndex) {
+                console.warn(
+                    `⚠️ Post-compute grow completion: gpuParticleCount (${gpuParticleCount}) < expectedMaxIndex (${expectedMaxIndex}), fixing...`
+                );
+                gpuParticleCount = expectedMaxIndex;
+            }
+
+            // Write final sizes to the OUTPUT buffer (the one compute shader just wrote to)
+            // This ensures our size updates don't get overridden by the next compute pass
+            const outputBufferIndex = 1 - engine.currentParticleBufferIndex;
+
+            for (let j = 0; j < particleCount; j++) {
+                const particleIndex = transition.startIndex + j;
+                const targetSize = transition.targetSizes[j];
+                const sizeOffset = particleIndex * PARTICLE_SIZE_BYTES + 20;
+
+                engine.device.queue.writeBuffer(
+                    engine.particleBuffers[outputBufferIndex],
+                    sizeOffset,
+                    new Float32Array([targetSize])
+                );
+            }
+
+            console.log(
+                `✅ Post-compute grow transition finalized: ${particleCount} particles now visible with proper sizes (output buffer updated)`
+            );
+
+            transitionsToFinalize.push(i);
+        }
+    }
+
+    // Remove finalized transitions (in reverse order to avoid index issues)
+    for (let i = transitionsToFinalize.length - 1; i >= 0; i--) {
+        activeTransitions.splice(transitionsToFinalize[i], 1);
+    }
+
+    if (transitionsToFinalize.length > 0) {
+        console.log(
+            `🧹 Finalized ${transitionsToFinalize.length} post-compute transitions, ${activeTransitions.length} remain active`
+        );
+    }
+}
+
+/**
  * Updates active particle transitions (grow/shrink animations)
  * Handles smooth size changes over time and cleans up completed transitions
  */
@@ -1172,9 +1294,10 @@ function updateParticleTransitions(engine: ParticleLeniaEngine): void {
                 const startingSize = transition.targetSizes[j];
                 sizeUpdates[j] = startingSize * (1.0 - progress);
             }
-        }
-
-        // Update particle sizes in both buffers
+        } // Update particle sizes in both buffers to ensure visibility
+        // CRITICAL: We write to both buffers to ensure that:
+        // 1. The current frame renders the updated sizes
+        // 2. The next frame's compute shader reads the updated sizes as input
         for (let bufferIndex = 0; bufferIndex < 2; bufferIndex++) {
             for (let j = 0; j < particleCount; j++) {
                 const particleIndex = transition.startIndex + j;
@@ -1201,19 +1324,106 @@ function updateParticleTransitions(engine: ParticleLeniaEngine): void {
             // Handle completion based on transition type
             if (transition.type === "shrink") {
                 console.log(
-                    `🍂 Shrink transition complete - scheduling off-screen repositioning and GPU count update`
+                    `🍂 Shrink transition complete - final cleanup with delayed GPU count update`
                 );
 
-                // Reposition particles off-screen as safety measure
-                repositionParticlesOffScreen(engine, transition);
+                // Apply final zero sizes immediately to both buffers - NO position changes yet
+                for (let bufferIndex = 0; bufferIndex < 2; bufferIndex++) {
+                    for (let j = 0; j < particleCount; j++) {
+                        const particleIndex = transition.startIndex + j;
 
-                // Update GPU particle count to the new (lower) count
-                // This is when we finally reduce the GPU particle count after the visual transition
-                gpuParticleCount = engine.simParams.numParticles;
+                        // Set size to absolute zero - particles become invisible at current position
+                        const sizeOffset =
+                            particleIndex * PARTICLE_SIZE_BYTES + 20;
+                        engine.device.queue.writeBuffer(
+                            engine.particleBuffers[bufferIndex],
+                            sizeOffset,
+                            new Float32Array([0.0])
+                        );
+
+                        // DON'T move particles off-screen yet - let them become invisible first
+                        // Moving position might cause the visual "pop" even with size=0
+                    }
+                }
+
+                // CRITICAL: Multi-step cleanup to prevent any visual discontinuity
+                // Step 1: Particles are now size=0 but still at their original positions
+                // Step 2: Wait for size changes to propagate through compute shader
+                // Step 3: Then update both engine and GPU count to stop rendering them entirely
+                requestAnimationFrame(() => {
+                    // Now update engine.simParams.numParticles to the final target count
+                    const targetCount = transition.startIndex; // The new lower count
+                    engine.simParams.numParticles = targetCount;
+                    engine.device.queue.writeBuffer(
+                        engine.simParamsBuffer,
+                        PARAMETER_OFFSETS.numParticles,
+                        new Uint32Array([targetCount])
+                    );
+
+                    // Also update GPU particle count for rendering
+                    gpuParticleCount = targetCount;
+                    console.log(
+                        `📉 Both engine and GPU particle counts updated: ${transition.endIndex} → ${targetCount} (after shrink transition)`
+                    );
+
+                    // Step 4: AFTER stopping rendering, move particles off-screen as cleanup
+                    // This prevents any potential issues but won't cause visual artifacts since they're not rendered
+                    setTimeout(() => {
+                        for (
+                            let bufferIndex = 0;
+                            bufferIndex < 2;
+                            bufferIndex++
+                        ) {
+                            for (let j = 0; j < particleCount; j++) {
+                                const particleIndex = transition.startIndex + j;
+                                const positionOffset =
+                                    particleIndex * PARTICLE_SIZE_BYTES + 0;
+                                engine.device.queue.writeBuffer(
+                                    engine.particleBuffers[bufferIndex],
+                                    positionOffset,
+                                    new Float32Array([-10000.0, -10000.0])
+                                );
+                            }
+                        }
+                        console.log(
+                            `🧹 Moved ${particleCount} particles off-screen after count update`
+                        );
+                    }, 50); // Small delay to ensure count update has taken effect
+                });
+            } else if (transition.type === "grow") {
+                console.log(
+                    `🌱 Grow transition complete - applying final sizes to input buffer and marking for post-compute finalization`
+                );
+                console.log(
+                    `📊 Grow completion debug: particleCount=${particleCount}, startIndex=${transition.startIndex}, endIndex=${transition.endIndex}, engine.numParticles=${engine.simParams.numParticles}, gpuParticleCount=${gpuParticleCount}`
+                );
+
+                // CRITICAL: Write final sizes to INPUT buffer immediately (for current frame rendering)
+                // Post-compute will handle the OUTPUT buffer after compute shader runs
+                const inputBufferIndex = engine.currentParticleBufferIndex;
+
+                for (let j = 0; j < particleCount; j++) {
+                    const particleIndex = transition.startIndex + j;
+                    const targetSize = transition.targetSizes[j];
+                    const sizeOffset = particleIndex * PARTICLE_SIZE_BYTES + 20;
+
+                    engine.device.queue.writeBuffer(
+                        engine.particleBuffers[inputBufferIndex],
+                        sizeOffset,
+                        new Float32Array([targetSize])
+                    );
+                }
+
+                // Mark this transition for post-compute finalization
+                // This ensures the final sizes are written to the OUTPUT buffer after compute shader runs
+                transition.needsPostComputeFinalization = true;
 
                 console.log(
-                    `📉 Updated GPU particle count from ${transition.endIndex} to ${gpuParticleCount} after shrink completion`
+                    `✅ Grow transition final sizes applied to input buffer and marked for post-compute finalization: ${particleCount} particles`
                 );
+
+                // DON'T add to completedTransitions yet - will be handled after compute pass
+                continue; // Skip adding to completedTransitions array
             }
 
             completedTransitions.push(i);
@@ -1455,6 +1665,9 @@ function initializeNewParticlesWithTransition(
             newParticleData
         );
 
+        // Cancel any existing transitions that overlap with this particle range
+        cancelOverlappingTransitions(startIndex, endIndex);
+
         // Add transition to active list
         activeTransitions.push({
             startIndex,
@@ -1572,6 +1785,9 @@ async function startParticleShrinkTransition(
 
         // Read current particle sizes from the GPU buffer
         await readParticleSizesFromGPU(engine, newCount, oldCount, targetSizes);
+
+        // Cancel any existing transitions that overlap with this particle range
+        cancelOverlappingTransitions(newCount, oldCount);
 
         // Add transition to active list
         activeTransitions.push({
@@ -1746,12 +1962,11 @@ export function updateParticleCount(
                 validatedCount
             );
         } else if (validatedCount < currentCount) {
-            // Decreasing particles - start shrink transition but KEEP original count in GPU for now
-            engine.simParams.numParticles = validatedCount; // Update engine params
-            // Keep original count in GPU so particles remain visible during shrink
-            gpuParticleCount = currentCount; // Explicitly maintain higher count until transition completes
+            // Decreasing particles - KEEP original count in both engine and GPU during transition
+            // DO NOT update engine.simParams.numParticles yet - this would cause immediate invisibility in compute shader
+            gpuParticleCount = currentCount; // Keep higher count until transition completes
             console.log(
-                `🍂 Starting particle decrease: engine=${validatedCount}, gpu=${gpuParticleCount} (keeping ${currentCount} visible during shrink)`
+                `🍂 Starting particle decrease: keeping engine=${currentCount}, gpu=${gpuParticleCount} during shrink (target: ${validatedCount})`
             );
             // Start async shrink transition with proper error handling
             startParticleShrinkTransition(

@@ -182,8 +182,9 @@ body {
         font-weight: 700;
 
         &::after {
-            content: " FPS";
-            color  : var(--primary-color);
+            content    : " fps";
+            color      : var(--primary-color);
+            font-weight: normal;
         }
     }
 
