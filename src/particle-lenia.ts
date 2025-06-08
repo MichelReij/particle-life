@@ -13,6 +13,8 @@ import gridFragWGSL from "./shaders/grid_frag.wgsl?raw";
 import zoomFragWGSL from "./shaders/zoom_frag.wgsl?raw";
 import lightningVertWGSL from "./shaders/lightning_vert.wgsl?raw";
 import lightningFragWGSL from "./shaders/lightning_frag.wgsl?raw";
+import lightningComputeWGSL from "./shaders/lightning_compute.wgsl?raw";
+import lightningFragBufferWGSL from "./shaders/lightning_frag_buffer.wgsl?raw";
 
 import { hsluvToRgb } from "hsluv-ts";
 import {
@@ -37,6 +39,12 @@ export const PARTICLE_RENDER_SIZE = 12.0;
 export const PARTICLE_SIZE_BYTES = 24; // pos(8) + vel(8) + type(4) + size(4) = 24 bytes
 export const RULE_SIZE_BYTES = 16; // attraction(f32), min_radius(f32), max_radius(f32), padding(f32)
 
+// Lightning buffer constants
+export const MAX_LIGHTNING_SEGMENTS = 30; // Maximum segments per bolt
+export const MAX_LIGHTNING_BOLTS = 4; // Maximum concurrent bolts
+export const LIGHTNING_SEGMENT_SIZE_BYTES = 32; // startPos(8) + endPos(8) + thickness(4) + alpha(4) + generation(4) + appearTime(4) + isVisible(4) + padding(4)
+export const LIGHTNING_BOLT_SIZE_BYTES = 16; // numSegments(4) + flashId(4) + startTime(4) + padding(4)
+
 // Size ranges for each particle type (multipliers of base size)
 export const PARTICLE_TYPE_SIZE_RANGES = [
     { min: 1.4, max: 1.6 }, // Type 0: Blue   - large, dominant
@@ -59,9 +67,12 @@ export interface ParticleLeniaEngine {
     quadVertexBuffer: GPUBuffer;
     particleColorsBuffer: GPUBuffer;
     zoomUniformsBuffer: GPUBuffer;
+    lightningSegmentsBuffer: GPUBuffer;
+    lightningBoltsBuffer: GPUBuffer;
 
     // Pipelines and Bind Groups
     computePipeline: GPUComputePipeline;
+    lightningComputePipeline: GPUComputePipeline;
     renderPipeline: GPURenderPipeline;
     backgroundRenderPipeline: GPURenderPipeline;
     vignetteRenderPipeline: GPURenderPipeline;
@@ -72,6 +83,7 @@ export interface ParticleLeniaEngine {
 
     // Bind Groups
     computeBindGroups: [GPUBindGroup, GPUBindGroup];
+    lightningComputeBindGroup: GPUBindGroup;
     renderBindGroup: GPUBindGroup;
     backgroundRenderBindGroup: GPUBindGroup;
     vignetteRenderBindGroup: GPUBindGroup;
@@ -117,6 +129,13 @@ const TRANSITION_DURATION = 1.5; // 1.5 seconds for smooth transitions
 
 // Track the actual GPU particle count during transitions
 let gpuParticleCount: number = 0;
+
+// === Automatic Rate Limit Continuation System ===
+// Track the original target count when rate limiting is applied
+let rateLimitTargetCount: number | null = null;
+let rateLimitLastAttemptTime: number = 0;
+const RATE_LIMIT_CONTINUATION_DELAY = 1000; // Wait 1 second between continuation attempts
+let isRateLimitContinuation: boolean = false; // Flag to prevent infinite loops during automatic continuation
 
 /**
  * Cancels any existing transitions that overlap with the specified particle range
@@ -316,9 +335,9 @@ export async function initializeParticleLeniaEngine(
         leniaGrowthMu: 0.18,
         leniaGrowthSigma: 0.025,
         leniaKernelRadius: 75.0,
-        lightningFrequency: 1.0, // 1 strike per second for highly visible testing
+        lightningFrequency: 0.7, // 0.7 strikes per second (slightly less frequent but still highly visible)
         lightningIntensity: 1.0, // 100% intensity
-        lightningDuration: 0.5, // 0.5 second flash duration (faster lightning)
+        lightningDuration: 0.6, // 0.6 second flash duration (slightly longer for better electromagnetic visibility)
     };
 
     // Create simulation parameters buffer
@@ -497,6 +516,31 @@ export async function initializeParticleLeniaEngine(
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
+    // Create lightning buffers
+    const lightningSegmentsBuffer = device.createBuffer({
+        label: "Lightning Segments Buffer",
+        size: MAX_LIGHTNING_SEGMENTS * LIGHTNING_SEGMENT_SIZE_BYTES,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+
+    const lightningBoltsBuffer = device.createBuffer({
+        label: "Lightning Bolts Buffer",
+        size: MAX_LIGHTNING_BOLTS * LIGHTNING_BOLT_SIZE_BYTES,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+
+    // Initialize lightning buffers with empty data
+    device.queue.writeBuffer(
+        lightningSegmentsBuffer,
+        0,
+        new ArrayBuffer(MAX_LIGHTNING_SEGMENTS * LIGHTNING_SEGMENT_SIZE_BYTES)
+    );
+    device.queue.writeBuffer(
+        lightningBoltsBuffer,
+        0,
+        new ArrayBuffer(MAX_LIGHTNING_BOLTS * LIGHTNING_BOLT_SIZE_BYTES)
+    );
+
     const initialZoomLevel = 1.5;
     const initialZoomCenterX = 1200.0;
     const initialZoomCenterY = 1200.0;
@@ -544,7 +588,7 @@ export async function initializeParticleLeniaEngine(
         code: lightningVertWGSL,
     });
     const lightningShaderModuleFrag = device.createShaderModule({
-        code: lightningFragWGSL,
+        code: lightningFragBufferWGSL, // Use new buffer-based lightning fragment shader
     });
 
     // Create compute pipeline
@@ -553,6 +597,21 @@ export async function initializeParticleLeniaEngine(
         layout: "auto",
         compute: {
             module: computeShaderModule,
+            entryPoint: "main",
+        },
+    });
+
+    // Create lightning compute shader module and pipeline
+    const lightningComputeShaderModule = device.createShaderModule({
+        label: "Lightning Compute Shader",
+        code: lightningComputeWGSL,
+    });
+
+    const lightningComputePipeline = device.createComputePipeline({
+        label: "Lightning Compute Pipeline",
+        layout: "auto",
+        compute: {
+            module: lightningComputeShaderModule,
             entryPoint: "main",
         },
     });
@@ -789,10 +848,31 @@ export async function initializeParticleLeniaEngine(
         primitive: { topology: "triangle-list" },
     });
 
+    // Create lightning render bind group layout with buffers
+    const lightningRenderBindGroupLayout = device.createBindGroupLayout({
+        entries: [
+            {
+                binding: 0,
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "uniform" }, // sim params
+            },
+            {
+                binding: 1,
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "read-only-storage" }, // lightning segments
+            },
+            {
+                binding: 2,
+                visibility: GPUShaderStage.FRAGMENT,
+                buffer: { type: "read-only-storage" }, // lightning bolts
+            },
+        ],
+    });
+
     const lightningRenderPipeline = device.createRenderPipeline({
         label: "Lightning Render Pipeline",
         layout: device.createPipelineLayout({
-            bindGroupLayouts: [simParamsBindGroupLayout],
+            bindGroupLayouts: [lightningRenderBindGroupLayout],
         }),
         vertex: { module: lightningShaderModuleVert, entryPoint: "main" },
         fragment: {
@@ -829,6 +909,8 @@ export async function initializeParticleLeniaEngine(
                 { binding: 1, resource: { buffer: rulesBuffer } },
                 { binding: 2, resource: { buffer: simParamsBuffer } },
                 { binding: 3, resource: { buffer: particleBuffers[1] } },
+                { binding: 4, resource: { buffer: lightningSegmentsBuffer } },
+                { binding: 5, resource: { buffer: lightningBoltsBuffer } },
             ],
         }),
         device.createBindGroup({
@@ -839,9 +921,22 @@ export async function initializeParticleLeniaEngine(
                 { binding: 1, resource: { buffer: rulesBuffer } },
                 { binding: 2, resource: { buffer: simParamsBuffer } },
                 { binding: 3, resource: { buffer: particleBuffers[0] } },
+                { binding: 4, resource: { buffer: lightningSegmentsBuffer } },
+                { binding: 5, resource: { buffer: lightningBoltsBuffer } },
             ],
         }),
     ];
+
+    // Create lightning compute bind group
+    const lightningComputeBindGroup = device.createBindGroup({
+        label: "Lightning Compute Bind Group",
+        layout: lightningComputePipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: simParamsBuffer } },
+            { binding: 1, resource: { buffer: lightningSegmentsBuffer } },
+            { binding: 2, resource: { buffer: lightningBoltsBuffer } },
+        ],
+    });
 
     const renderBindGroup = device.createBindGroup({
         label: "Render BindGroup",
@@ -896,8 +991,12 @@ export async function initializeParticleLeniaEngine(
 
     const lightningRenderBindGroup = device.createBindGroup({
         label: "Lightning Render Bind Group",
-        layout: simParamsBindGroupLayout,
-        entries: [{ binding: 0, resource: { buffer: simParamsBuffer } }],
+        layout: lightningRenderBindGroupLayout,
+        entries: [
+            { binding: 0, resource: { buffer: simParamsBuffer } },
+            { binding: 1, resource: { buffer: lightningSegmentsBuffer } },
+            { binding: 2, resource: { buffer: lightningBoltsBuffer } },
+        ],
     });
 
     // Return the complete engine instance
@@ -911,7 +1010,10 @@ export async function initializeParticleLeniaEngine(
         quadVertexBuffer,
         particleColorsBuffer,
         zoomUniformsBuffer,
+        lightningSegmentsBuffer,
+        lightningBoltsBuffer,
         computePipeline,
+        lightningComputePipeline,
         renderPipeline,
         backgroundRenderPipeline,
         vignetteRenderPipeline,
@@ -920,6 +1022,7 @@ export async function initializeParticleLeniaEngine(
         zoomRenderPipeline,
         lightningRenderPipeline,
         computeBindGroups,
+        lightningComputeBindGroup,
         renderBindGroup,
         backgroundRenderBindGroup,
         vignetteRenderBindGroup,
@@ -1106,6 +1209,9 @@ export function renderFrame(engine: ParticleLeniaEngine): void {
     // that the GPU buffer writes are properly synchronized.
     updateParticleTransitions(engine);
 
+    // Check for and handle automatic rate limit continuation
+    handleRateLimitContinuation(engine);
+
     // Force GPU queue submission to ensure transition buffer writes complete before compute shader
     const transitionCommandEncoder = engine.device.createCommandEncoder({
         label: "Transition Buffer Sync",
@@ -1116,7 +1222,16 @@ export function renderFrame(engine: ParticleLeniaEngine): void {
         label: "Particle Life Frame Encoder",
     });
 
-    // Compute Pass - now runs after transition updates are guaranteed to be flushed
+    // Lightning Compute Pass - FIRST to generate lightning data for both physics and rendering
+    const lightningComputePass = commandEncoder.beginComputePass({
+        label: "Lightning Compute Pass",
+    });
+    lightningComputePass.setPipeline(engine.lightningComputePipeline);
+    lightningComputePass.setBindGroup(0, engine.lightningComputeBindGroup);
+    lightningComputePass.dispatchWorkgroups(1); // Single workgroup for lightning generation
+    lightningComputePass.end();
+
+    // Compute Pass - now runs after lightning data is generated
     const computePass = commandEncoder.beginComputePass({
         label: "Particle Compute Pass",
     });
@@ -1616,6 +1731,8 @@ export function destroyEngine(engine: ParticleLeniaEngine): void {
     engine.quadVertexBuffer.destroy();
     engine.particleColorsBuffer.destroy();
     engine.zoomUniformsBuffer.destroy();
+    engine.lightningSegmentsBuffer.destroy();
+    engine.lightningBoltsBuffer.destroy();
     engine.sceneTexture.destroy();
     engine.intermediateTexture.destroy();
 
@@ -1977,13 +2094,75 @@ export function pressureToParticleCount(pressure: number): number {
 }
 
 /**
+ * Checks for and handles automatic continuation of rate-limited particle count changes
+ * Called every frame to gradually reach the original target count
+ */
+function handleRateLimitContinuation(engine: ParticleLeniaEngine): void {
+    // Only continue if we have a target and enough time has passed
+    if (rateLimitTargetCount === null) {
+        return;
+    }
+
+    const currentTime = performance.now();
+    const timeSinceLastAttempt = currentTime - rateLimitLastAttemptTime;
+
+    // Wait for the specified delay before attempting continuation
+    if (timeSinceLastAttempt < RATE_LIMIT_CONTINUATION_DELAY) {
+        return;
+    }
+
+    const currentCount = engine.simParams.numParticles;
+
+    // Check if we've already reached the target
+    if (currentCount === rateLimitTargetCount) {
+        console.log(`✅ Rate limit target reached: ${currentCount} particles`);
+        rateLimitTargetCount = null;
+        return;
+    }
+
+    // Check if we should continue (target is different from current)
+    if (
+        rateLimitTargetCount > currentCount ||
+        rateLimitTargetCount < currentCount
+    ) {
+        console.log(
+            `🔄 Continuing rate-limited progression: ${currentCount} → (target: ${rateLimitTargetCount})`
+        );
+
+        // Set flag to prevent infinite loops during automatic continuation
+        isRateLimitContinuation = true;
+
+        // Attempt another step toward the target
+        const success = updateParticleCount(engine, rateLimitTargetCount);
+
+        // Clear the flag after the update
+        isRateLimitContinuation = false;
+
+        if (!success) {
+            console.error(
+                `💥 Failed to continue rate-limited progression, clearing target`
+            );
+            rateLimitTargetCount = null;
+        }
+        // Note: Since we bypassed rate limiting, we need to manually update the timing
+        rateLimitLastAttemptTime = performance.now();
+    }
+}
+
+/**
  * Validates particle count change for safety
  * Prevents sudden large changes that could cause instability
+ * Now includes automatic continuation to reach original targets
  */
 function validateParticleCountChange(
     currentCount: number,
     newCount: number
 ): number {
+    // If this is an automatic rate limit continuation, skip rate limiting to prevent infinite loops
+    if (isRateLimitContinuation) {
+        return newCount;
+    }
+
     const maxChangePercent = 0.5; // Maximum 50% change per operation
     const maxChange = currentCount * maxChangePercent;
 
@@ -1993,9 +2172,15 @@ function validateParticleCountChange(
         const validatedCount = currentCount + actualIncrease;
 
         if (validatedCount < newCount) {
+            // Rate limiting is being applied - remember the original target for continuation
+            rateLimitTargetCount = newCount;
+            rateLimitLastAttemptTime = performance.now();
             console.log(
-                `⚠️ Rate limited particle increase: ${currentCount} → ${validatedCount} (target: ${newCount})`
+                `⚠️ Rate limited particle increase: ${currentCount} → ${validatedCount} (target: ${newCount}) - will continue automatically`
             );
+        } else {
+            // Target reached without rate limiting - clear any existing continuation
+            rateLimitTargetCount = null;
         }
 
         return validatedCount;
@@ -2005,15 +2190,23 @@ function validateParticleCountChange(
         const validatedCount = currentCount - actualDecrease;
 
         if (validatedCount > newCount) {
+            // Rate limiting is being applied for decreases too
+            rateLimitTargetCount = newCount;
+            rateLimitLastAttemptTime = performance.now();
             console.log(
-                `⚠️ Rate limited particle decrease: ${currentCount} → ${validatedCount} (target: ${newCount})`
+                `⚠️ Rate limited particle decrease: ${currentCount} → ${validatedCount} (target: ${newCount}) - will continue automatically`
             );
+        } else {
+            // Target reached without rate limiting - clear any existing continuation
+            rateLimitTargetCount = null;
         }
 
         return validatedCount;
     }
 
-    return newCount; // No change needed
+    // No change needed - clear any existing continuation
+    rateLimitTargetCount = null;
+    return newCount;
 }
 
 /**
@@ -2038,6 +2231,18 @@ export function updateParticleCount(
         );
         const currentCount = engine.simParams.numParticles;
 
+        // Check if this is a new explicit user request (different from current rate limit target)
+        // If so, clear any existing rate limit continuation to avoid conflicts
+        if (
+            rateLimitTargetCount !== null &&
+            clampedCount !== rateLimitTargetCount
+        ) {
+            console.log(
+                `🔄 New explicit particle count request (${clampedCount}) overriding rate limit target (${rateLimitTargetCount})`
+            );
+            rateLimitTargetCount = null;
+        }
+
         // Skip if no change needed
         if (clampedCount === currentCount) {
             return true;
@@ -2048,6 +2253,18 @@ export function updateParticleCount(
             currentCount,
             clampedCount
         );
+
+        // If this was an automatic continuation and we reached the target, clear it
+        if (
+            isRateLimitContinuation &&
+            clampedCount === validatedCount &&
+            rateLimitTargetCount === clampedCount
+        ) {
+            console.log(
+                `✅ Rate limit automatic continuation reached target: ${validatedCount} particles`
+            );
+            rateLimitTargetCount = null;
+        }
 
         console.log(
             `🔄 Updating particle count: ${currentCount} → ${validatedCount}`

@@ -19,6 +19,27 @@ struct InteractionRule {
     // To make it 16 bytes
 }
 
+// Lightning data structures (shared with lightning compute and rendering)
+struct LightningSegment {
+    startPos: vec2<f32>,
+    endPos: vec2<f32>,
+    thickness: f32,
+    alpha: f32,
+    generation: u32,
+    appearTime: f32,
+    isVisible: u32,
+    _padding: f32,
+    // Ensure 16-byte alignment
+}
+
+struct LightningBolt {
+    numSegments: u32,
+    flashId: u32,
+    startTime: f32,
+    _padding: f32,
+    // Ensure 16-byte alignment
+}
+
 struct SimParams {
     delta_time: f32,
     friction: f32,
@@ -67,6 +88,14 @@ struct SimParams {
     // Lenia growth function spread (σ)
     lenia_kernel_radius: f32,
     // Lenia kernel radius in pixels
+
+    // Lightning parameters
+    lightning_frequency: f32,
+    // Lightning strikes per second
+    lightning_intensity: f32,
+    // Lightning brightness/strength (0-1)
+    lightning_duration: f32,
+    // Duration of each lightning flash in seconds
 }
 
 // Particle data (input)
@@ -81,6 +110,12 @@ var<uniform> sim_params: SimParams;
 // Particle data (output)
 @group(0) @binding(3)
 var<storage, read_write> particles_out: array<Particle>;
+// Lightning segments buffer (shared with rendering)
+@group(0) @binding(4)
+var<storage, read> lightning_segments: array<LightningSegment>;
+// Lightning bolt buffer (shared with rendering) - single bolt structure
+@group(0) @binding(5)
+var<storage, read> lightning_bolt: LightningBolt;
 
 const PI: f32 = 3.141592653589793;
 const EPSILON: f32 = 0.001;
@@ -136,6 +171,143 @@ fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32) -> f32 {
 
     // Normalize density by maximum possible (all particles at center)
     return density / f32(sim_params.num_particles);
+}
+
+// === Lightning Electromagnetic Force Functions ===
+
+// Hash function for lightning generation (matches fragment shader)
+fn hash(x: f32) -> f32 {
+    var p = x;
+    p = fract(p * 0.1031);
+    p *= p + 33.33;
+    p *= p + p;
+    return fract(p);
+}
+
+// Struct to represent a branch in the lightning system
+struct LightningBranch {
+    pos: vec2<f32>,
+    dir: vec2<f32>,
+    generation: u32,
+    appear_time: f32,
+}
+
+;
+
+// Calculate electromagnetic force from lightning on a particle (buffer-based)
+fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, time: f32) -> vec2<f32> {
+    // Check if lightning is enabled
+    if (sim_params.lightning_frequency <= 0.0) {
+        return vec2<f32>(0.0, 0.0);
+    }
+
+    var total_em_force = vec2<f32>(0.0, 0.0);
+
+    // Process the single lightning bolt
+    let bolt = lightning_bolt;
+
+    // Skip inactive bolt
+    if (bolt.numSegments == 0u) {
+        return total_em_force;
+    }
+
+    // Check if this bolt is currently active
+    let bolt_age = time - bolt.startTime;
+    let flash_duration = sim_params.lightning_duration;
+
+    if (bolt_age < 0.0 || bolt_age > flash_duration) {
+        return total_em_force;
+    }
+
+    // Process each segment in this bolt
+    for (var seg_idx = 0u; seg_idx < bolt.numSegments; seg_idx++) {
+        let segment = lightning_segments[seg_idx];
+
+        // Check if segment is visible
+        if (segment.isVisible == 0u) {
+            continue;
+        }
+
+        // Check if segment should be visible at current time
+        let segment_age = time - segment.appearTime;
+        let segment_duration = 0.4;
+        // Same as in lightning compute shader
+
+        if (segment_age < 0.0 || segment_age > segment_duration) {
+            continue;
+        }
+
+        // Calculate electromagnetic force from this segment
+        let em_force = calculateSegmentElectromagneticForce(particle_pos, segment.startPos, segment.endPos, segment.generation);
+        total_em_force = total_em_force + em_force;
+    }
+
+    return total_em_force;
+}
+
+// Calculate electromagnetic force from a single lightning segment
+fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, segment_start: vec2<f32>, segment_end: vec2<f32>, generation: u32) -> vec2<f32> {
+    // Find closest point on segment to particle
+    let segment_vec = segment_end - segment_start;
+    let segment_length = length(segment_vec);
+
+    if (segment_length < EPSILON) {
+        return vec2<f32>(0.0, 0.0);
+    }
+
+    let segment_dir = segment_vec / segment_length;
+    let to_particle = particle_pos - segment_start;
+    let projection = dot(to_particle, segment_dir);
+
+    // Clamp projection to segment bounds
+    let clamped_projection = clamp(projection, 0.0, segment_length);
+    let closest_point = segment_start + segment_dir * clamped_projection;
+
+    // Calculate distance and force direction
+    let force_vec = particle_pos - closest_point;
+    let distance = length(force_vec);
+
+    // Calculate influence radius - branch tips have more concentrated but intense fields
+    let base_influence_radius = 150.0;
+    // Branch tips have smaller but more intense influence zones (realistic charge concentration)
+    let radius_scale = 1.0 - f32(generation) * 0.15;
+    // Each generation 15% smaller radius
+    let influence_radius = base_influence_radius * max(0.5, radius_scale);
+    // Minimum 50% radius
+
+    if (distance >= influence_radius || distance < EPSILON) {
+        return vec2<f32>(0.0, 0.0);
+    }
+
+    // Calculate electromagnetic force magnitude with enhanced decay curve
+    let normalized_distance = distance / influence_radius;
+    // Use more dramatic force curve for stronger near-field effects
+    let distance_factor = 1.0 - pow(normalized_distance, 1.5);
+    let force_magnitude = distance_factor * sim_params.lightning_intensity;
+
+    // Apply force scaling based on generation - STRONGER at branch tips (realistic charge concentration)
+    // Higher generations (branch tips) have stronger electromagnetic fields
+    let generation_scale = 1.0 + f32(generation) * 0.3;
+    // Each generation 30% stronger
+    let base_force = force_magnitude * generation_scale * 800.0;
+
+    // Add electromagnetic plasma-like effects for very close particles
+    // Branch tips (higher generations) have more intense plasma fields
+    let plasma_threshold = 0.3;
+    // Within 30% of influence radius
+    var final_magnitude = base_force;
+    if (normalized_distance < plasma_threshold) {
+        // Stronger plasma effects at branch tips due to charge concentration
+        let tip_plasma_multiplier = 1.0 + f32(generation) * 0.5;
+        // Branch tips have stronger plasma
+        let plasma_factor = 1.0 + (plasma_threshold - normalized_distance) * 3.0 * tip_plasma_multiplier;
+        final_magnitude = base_force * plasma_factor;
+    }
+
+    // Electromagnetic force direction (repulsive from lightning)
+    let force_direction = force_vec / distance;
+
+    return force_direction * final_magnitude;
 }
 
 @compute @workgroup_size(64) // Example workgroup size, can be tuned
@@ -273,6 +445,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // Thus, the formula naturally gives a negative force for repulsion.
             force_magnitude = sim_params.r_smooth * current_rule_min_radius * (1.0 / (current_rule_min_radius + sim_params.r_smooth) - 1.0 / (dist + sim_params.r_smooth));
         }
+        // Add electromagnetic cascade effect: fast-moving particles (recently affected by lightning)
+        // create stronger interactions with nearby particles
+        let other_particle_speed = length(particle_q.vel);
+        let electromagnetic_boost = 1.0 + (other_particle_speed * 0.001);
+        // Small boost for energetic particles
+
+        force_magnitude = force_magnitude * electromagnetic_boost;
+
         total_force = total_force + norm_diff * force_magnitude;
     }
 
@@ -301,6 +481,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         total_force = total_force + lenia_force;
     }
+
+    // Add lightning electromagnetic forces
+    let lightning_em_force = calculateLightningElectromagneticForce(particle_p.pos, sim_params.time);
+    total_force = total_force + lightning_em_force;
 
     // Update velocity
     particle_p.vel = particle_p.vel + total_force * sim_params.force_scale * sim_params.delta_time;

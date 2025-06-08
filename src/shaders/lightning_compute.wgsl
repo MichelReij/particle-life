@@ -1,12 +1,5 @@
-// Lightning effect fragment shader - BRANCHING VERSION
-// Current behavior:
-// - Lightning strikes every 1 second, lasts 0.5 seconds (fast lightning)
-// - New segments appear every 0.1 seconds
-// - 90% branching probability at each segment
-// - Branching angles: 25-60 degrees from parent direction
-// - No collision detection (removed for better visual flow)
-// - Segments start with ±0.4 radian angle variation for visible branching
-// - Up to 4 generations of branches allowed (0, 1, 2, 3)
+// Lightning Generation Compute Shader
+// Generates lightning segments and stores them in a buffer for both rendering and physics
 
 struct SimulationParams {
     deltaTime: f32,
@@ -43,10 +36,48 @@ struct SimulationParams {
     lightningDuration: f32,
 }
 
+// Lightning segment data structure
+struct LightningSegment {
+    startPos: vec2<f32>,
+    // Segment start position (UV coordinates)
+    endPos: vec2<f32>,
+    // Segment end position (UV coordinates)
+    thickness: f32,
+    // Segment thickness in pixels
+    alpha: f32,
+    // Segment alpha/opacity
+    generation: u32,
+    // Branch generation (0, 1, 2, 3)
+    appearTime: f32,
+    // When this segment should appear
+    isVisible: u32,
+    // 1 if visible, 0 if not (boolean as u32)
+    _padding: u32,
+    // Padding for alignment
+}
+
+// Lightning bolt data structure
+struct LightningBolt {
+    numSegments: u32,
+    // Number of active segments in this bolt
+    flashId: u32,
+    // Unique flash ID for this bolt
+    startTime: f32,
+    // When this bolt started
+    _padding: u32,
+    // Padding for alignment
+}
+
 @group(0) @binding(0)
 var<uniform> sim_params: SimulationParams;
 
-// Simple hash function
+@group(0) @binding(1)
+var<storage, read_write> lightning_segments: array<LightningSegment>;
+
+@group(0) @binding(2)
+var<storage, read_write> lightning_bolt: LightningBolt;
+
+// Hash function for lightning generation
 fn hash(x: f32) -> f32 {
     var p = x;
     p = fract(p * 0.1031);
@@ -55,47 +86,73 @@ fn hash(x: f32) -> f32 {
     return fract(p);
 }
 
-fn hash2(p: vec2<f32>) -> f32 {
-    var p3 = fract(vec3<f32>(p.xyx) * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
+// Convert UV coordinates to virtual world coordinates
+fn uvToWorld(uv: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(uv.x * sim_params.virtualWorldWidth, uv.y * sim_params.virtualWorldHeight);
 }
 
-// Generate lightning bolt with true branching - each segment can branch into 1 or 2 new segments
-fn lightningBolt(uv: vec2<f32>, time: f32, boltId: f32, timeInFlash: f32) -> f32 {
-    // Create seed for this bolt
-    let baseSeed = hash(boltId * 73.421);
+// Convert virtual world coordinates to UV coordinates
+fn worldToUV(world: vec2<f32>) -> vec2<f32> {
+    return vec2<f32>(world.x / sim_params.virtualWorldWidth, world.y / sim_params.virtualWorldHeight);
+}
+
+@compute @workgroup_size(1)
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    // Only use the first thread for lightning generation
+    if (global_id.x != 0u || global_id.y != 0u || global_id.z != 0u) {
+        return;
+    }
+
+    // Check if lightning is enabled
+    if (sim_params.lightningFrequency <= 0.0) {
+        lightning_bolt.numSegments = 0u;
+        return;
+    }
+
+    // Calculate lightning timing
+    let flashInterval = 1.0 / sim_params.lightningFrequency;
+    let timeInCycle = sim_params.time % flashInterval;
+    let flashDuration = sim_params.lightningDuration;
+
+    // Clear segments if we're not in a lightning flash
+    if (timeInCycle > flashDuration) {
+        lightning_bolt.numSegments = 0u;
+        return;
+    }
+
+    // Generate new lightning bolt when flash starts
+    let currentFlashId = u32(floor(sim_params.time / flashInterval));
+    if (lightning_bolt.flashId != currentFlashId) {
+        // New lightning bolt starting
+        lightning_bolt.flashId = currentFlashId;
+        lightning_bolt.startTime = sim_params.time - timeInCycle;
+        lightning_bolt.numSegments = 0u;
+    }
+
+    // Generate lightning bolt using the same algorithm as the original fragment shader
+    let baseSeed = hash(f32(currentFlashId) * 73.421);
 
     // Random starting position and direction
     let posRand = hash(baseSeed * 555.0);
     let posRand2 = hash(baseSeed * 777.0);
     let dirRand = hash(baseSeed * 333.0);
 
-    // Start from anywhere on screen
+    // Start from anywhere on screen (UV coordinates)
     let startPos = vec2<f32>(0.1 + posRand * 0.8, 0.1 + posRand2 * 0.8);
 
     // Random initial direction
     let angle = dirRand * 6.28318;
     let initialDirection = vec2<f32>(cos(angle), sin(angle));
 
-    // Lightning parameters
-    let maxTotalSegments = 30;
-    // Total segments across all branches
+    // Lightning parameters (matching fragment shader exactly)
+    let maxTotalSegments = 30u;
     let minSegmentLengthPx = 60.0;
-    // Minimum segment length in pixels
     let maxSegmentLengthPx = 150.0;
-    // Maximum segment length in pixels
     let resolution = vec2<f32>(sim_params.canvasRenderWidth, sim_params.canvasRenderHeight);
     let minSegmentLengthUV = minSegmentLengthPx / min(resolution.x, resolution.y);
     let maxSegmentLengthUV = maxSegmentLengthPx / min(resolution.x, resolution.y);
-    // Convert to UV coordinates
     let segmentInterval = 0.07;
-    // New segment every 0.07 seconds
     let segmentDuration = 0.4;
-    // Each segment visible for 0.4 seconds before disappearing
-
-    var intensity = 0.0;
-    var segmentCount = 0;
 
     // Arrays to store active branch endpoints (simulate dynamic arrays with fixed size)
     var branchPositions: array<vec2<f32>, 20>;
@@ -103,65 +160,60 @@ fn lightningBolt(uv: vec2<f32>, time: f32, boltId: f32, timeInFlash: f32) -> f32
     var branchGenerations: array<u32, 20>;
     var branchAppearTimes: array<f32, 20>;
 
-    var activeBranches = 0;
+    var activeBranches: u32 = 0u;
+    var segmentCount = 0u;
 
     // Initialize with root segment
     branchPositions[0] = startPos;
     branchDirections[0] = initialDirection;
     branchGenerations[0] = 0u;
     branchAppearTimes[0] = 0.0;
-    activeBranches = 1;
+    activeBranches = 1u;
 
     // Generate segments progressively
-    for (var step = 0; step < maxTotalSegments && activeBranches > 0; step++) {
+    for (var step: u32 = 0u; step < maxTotalSegments && activeBranches > 0u; step++) {
         let stepAppearTime = f32(step) * segmentInterval;
 
         // Skip if this step shouldn't appear yet
-        if (timeInFlash < stepAppearTime) {
+        if (timeInCycle < stepAppearTime) {
             break;
         }
 
-        var newBranches = 0;
+        var newBranches: u32 = 0u;
         var newBranchPositions: array<vec2<f32>, 20>;
         var newBranchDirections: array<vec2<f32>, 20>;
         var newBranchGenerations: array<u32, 20>;
         var newBranchAppearTimes: array<f32, 20>;
 
         // Process each active branch
-        for (var i = 0; i < activeBranches; i++) {
+        for (var i: u32 = 0u; i < activeBranches; i++) {
             let currentPos = branchPositions[i];
             let currentDir = branchDirections[i];
             let generation = branchGenerations[i];
             let branchAppearTime = branchAppearTimes[i];
 
             // Only process branches that should be visible
-            if (timeInFlash >= branchAppearTime) {
+            if (timeInCycle >= branchAppearTime) {
                 // Calculate segment properties
                 let segSeed = hash(baseSeed + f32(step) * 73.0 + f32(i) * 37.0);
 
-                // Decide branching first (90% chance to branch for highly visible testing)
+                // Decide branching first (90% chance to branch)
                 let branchSeed = hash(segSeed * 99.999);
                 let shouldBranch = branchSeed > 0.1 && generation < 4u && newBranches < 16;
 
-                // For continuing segments: use small angle change to maintain mostly straight paths
-                // For branching: don't draw the "continuing" segment, just branch off
+                // Angle change logic
                 var angleChange: f32;
                 if (shouldBranch) {
-                    // For branching segments, use moderate angle change for more dramatic lightning
                     angleChange = (hash(segSeed * 11.111) - 0.5) * 0.4;
-                    // Increased for more visible branching
                 }
                 else {
-                    // For non-branching segments, maintain straighter paths
                     angleChange = (hash(segSeed * 11.111) - 0.5) * 0.1;
-                    // Small change for continuing segments
                 }
 
                 let newAngle = atan2(currentDir.y, currentDir.x) + angleChange;
                 var newDir = vec2<f32>(cos(newAngle), sin(newAngle));
 
                 // Calculate segment length with randomization and generation decay
-                // Start with max length, decay by generation, but respect min/max constraints
                 let lengthSeed = hash(segSeed * 222.222);
                 let baseLengthUV = minSegmentLengthUV + lengthSeed * (maxSegmentLengthUV - minSegmentLengthUV);
                 let generationDecay = pow(0.8, f32(generation));
@@ -169,31 +221,35 @@ fn lightningBolt(uv: vec2<f32>, time: f32, boltId: f32, timeInFlash: f32) -> f32
                 let segmentEnd = currentPos + newDir * currentSegmentLength;
 
                 // Calculate thickness and alpha (thinner and dimmer for higher generations)
-                // Constrain thickness to 1-3px range for better visibility
-                let raw_thickness = 3.0 * pow(0.7, f32(generation));
-                let thickness = max(1.0, min(3.0, raw_thickness));
+                let rawThickness = 3.0 * pow(0.7, f32(generation));
+                let thickness = max(1.0, min(3.0, rawThickness));
                 let baseAlpha = 1.0 * pow(0.9, f32(generation));
 
-                // Check if segment is still within its visibility duration (no gradual fade)
-                let segmentAge = timeInFlash - stepAppearTime;
+                // Check if segment is still within its visibility duration
+                let segmentAge = timeInCycle - stepAppearTime;
                 let isVisible = segmentAge < segmentDuration;
 
-                // Only draw segment if it's still visible
-                if (isVisible) {
-                    intensity = max(intensity, drawSegment(uv, currentPos, segmentEnd, baseAlpha, thickness));
+                // Store segment in buffer if we have space and it's visible
+                // Convert UV coordinates to world coordinates for physics simulation
+                if (segmentCount < arrayLength(&lightning_segments) && isVisible) {
+                    lightning_segments[segmentCount].startPos = uvToWorld(currentPos);
+                    lightning_segments[segmentCount].endPos = uvToWorld(segmentEnd);
+                    lightning_segments[segmentCount].thickness = thickness;
+                    lightning_segments[segmentCount].alpha = baseAlpha;
+                    lightning_segments[segmentCount].generation = generation;
+                    lightning_segments[segmentCount].appearTime = lightning_bolt.startTime + stepAppearTime; // FIX: Store absolute time, not relative
+                    lightning_segments[segmentCount].isVisible = select(0u, 1u, isVisible);
+                    lightning_segments[segmentCount]._padding = 0u;
+                    segmentCount = segmentCount + 1u;
                 }
 
+                // Branching logic
                 if (shouldBranch) {
-                    // Don't draw a continuing main branch - instead draw the angled segment
-                    //and create NEW branches from the endpoint
-
-                    // Then add branch(es) from the current segment endpoint
-                    // Decide number of branches (1 or 2) - slightly favor single branches for more realistic lightning
+                    // Decide number of branches (1 or 2) - 40% chance for 2 branches
                     let numNewBranches = select(1, 2, hash(segSeed * 77.777) > 0.6);
-                    // 40% chance for 2 branches
 
                     if (numNewBranches == 1) {
-                        // Single branch - angle between 25-60 degrees from parent (more realistic)
+                        // Single branch - angle between 25-60 degrees from parent
                         if (newBranches < 19) {
                             let minAngle = 25.0 * 3.14159 / 180.0;
                             let maxAngle = 60.0 * 3.14159 / 180.0;
@@ -208,13 +264,12 @@ fn lightningBolt(uv: vec2<f32>, time: f32, boltId: f32, timeInFlash: f32) -> f32
                             newBranchDirections[newBranches] = vec2<f32>(cos(finalBranchAngle), sin(finalBranchAngle));
                             newBranchGenerations[newBranches] = generation + 1u;
                             newBranchAppearTimes[newBranches] = stepAppearTime + segmentInterval;
-                            newBranches = newBranches + 1;
+                            newBranches = newBranches + 1u;
                         }
                     }
                     else {
                         // Two branches - both at angles between 25-60 degrees from parent
                         if (newBranches < 18) {
-                            // Need 2 slots available
                             let minAngle = 25.0 * 3.14159 / 180.0;
                             let maxAngle = 60.0 * 3.14159 / 180.0;
                             let angleRange = maxAngle - minAngle;
@@ -233,29 +288,25 @@ fn lightningBolt(uv: vec2<f32>, time: f32, boltId: f32, timeInFlash: f32) -> f32
                             newBranchDirections[newBranches] = vec2<f32>(cos(splitAngle1), sin(splitAngle1));
                             newBranchGenerations[newBranches] = generation + 1u;
                             newBranchAppearTimes[newBranches] = stepAppearTime + segmentInterval;
-                            newBranches = newBranches + 1;
+                            newBranches = newBranches + 1u;
 
                             // Second branch
                             newBranchPositions[newBranches] = segmentEnd;
                             newBranchDirections[newBranches] = vec2<f32>(cos(splitAngle2), sin(splitAngle2));
                             newBranchGenerations[newBranches] = generation + 1u;
                             newBranchAppearTimes[newBranches] = stepAppearTime + segmentInterval;
-                            newBranches = newBranches + 1;
+                            newBranches = newBranches + 1u;
                         }
                     }
                 }
                 else {
-                    // No branching - continue this branch with minimal direction change
+                    // No branching - continue this branch
                     if (newBranches < 20) {
                         newBranchPositions[newBranches] = segmentEnd;
-                        // Start from end of current segment
                         newBranchDirections[newBranches] = newDir;
-                        // Use the slightly adjusted direction
                         newBranchGenerations[newBranches] = generation;
-                        // Same generation
                         newBranchAppearTimes[newBranches] = stepAppearTime + segmentInterval;
-                        // Next time step
-                        newBranches = newBranches + 1;
+                        newBranches = newBranches + 1u;
                     }
                 }
             }
@@ -263,7 +314,7 @@ fn lightningBolt(uv: vec2<f32>, time: f32, boltId: f32, timeInFlash: f32) -> f32
 
         // Update active branches for next iteration
         activeBranches = newBranches;
-        for (var j = 0; j < activeBranches; j++) {
+        for (var j: u32 = 0u; j < activeBranches; j++) {
             branchPositions[j] = newBranchPositions[j];
             branchDirections[j] = newBranchDirections[j];
             branchGenerations[j] = newBranchGenerations[j];
@@ -271,67 +322,6 @@ fn lightningBolt(uv: vec2<f32>, time: f32, boltId: f32, timeInFlash: f32) -> f32
         }
     }
 
-    return intensity;
-}
-
-// Helper function to draw a single segment
-fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thickness: f32) -> f32 {
-    let segmentDir = end - start;
-    let segmentLength = length(segmentDir);
-
-    if (segmentLength < 0.001) {
-        return 0.0;
-    }
-
-    let normalizedDir = segmentDir / segmentLength;
-    let toPoint = uv - start;
-    let projLength = dot(toPoint, normalizedDir);
-
-    if (projLength >= 0.0 && projLength <= segmentLength) {
-        let closestPoint = start + normalizedDir * projLength;
-        let distToSegment = length(uv - closestPoint);
-
-        let pixelThickness = thickness / 800.0;
-        // Convert pixels to UV coordinates
-        let segmentIntensity = (1.0 - smoothstep(0.0, pixelThickness, distToSegment)) * alpha;
-        return segmentIntensity;
-    }
-
-    return 0.0;
-}
-
-@fragment
-fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    let resolution = vec2<f32>(sim_params.canvasRenderWidth, sim_params.canvasRenderHeight);
-    let uv = frag_coord.xy / resolution;
-
-    // Check if lightning is enabled (frequency > 0)
-    if (sim_params.lightningFrequency <= 0.0) {
-        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    }
-
-    // Calculate lightning timing using proper parameters
-    let flashInterval = 1.0 / sim_params.lightningFrequency;
-    // Convert frequency to interval
-    let timeInCycle = sim_params.time % flashInterval;
-    let flashDuration = sim_params.lightningDuration;
-
-    // Only show lightning during flash period
-    if (timeInCycle > flashDuration) {
-        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    }
-
-    // Generate lightning bolt
-    let flashId = floor(sim_params.time / flashInterval);
-    let boltIntensity = lightningBolt(uv, sim_params.time, flashId, timeInCycle);
-
-    if (boltIntensity <= 0.0) {
-        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    }
-
-    // Lightning color - bright blue-white
-    let lightningColor = vec3<f32>(0.8, 0.9, 1.0);
-    let alpha = boltIntensity * sim_params.lightningIntensity;
-
-    return vec4<f32>(lightningColor, alpha);
+    // Update total segment count
+    lightning_bolt.numSegments = segmentCount;
 }
