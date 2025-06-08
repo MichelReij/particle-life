@@ -316,9 +316,9 @@ export async function initializeParticleLeniaEngine(
         leniaGrowthMu: 0.18,
         leniaGrowthSigma: 0.025,
         leniaKernelRadius: 75.0,
-        lightningFrequency: 0.2, // 0.2 strikes per second (every 5 seconds)
-        lightningIntensity: 0.8, // 80% intensity
-        lightningDuration: 0.5, // 500ms flash duration
+        lightningFrequency: 1.0, // 1 strike per second for highly visible testing
+        lightningIntensity: 1.0, // 100% intensity
+        lightningDuration: 0.5, // 0.5 second flash duration (faster lightning)
     };
 
     // Create simulation parameters buffer
