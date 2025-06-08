@@ -11,6 +11,8 @@ import vignetteFragWGSL from "./shaders/vignette_frag.wgsl?raw";
 import fisheyeFragWGSL from "./shaders/fisheye_frag.wgsl?raw";
 import gridFragWGSL from "./shaders/grid_frag.wgsl?raw";
 import zoomFragWGSL from "./shaders/zoom_frag.wgsl?raw";
+import lightningVertWGSL from "./shaders/lightning_vert.wgsl?raw";
+import lightningFragWGSL from "./shaders/lightning_frag.wgsl?raw";
 
 import { hsluvToRgb } from "hsluv-ts";
 import {
@@ -66,6 +68,7 @@ export interface ParticleLeniaEngine {
     fisheyeRenderPipeline: GPURenderPipeline;
     gridRenderPipeline: GPURenderPipeline;
     zoomRenderPipeline: GPURenderPipeline;
+    lightningRenderPipeline: GPURenderPipeline;
 
     // Bind Groups
     computeBindGroups: [GPUBindGroup, GPUBindGroup];
@@ -75,6 +78,7 @@ export interface ParticleLeniaEngine {
     fisheyeRenderBindGroup: GPUBindGroup;
     gridRenderBindGroup: GPUBindGroup;
     zoomRenderBindGroup: GPUBindGroup;
+    lightningRenderBindGroup: GPUBindGroup;
 
     // Textures and Sampler
     sceneTexture: GPUTexture;
@@ -312,6 +316,9 @@ export async function initializeParticleLeniaEngine(
         leniaGrowthMu: 0.18,
         leniaGrowthSigma: 0.025,
         leniaKernelRadius: 75.0,
+        lightningFrequency: 0.2, // 0.2 strikes per second (every 5 seconds)
+        lightningIntensity: 0.8, // 80% intensity
+        lightningDuration: 0.5, // 500ms flash duration
     };
 
     // Create simulation parameters buffer
@@ -347,7 +354,23 @@ export async function initializeParticleLeniaEngine(
     simParamsViewF32[24] = simParams.leniaGrowthMu;
     simParamsViewF32[25] = simParams.leniaGrowthSigma;
     simParamsViewF32[26] = simParams.leniaKernelRadius;
-    simParamsViewF32[27] = 0.0; // padding
+    simParamsViewF32[27] = simParams.lightningFrequency;
+    simParamsViewF32[28] = simParams.lightningIntensity;
+    simParamsViewF32[29] = simParams.lightningDuration;
+    simParamsViewF32[30] = 0.0; // _padding1
+    simParamsViewF32[31] = 0.0; // _padding2
+
+    // DEBUG: Log buffer sizes to verify we're creating 128 bytes
+    console.log("🔍 DEBUG: Buffer size verification:");
+    console.log("SIM_PARAMS_SIZE_BYTES:", SIM_PARAMS_SIZE_BYTES);
+    console.log("simParamsData.byteLength:", simParamsData.byteLength);
+    console.log("Expected indices 0-31 (128 bytes total)");
+    console.log("Lightning parameters:");
+    console.log("  lightningFrequency (index 27):", simParamsViewF32[27]);
+    console.log("  lightningIntensity (index 28):", simParamsViewF32[28]);
+    console.log("  lightningDuration (index 29):", simParamsViewF32[29]);
+    console.log("  _padding1 (index 30):", simParamsViewF32[30]);
+    console.log("  _padding2 (index 31):", simParamsViewF32[31]);
 
     const simParamsBuffer = device.createBuffer({
         label: "Simulation Parameters Buffer",
@@ -355,6 +378,13 @@ export async function initializeParticleLeniaEngine(
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     device.queue.writeBuffer(simParamsBuffer, 0, simParamsData);
+
+    // DEBUG: Log the actual buffer size after creation
+    console.log(
+        "✅ Created simParamsBuffer with size:",
+        SIM_PARAMS_SIZE_BYTES,
+        "bytes"
+    );
 
     // Create textures
     const sceneTexture = device.createTexture({
@@ -509,6 +539,12 @@ export async function initializeParticleLeniaEngine(
     });
     const zoomShaderModuleFrag = device.createShaderModule({
         code: zoomFragWGSL,
+    });
+    const lightningShaderModuleVert = device.createShaderModule({
+        code: lightningVertWGSL,
+    });
+    const lightningShaderModuleFrag = device.createShaderModule({
+        code: lightningFragWGSL,
     });
 
     // Create compute pipeline
@@ -753,6 +789,36 @@ export async function initializeParticleLeniaEngine(
         primitive: { topology: "triangle-list" },
     });
 
+    const lightningRenderPipeline = device.createRenderPipeline({
+        label: "Lightning Render Pipeline",
+        layout: device.createPipelineLayout({
+            bindGroupLayouts: [simParamsBindGroupLayout],
+        }),
+        vertex: { module: lightningShaderModuleVert, entryPoint: "main" },
+        fragment: {
+            module: lightningShaderModuleFrag,
+            entryPoint: "main",
+            targets: [
+                {
+                    format: presentationFormat,
+                    blend: {
+                        color: {
+                            srcFactor: "src-alpha",
+                            dstFactor: "one-minus-src-alpha",
+                            operation: "add",
+                        },
+                        alpha: {
+                            srcFactor: "one",
+                            dstFactor: "one-minus-src-alpha",
+                            operation: "add",
+                        },
+                    },
+                },
+            ],
+        },
+        primitive: { topology: "triangle-list" },
+    });
+
     // Create bind groups
     const computeBindGroups: [GPUBindGroup, GPUBindGroup] = [
         device.createBindGroup({
@@ -828,6 +894,12 @@ export async function initializeParticleLeniaEngine(
         ],
     });
 
+    const lightningRenderBindGroup = device.createBindGroup({
+        label: "Lightning Render Bind Group",
+        layout: simParamsBindGroupLayout,
+        entries: [{ binding: 0, resource: { buffer: simParamsBuffer } }],
+    });
+
     // Return the complete engine instance
     const engine: ParticleLeniaEngine = {
         device,
@@ -846,6 +918,7 @@ export async function initializeParticleLeniaEngine(
         fisheyeRenderPipeline,
         gridRenderPipeline,
         zoomRenderPipeline,
+        lightningRenderPipeline,
         computeBindGroups,
         renderBindGroup,
         backgroundRenderBindGroup,
@@ -853,6 +926,7 @@ export async function initializeParticleLeniaEngine(
         fisheyeRenderBindGroup,
         gridRenderBindGroup,
         zoomRenderBindGroup,
+        lightningRenderBindGroup,
         sceneTexture,
         intermediateTexture,
         sceneSampler,
@@ -930,6 +1004,11 @@ const PARAMETER_OFFSETS: Record<keyof SimulationParams, number> = {
     leniaGrowthMu: 24 * 4, // simParamsViewF32[24]
     leniaGrowthSigma: 25 * 4, // simParamsViewF32[25]
     leniaKernelRadius: 26 * 4, // simParamsViewF32[26]
+    lightningFrequency: 27 * 4, // simParamsViewF32[27]
+    lightningIntensity: 28 * 4, // simParamsViewF32[28]
+    lightningDuration: 29 * 4, // simParamsViewF32[29]
+    _padding1: 30 * 4, // simParamsViewF32[30] (padding for alignment)
+    _padding2: 31 * 4, // simParamsViewF32[31] (padding for alignment)
 };
 
 // Convenient wrapper function that automatically calculates buffer offset
@@ -1148,7 +1227,34 @@ export function renderFrame(engine: ParticleLeniaEngine): void {
     gridPass.draw(6, 1, 0, 0);
     gridPass.end();
 
-    // 4. Fisheye Post-Processing Pass
+    // 4. Lightning Effects Pass
+    const lightningPassDescriptor: GPURenderPassDescriptor = {
+        label: "Lightning Pass to Scene Texture",
+        colorAttachments: [
+            {
+                view: sceneTextureView,
+                loadOp: "load",
+                storeOp: "store",
+            },
+        ],
+    };
+    const lightningPass = commandEncoder.beginRenderPass(
+        lightningPassDescriptor
+    );
+    lightningPass.setViewport(
+        engine.simParams.virtualWorldOffsetX,
+        engine.simParams.virtualWorldOffsetY,
+        engine.simParams.canvasRenderWidth,
+        engine.simParams.canvasRenderHeight,
+        0.0,
+        1.0
+    );
+    lightningPass.setPipeline(engine.lightningRenderPipeline);
+    lightningPass.setBindGroup(0, engine.lightningRenderBindGroup);
+    lightningPass.draw(6, 1, 0, 0);
+    lightningPass.end();
+
+    // 5. Fisheye Post-Processing Pass
     const intermediateTextureView = engine.intermediateTexture.createView();
     const fisheyePassDescriptor: GPURenderPassDescriptor = {
         label: "Fisheye Pass to Intermediate Texture",
@@ -1167,7 +1273,7 @@ export function renderFrame(engine: ParticleLeniaEngine): void {
     fisheyePass.draw(6, 1, 0, 0);
     fisheyePass.end();
 
-    // 5. Zoom Post-Processing Pass
+    // 6. Zoom Post-Processing Pass
     const canvasTextureView = engine.context.getCurrentTexture().createView();
     const zoomPassDescriptor: GPURenderPassDescriptor = {
         label: "Zoom Pass to Canvas",

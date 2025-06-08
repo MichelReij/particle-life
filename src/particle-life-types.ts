@@ -45,7 +45,15 @@ export interface SimulationParams {
     leniaGrowthMu: number; // Lenia growth function center (μ)
     leniaGrowthSigma: number; // Lenia growth function spread (σ)
     leniaKernelRadius: number; // Lenia kernel radius
-    // _padding1 is implicit in WGSL if needed after backgroundColor for alignment
+
+    // Lightning parameters
+    lightningFrequency: number; // Lightning strikes per second when electrical activity is high
+    lightningIntensity: number; // Lightning brightness/strength (0-1)
+    lightningDuration: number; // Duration of each lightning flash in seconds
+
+    // Padding to align to 128 bytes (32 floats) for WebGPU requirements
+    _padding1?: number;
+    _padding2?: number;
 }
 
 // Size of the SimulationParams struct in bytes
@@ -77,11 +85,13 @@ export interface SimulationParams {
 // leniaGrowthMu: f32 (4)
 // leniaGrowthSigma: f32 (4)
 // leniaKernelRadius: f32 (4)
-// -- Total so far: 92 + 16 = 108 bytes --
-// To make it a multiple of 16, we need 4 more bytes of padding (_padding1: f32).
-// So, 108 + 4 = 112 bytes.
-// This corresponds to 28 floats (24 actual params + 3 for color + 1 padding)
-export const SIM_PARAMS_SIZE_BYTES = 28 * 4; // 112 bytes
+// lightningFrequency: f32 (4)
+// lightningIntensity: f32 (4)
+// lightningDuration: f32 (4)
+// -- Total so far: 92 + 28 = 120 bytes --
+// However, WebGPU may require more padding for the WGSL struct alignment
+// Increasing to 128 bytes (32 floats) to meet WebGPU requirements
+export const SIM_PARAMS_SIZE_BYTES = 32 * 4; // 128 bytes
 
 export const MAX_PARTICLE_TYPES = 16;
 
