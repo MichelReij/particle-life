@@ -99,8 +99,8 @@ fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thic
         let closestPoint = start + normalizedDir * projLength;
         let distToSegment = length(uv - closestPoint);
 
-        let pixelThickness = thickness / 800.0;
-        // Convert pixels to UV coordinates
+        let pixelThickness = thickness / sim_params.canvasRenderWidth;
+        // Convert pixels to UV coordinates based on actual render resolution
         let segmentIntensity = (1.0 - smoothstep(0.0, pixelThickness, distToSegment)) * alpha;
         return segmentIntensity;
     }
@@ -118,19 +118,9 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
 
-    // Calculate lightning timing using proper parameters
-    let flashInterval = 1.0 / sim_params.lightningFrequency;
-    let timeInCycle = sim_params.time % flashInterval;
-    let flashDuration = sim_params.lightningDuration;
-
-    // Only show lightning during flash period
-    if (timeInCycle > flashDuration) {
-        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    }
-
     var boltIntensity = 0.0;
 
-    // Draw all segments from the buffer
+    // Draw all segments from the buffer - compute shader handles timing
     for (var i = 0u; i < lightning_bolt.numSegments; i++) {
         let segment = lightning_segments[i];
 

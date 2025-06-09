@@ -86,6 +86,11 @@ fn hash(x: f32) -> f32 {
     return fract(p);
 }
 
+// Floating point modulo function
+fn fmod(x: f32, y: f32) -> f32 {
+    return x - y * floor(x / y);
+}
+
 // Convert UV coordinates to virtual world coordinates
 fn uvToWorld(uv: vec2<f32>) -> vec2<f32> {
     return vec2<f32>(uv.x * sim_params.virtualWorldWidth, uv.y * sim_params.virtualWorldHeight);
@@ -109,9 +114,38 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    // Calculate lightning timing
-    let flashInterval = 1.0 / sim_params.lightningFrequency;
-    let timeInCycle = sim_params.time % flashInterval;
+    // Calculate lightning timing based on electrical activity
+    // electrical activity (interTypeAttractionScale) ranges from 0-3
+    // At max activity (3.0), interval should be ~8 seconds with randomization
+    let electricalActivity = sim_params.interTypeAttractionScale;
+    let baseInterval = mix(20.0, 8.0, min(electricalActivity / 3.0, 1.0)); // 20s at min activity, 8s at max
+    
+    // Calculate current flash cycle using accumulated time accounting for variable intervals
+    // We need to track which flash cycle we're in more carefully
+    var accumulatedTime = 0.0;
+    var flashId = 0u;
+    var flashStartTime = 0.0;
+    var flashInterval = baseInterval;
+    
+    // Find which flash cycle we're currently in
+    for (var i = 0u; i < 1000u; i++) { // Safety limit to prevent infinite loops
+        // Calculate interval for this flash cycle
+        let flashRandomSeed = hash(f32(i) * 12.345);
+        let randomFactor = 0.75 + 0.5 * flashRandomSeed; // Range: 0.75 to 1.25
+        flashInterval = baseInterval * randomFactor;
+        
+        if (sim_params.time < accumulatedTime + flashInterval) {
+            // We're in this flash cycle
+            flashId = i;
+            flashStartTime = accumulatedTime;
+            break;
+        }
+        
+        accumulatedTime += flashInterval;
+    }
+    
+    // Calculate time within this specific flash interval
+    let timeInCycle = sim_params.time - flashStartTime;
     let flashDuration = sim_params.lightningDuration;
 
     // Clear segments if we're not in a lightning flash
@@ -121,24 +155,26 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     // Generate new lightning bolt when flash starts
-    let currentFlashId = u32(floor(sim_params.time / flashInterval));
-    if (lightning_bolt.flashId != currentFlashId) {
+    if (lightning_bolt.flashId != flashId) {
         // New lightning bolt starting
-        lightning_bolt.flashId = currentFlashId;
-        lightning_bolt.startTime = sim_params.time - timeInCycle;
+        lightning_bolt.flashId = flashId;
+        lightning_bolt.startTime = flashStartTime;
         lightning_bolt.numSegments = 0u;
     }
 
     // Generate lightning bolt using the same algorithm as the original fragment shader
-    let baseSeed = hash(f32(currentFlashId) * 73.421);
+    let baseSeed = hash(f32(flashId) * 73.421); // Use flashId instead of time-based seed
 
-    // Random starting position and direction
+    // Random starting position constrained to circle with radius 0.25UV (600px) from center
     let posRand = hash(baseSeed * 555.0);
     let posRand2 = hash(baseSeed * 777.0);
     let dirRand = hash(baseSeed * 333.0);
-
-    // Start from anywhere on screen (UV coordinates)
-    let startPos = vec2<f32>(0.1 + posRand * 0.8, 0.1 + posRand2 * 0.8);
+    
+    // Generate point within circle of radius 0.25UV from center (0.5, 0.5)
+    let radius = sqrt(posRand) * 0.25; // Square root for uniform distribution
+    let theta = posRand2 * 6.28318; // Random angle
+    let center = vec2<f32>(0.5, 0.5); // Screen center in UV coordinates
+    let startPos = center + vec2<f32>(cos(theta), sin(theta)) * radius;
 
     // Random initial direction
     let angle = dirRand * 6.28318;
@@ -146,8 +182,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Lightning parameters (matching fragment shader exactly)
     let maxTotalSegments = 30u;
-    let minSegmentLengthPx = 60.0;
-    let maxSegmentLengthPx = 150.0;
+    let minSegmentLengthPx = 40.0;
+    let maxSegmentLengthPx = 90.0;
     let resolution = vec2<f32>(sim_params.canvasRenderWidth, sim_params.canvasRenderHeight);
     let minSegmentLengthUV = minSegmentLengthPx / min(resolution.x, resolution.y);
     let maxSegmentLengthUV = maxSegmentLengthPx / min(resolution.x, resolution.y);
@@ -221,13 +257,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let segmentEnd = currentPos + newDir * currentSegmentLength;
 
                 // Calculate thickness and alpha (thinner and dimmer for higher generations)
-                let rawThickness = 3.0 * pow(0.7, f32(generation));
+                let rawThickness = 3.0 * pow(0.8, f32(generation));
                 let thickness = max(1.0, min(3.0, rawThickness));
                 let baseAlpha = 1.0 * pow(0.9, f32(generation));
 
-                // Check if segment is still within its visibility duration
+                // Check if segment should appear yet and is still within flash duration
                 let segmentAge = timeInCycle - stepAppearTime;
-                let isVisible = segmentAge < segmentDuration;
+                let isVisible = segmentAge >= 0.0 && segmentAge < segmentDuration;
 
                 // Store segment in buffer if we have space and it's visible
                 // Convert UV coordinates to world coordinates for physics simulation

@@ -136,8 +136,8 @@ fn lightningBolt(uv: vec2<f32>, time: f32, boltId: f32, timeInCycle: f32) -> f32
                 let closestPoint = currentPos + currentDir * projLength;
                 let distToSegment = length(uv - closestPoint);
 
-                let thickness = 3.0 / 800.0;
-                // 3 pixels thick
+                let thickness = 3.0 / sim_params.canvasRenderWidth;
+                // 3 pixels thick - convert to UV coordinates based on actual render resolution
                 let segmentIntensity = (1.0 - smoothstep(0.0, thickness, distToSegment)) * segmentAlpha;
                 intensity = max(intensity, segmentIntensity);
             }

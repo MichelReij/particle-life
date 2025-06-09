@@ -195,7 +195,7 @@ struct LightningBranch {
 ;
 
 // Calculate electromagnetic force from lightning on a particle (buffer-based)
-fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, time: f32) -> vec2<f32> {
+fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, particle_vel: vec2<f32>, time: f32, particle_type: u32) -> vec2<f32> {
     // Check if lightning is enabled
     if (sim_params.lightning_frequency <= 0.0) {
         return vec2<f32>(0.0, 0.0);
@@ -238,7 +238,7 @@ fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, time: f32) ->
         }
 
         // Calculate electromagnetic force from this segment
-        let em_force = calculateSegmentElectromagneticForce(particle_pos, segment.startPos, segment.endPos, segment.generation);
+        let em_force = calculateSegmentElectromagneticForce(particle_pos, particle_vel, segment.startPos, segment.endPos, segment.generation, particle_type, time, segment_age);
         total_em_force = total_em_force + em_force;
     }
 
@@ -246,7 +246,7 @@ fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, time: f32) ->
 }
 
 // Calculate electromagnetic force from a single lightning segment
-fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, segment_start: vec2<f32>, segment_end: vec2<f32>, generation: u32) -> vec2<f32> {
+fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: vec2<f32>, segment_start: vec2<f32>, segment_end: vec2<f32>, generation: u32, particle_type: u32, time: f32, segment_age: f32) -> vec2<f32> {
     // Find closest point on segment to particle
     let segment_vec = segment_end - segment_start;
     let segment_length = length(segment_vec);
@@ -269,45 +269,83 @@ fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, segment_start: 
 
     // Calculate influence radius - branch tips have more concentrated but intense fields
     let base_influence_radius = 150.0;
-    // Branch tips have smaller but more intense influence zones (realistic charge concentration)
     let radius_scale = 1.0 - f32(generation) * 0.15;
-    // Each generation 15% smaller radius
     let influence_radius = base_influence_radius * max(0.5, radius_scale);
-    // Minimum 50% radius
 
     if (distance >= influence_radius || distance < EPSILON) {
         return vec2<f32>(0.0, 0.0);
     }
 
-    // Calculate electromagnetic force magnitude with enhanced decay curve
     let normalized_distance = distance / influence_radius;
-    // Use more dramatic force curve for stronger near-field effects
     let distance_factor = 1.0 - pow(normalized_distance, 1.5);
-    let force_magnitude = distance_factor * sim_params.lightning_intensity;
 
-    // Apply force scaling based on generation - STRONGER at branch tips (realistic charge concentration)
-    // Higher generations (branch tips) have stronger electromagnetic fields
-    let generation_scale = 1.0 + f32(generation) * 0.3;
-    // Each generation 30% stronger
-    let base_force = force_magnitude * generation_scale * 800.0;
+    // === CHARGE SEPARATION EFFECT ===
+    // Different particle types have different "charge" based on their type
+    let particle_type_f = f32(particle_type);
+    let charge_polarity = sin(particle_type_f * 2.0); // Range: -1 to 1
+    // Some types attracted (negative charge), others repelled (positive charge)
 
-    // Add electromagnetic plasma-like effects for very close particles
-    // Branch tips (higher generations) have more intense plasma fields
-    let plasma_threshold = 0.3;
-    // Within 30% of influence radius
-    var final_magnitude = base_force;
+    // === ENHANCED MAGNETIC FIELD SPIRALING ===
+    // Lightning creates a magnetic field around the current path
+    // Perpendicular direction for magnetic force (right-hand rule)
+    let perpendicular = vec2<f32>(-segment_dir.y, segment_dir.x);
+
+    // Enhanced magnetic force with velocity dependence (Lorentz force: F = q(v × B))
+    let particle_speed = length(particle_vel);
+    let velocity_factor = max(0.5, particle_speed * 0.02); // Increased minimum and scale
+
+    // Add time-based oscillations for dynamic spiral patterns
+    let time_oscillation = sin(time * 3.0 + particle_type_f) * 0.5 + 1.0; // Range: 0.5 to 1.5
+    let segment_oscillation = sin(segment_age * 5.0) * 0.3 + 1.0; // Segment-specific pulsing
+
+    // Calculate magnetic force strength - much stronger and distance-dependent
+    let magnetic_base_strength = (1.0 - pow(normalized_distance, 0.8)) * sim_params.lightning_intensity;
+    let magnetic_strength = magnetic_base_strength * 1500.0 * velocity_factor * time_oscillation * segment_oscillation;
+
+    // Create multiple spiral components for more complex motion
+    let spiral_direction = perpendicular * charge_polarity;
+    let magnetic_force = spiral_direction * magnetic_strength;
+
+    // Enhanced rotational component with time-varying angle
+    let base_rotation_angle = charge_polarity * 2.0; // Increased base rotation
+    let time_rotation = time * 2.0 + particle_type_f; // Time-varying rotation
+    let dynamic_rotation_angle = base_rotation_angle + sin(time_rotation) * 1.0;
+
+    let cos_rot = cos(dynamic_rotation_angle);
+    let sin_rot = sin(dynamic_rotation_angle);
+    let rotated_perpendicular = vec2<f32>(
+        perpendicular.x * cos_rot - perpendicular.y * sin_rot,
+        perpendicular.x * sin_rot + perpendicular.y * cos_rot
+    );
+    let enhanced_spiral_force = rotated_perpendicular * magnetic_strength * 0.8; // Increased contribution
+
+    // Add velocity-aligned magnetic component for helical motion
+    let velocity_dir = normalize(particle_vel + vec2<f32>(0.001, 0.001)); // Avoid division by zero
+    let velocity_cross_field = vec2<f32>(-velocity_dir.y, velocity_dir.x);
+    let helical_force = velocity_cross_field * magnetic_strength * charge_polarity * 0.6;
+
+    // === ELECTRIC FIELD FORCE ===
+    // Traditional attraction/repulsion based on charge
+    let electric_direction = force_vec / distance;
+    let electric_strength = distance_factor * sim_params.lightning_intensity * 700.0; // Increased slightly
+    let electric_force = electric_direction * electric_strength * charge_polarity;
+
+    // === GENERATION SCALING ===
+    // Higher generations (branch tips) have stronger fields due to charge concentration
+    let generation_scale = 1.0 + f32(generation) * 0.4;
+
+    // === PLASMA EFFECTS FOR VERY CLOSE PARTICLES ===
+    let plasma_threshold = 0.25;
+    var total_force = magnetic_force + enhanced_spiral_force + helical_force + electric_force;
+
     if (normalized_distance < plasma_threshold) {
-        // Stronger plasma effects at branch tips due to charge concentration
-        let tip_plasma_multiplier = 1.0 + f32(generation) * 0.5;
-        // Branch tips have stronger plasma
-        let plasma_factor = 1.0 + (plasma_threshold - normalized_distance) * 3.0 * tip_plasma_multiplier;
-        final_magnitude = base_force * plasma_factor;
+        let plasma_intensity = (plasma_threshold - normalized_distance) / plasma_threshold;
+        let plasma_boost = 1.0 + plasma_intensity * 3.0; // Increased plasma boost
+        total_force = total_force * plasma_boost;
     }
 
-    // Electromagnetic force direction (repulsive from lightning)
-    let force_direction = force_vec / distance;
-
-    return force_direction * final_magnitude;
+    // Apply 75% force reduction (halved twice: 0.5 * 0.5 = 0.25)
+    return total_force * generation_scale * 0.25;
 }
 
 @compute @workgroup_size(64) // Example workgroup size, can be tuned
@@ -483,7 +521,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     // Add lightning electromagnetic forces
-    let lightning_em_force = calculateLightningElectromagneticForce(particle_p.pos, sim_params.time);
+    let lightning_em_force = calculateLightningElectromagneticForce(particle_p.pos, particle_p.vel, sim_params.time, particle_p.ptype);
     total_force = total_force + lightning_em_force;
 
     // Update velocity

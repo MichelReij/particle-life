@@ -291,8 +291,8 @@ fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thic
         let closestPoint = start + normalizedDir * projLength;
         let distToSegment = length(uv - closestPoint);
 
-        let pixelThickness = thickness / 800.0;
-        // Convert pixels to UV coordinates
+        let pixelThickness = thickness / sim_params.canvasRenderWidth;
+        // Convert pixels to UV coordinates based on actual render resolution
         let segmentIntensity = (1.0 - smoothstep(0.0, pixelThickness, distToSegment)) * alpha;
         return segmentIntensity;
     }
