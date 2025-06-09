@@ -119,31 +119,31 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // At max activity (3.0), interval should be ~8 seconds with randomization
     let electricalActivity = sim_params.interTypeAttractionScale;
     let baseInterval = mix(20.0, 8.0, min(electricalActivity / 3.0, 1.0)); // 20s at min activity, 8s at max
-    
+
     // Calculate current flash cycle using accumulated time accounting for variable intervals
     // We need to track which flash cycle we're in more carefully
     var accumulatedTime = 0.0;
     var flashId = 0u;
     var flashStartTime = 0.0;
     var flashInterval = baseInterval;
-    
+
     // Find which flash cycle we're currently in
     for (var i = 0u; i < 1000u; i++) { // Safety limit to prevent infinite loops
         // Calculate interval for this flash cycle
         let flashRandomSeed = hash(f32(i) * 12.345);
         let randomFactor = 0.75 + 0.5 * flashRandomSeed; // Range: 0.75 to 1.25
         flashInterval = baseInterval * randomFactor;
-        
+
         if (sim_params.time < accumulatedTime + flashInterval) {
             // We're in this flash cycle
             flashId = i;
             flashStartTime = accumulatedTime;
             break;
         }
-        
+
         accumulatedTime += flashInterval;
     }
-    
+
     // Calculate time within this specific flash interval
     let timeInCycle = sim_params.time - flashStartTime;
     let flashDuration = sim_params.lightningDuration;
@@ -169,7 +169,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let posRand = hash(baseSeed * 555.0);
     let posRand2 = hash(baseSeed * 777.0);
     let dirRand = hash(baseSeed * 333.0);
-    
+
     // Generate point within circle of radius 0.25UV from center (0.5, 0.5)
     let radius = sqrt(posRand) * 0.25; // Square root for uniform distribution
     let theta = posRand2 * 6.28318; // Random angle
