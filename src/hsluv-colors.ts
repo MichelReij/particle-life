@@ -1,26 +1,5 @@
 // Custom color palette for particle types
-const CUSTOM_COLORS = [
-    // "#78729e",
-    // "#cf9760",
-    // "#698c61",
-    // "#37597d",
-    // "#287a8c",
-    // "#a15064",
-    // "#cf900a",
-    // "#8196bd",
-    //
-    // "#006aa3",
-    // "#eb8d3b",
-    // "#d43934",
-    // "#8255b8",
-    // "#5fa15c",
-    //
-    "#0374ad",
-    "#c78513",
-    "#bf1c1c",
-    "#6d30bd",
-    "#52964d",
-];
+const CUSTOM_COLORS = ["#0374ad", "#c78513", "#bf1c1c", "#6d30bd", "#52964d"];
 
 // Default opacity for particle colors (0.0 = transparent, 1.0 = opaque)
 const DEFAULT_PARTICLE_OPACITY = 0.6;

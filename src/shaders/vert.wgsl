@@ -39,10 +39,10 @@ struct SimParams {
     // Lenia kernel radius in pixels
 }
 
-@group(0) @binding(0)
+@group(0) @binding(2)
 var<uniform> sim_params: SimParams;
 
-@group(0) @binding(1)
+@group(0) @binding(0)
 var<storage, read> particle_colors: array<vec4<f32>>;
 
 struct VertexInput {

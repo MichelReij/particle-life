@@ -20,6 +20,15 @@ yarn.lock
 public/
 # If you have other webpack-specific files, add them here
 
+# Rust / WASM
+target/
+pkg/
+Cargo.lock
+
+# WebGPU renderer development files
+src/webgpu_renderer_old.rs
+src/webgpu_renderer_simple.rs
+
 # IDE / Editor specific
 .vscode/
 .idea/
@@ -46,3 +55,9 @@ yarn-error.log*
 *.tmp
 *.swp
 *~
+
+# Backup files
+*_backup.ts
+*_old.ts
+*-backup.ts
+*-old.ts

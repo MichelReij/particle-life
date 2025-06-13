@@ -1,0 +1,8 @@
+{
+    "scripts": {
+        "build-wasm": "./build-wasm.sh",
+        "build": "npm run build-wasm && webpack --mode production",
+        "dev": "npm run build-wasm && webpack serve --mode development",
+        "dev-wasm": "npm run build-wasm && npm run dev"
+    }
+}

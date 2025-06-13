@@ -25,7 +25,9 @@
                 />
                 <span id="zoomValue">1.50</span>
             </div>
-            <div id="canvasContainer"></div>
+            <div id="canvasContainer">
+                <canvas id="canvas" width="800" height="800"></canvas>
+            </div>
             <div id="Joystick">
                 <label>Navigation:</label>
                 <div id="joyDiv"></div>
@@ -35,7 +37,25 @@
                     Range: 0
                 </div>
             </div>
-            <div id="fpsDisplay"></div>
+            <div id="fps-display"></div>
+
+            <!-- Performance Control Section -->
+            <div id="Performance" class="slider-container">
+                <label for="particleCountSlider"
+                    >Particle Count (Performance Test):</label
+                >
+                <input
+                    type="range"
+                    id="particleCountSlider"
+                    min="100"
+                    max="5000"
+                    value="3200"
+                    step="100"
+                    class="horizontal-slider"
+                />
+                <span id="particleCountValue">3200</span>
+                <button id="performanceTest">Run Performance Test</button>
+            </div>
 
             <div id="Temp" class="slider-container">
                 <label for="tempSlider">Temperature</label>

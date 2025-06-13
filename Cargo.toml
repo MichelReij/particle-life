@@ -1,0 +1,84 @@
+[package]
+name = "particle-life-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2.100"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+getrandom = { version = "0.2", features = ["js"] }
+rand = { version = "0.8", features = ["small_rng"] }
+console_error_panic_hook = "0.1"
+bytemuck = { version = "1.0", features = ["derive"] }
+wgpu = "25.0.2"
+futures = "0.3"
+
+[dependencies.web-sys]
+version = "0.3.77"
+features = [
+  "console",
+  "Performance",
+  "Window",
+  "Document",
+  "HtmlCanvasElement",
+  "WebGl2RenderingContext",
+  "Navigator",
+  # Canvas 2D rendering
+  "CanvasRenderingContext2d",
+  "Element",
+  # WebGPU support - only confirmed available features
+  "Gpu",
+  "GpuAdapter",
+  "GpuDevice",
+  "GpuQueue",
+  "GpuCanvasContext",
+  "GpuBuffer",
+  "GpuBindGroup",
+  "GpuBindGroupLayout",
+  "GpuBindGroupDescriptor",
+  "GpuBindGroupEntry",
+  "GpuBindGroupLayoutDescriptor",
+  "GpuBindGroupLayoutEntry",
+  "GpuPipelineLayout",
+  "GpuPipelineLayoutDescriptor",
+  "GpuRenderPipeline",
+  "GpuRenderPipelineDescriptor",
+  "GpuShaderModule",
+  "GpuShaderModuleDescriptor",
+  "GpuCommandEncoder",
+  "GpuCommandBuffer",
+  "GpuRenderPassEncoder",
+  "GpuRenderPassDescriptor",
+  "GpuRenderPassColorAttachment",
+  "GpuTextureView",
+  "GpuTexture",
+  "GpuTextureDescriptor",
+  "GpuBufferDescriptor",
+  "GpuVertexBufferLayout",
+  "GpuVertexAttribute",
+  "GpuVertexState",
+  "GpuFragmentState",
+  "GpuColorTargetState",
+  "GpuPrimitiveState",
+  "GpuMultisampleState",
+  "GpuRequestAdapterOptions",
+  "GpuDeviceDescriptor",
+  "GpuCanvasConfiguration",
+]
+
+[profile.release]
+# Enable maximum optimizations for performance
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# Optimize for small size while maintaining performance
+[profile.release.package."*"]
+opt-level = 3

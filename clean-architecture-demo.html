@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Particle Life - Rust + TypeScript Clean Architecture</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                background: #000;
+                color: #fff;
+                font-family: Arial, sans-serif;
+                overflow: hidden;
+            }
+
+            #canvas {
+                display: block;
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+            }
+
+            .ui-panel {
+                position: absolute;
+                top: 20px;
+                left: 20px;
+                background: rgba(0, 0, 0, 0.8);
+                padding: 20px;
+                border-radius: 10px;
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                z-index: 100;
+            }
+
+            .ui-panel h3 {
+                margin: 0 0 15px 0;
+                color: #00ff88;
+            }
+
+            .control-group {
+                margin-bottom: 15px;
+            }
+
+            .control-group label {
+                display: block;
+                margin-bottom: 5px;
+                font-size: 14px;
+                color: #ccc;
+            }
+
+            .control-group input[type="range"] {
+                width: 200px;
+                margin-right: 10px;
+            }
+
+            .control-group input[type="number"] {
+                width: 60px;
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                color: #fff;
+                padding: 5px;
+                border-radius: 3px;
+            }
+
+            .control-group button {
+                background: #00ff88;
+                color: #000;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+                cursor: pointer;
+                font-weight: bold;
+                margin-right: 10px;
+            }
+
+            .control-group button:hover {
+                background: #00cc66;
+            }
+
+            .stats {
+                position: absolute;
+                top: 20px;
+                right: 20px;
+                background: rgba(0, 0, 0, 0.8);
+                padding: 15px;
+                border-radius: 10px;
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                font-family: monospace;
+                font-size: 12px;
+            }
+
+            .stats h4 {
+                margin: 0 0 10px 0;
+                color: #00ff88;
+            }
+
+            .architecture-info {
+                position: absolute;
+                bottom: 20px;
+                left: 20px;
+                background: rgba(0, 0, 0, 0.8);
+                padding: 15px;
+                border-radius: 10px;
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                font-size: 12px;
+                max-width: 300px;
+            }
+
+            .architecture-info h4 {
+                margin: 0 0 10px 0;
+                color: #00ff88;
+            }
+
+            .architecture-info .rust-layer {
+                color: #ff6b35;
+                font-weight: bold;
+            }
+
+            .architecture-info .ts-layer {
+                color: #3178c6;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="canvas"></canvas>
+
+        <div class="ui-panel">
+            <h3>🎛️ Simulation Controls</h3>
+
+            <div class="control-group">
+                <label
+                    >Particle Count:
+                    <span id="particleCountValue">1000</span></label
+                >
+                <input
+                    type="range"
+                    id="particleCount"
+                    min="64"
+                    max="6400"
+                    step="64"
+                    value="1000"
+                />
+            </div>
+
+            <div class="control-group">
+                <label>Friction: <span id="frictionValue">0.1</span></label>
+                <input
+                    type="range"
+                    id="friction"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value="0.1"
+                />
+            </div>
+
+            <div class="control-group">
+                <label
+                    >Force Scale: <span id="forceScaleValue">1.0</span></label
+                >
+                <input
+                    type="range"
+                    id="forceScale"
+                    min="0.1"
+                    max="5.0"
+                    step="0.1"
+                    value="1.0"
+                />
+            </div>
+
+            <div class="control-group">
+                <label>Background Color:</label>
+                <input type="color" id="backgroundColor" value="#000000" />
+            </div>
+
+            <div class="control-group">
+                <button id="randomizeRules">🎲 Randomize Rules</button>
+                <button id="resetSimulation">🔄 Reset</button>
+            </div>
+        </div>
+
+        <div class="stats">
+            <h4>📊 Performance</h4>
+            <div id="fps">FPS: --</div>
+            <div id="particleInfo">Particles: --</div>
+            <div id="engineInfo">Engine: --</div>
+        </div>
+
+        <div class="architecture-info">
+            <h4>🏗️ Clean Architecture</h4>
+            <div>
+                <span class="rust-layer">🦀 Rust Layer:</span><br />
+                • All simulation logic<br />
+                • WebGPU rendering (future)<br />
+                • WASM-optimized performance<br />
+                • Ready for ESP32 native deployment
+            </div>
+            <br />
+            <div>
+                <span class="ts-layer">🎯 TypeScript Layer:</span><br />
+                • UI controls only<br />
+                • DOM manipulation<br />
+                • Calls into Rust API<br />
+                • Thin presentation layer
+            </div>
+        </div>
+
+        <script type="module" src="./app.ts"></script>
+    </body>
+</html>
