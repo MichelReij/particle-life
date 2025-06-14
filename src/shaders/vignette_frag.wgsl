@@ -9,6 +9,8 @@ struct SimParams {
     canvasRenderHeight: f32,
     virtualWorldOffsetX: f32,
     virtualWorldOffsetY: f32,
+    viewportWidth: f32,
+    viewportHeight: f32,
     boundaryMode: u32,
     particleRenderSize: f32,
     forceScale: f32,

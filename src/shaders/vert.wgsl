@@ -10,6 +10,8 @@ struct SimParams {
     canvas_render_height: f32,
     virtual_world_offset_x: f32,
     virtual_world_offset_y: f32,
+    viewport_width: f32,
+    viewport_height: f32,
     boundary_mode: u32,
     particle_render_size: f32,
     force_scale: f32,
@@ -108,17 +110,19 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
     // Use per-particle size instead of global particle_render_size
     let particle_radius_pixels = particle_attrs.particle_size;
 
-    // Particle position is in virtual world coordinates.
-    // Translate to canvas-relative coordinates before normalizing.
-    let canvas_relative_pos_x = particle_attrs.particle_pos.x - sim_params.virtual_world_offset_x;
-    let canvas_relative_pos_y = particle_attrs.particle_pos.y - sim_params.virtual_world_offset_y;
+    // Particle position is in virtual world coordinates (0-2400 range)
+    // Convert directly to clip space (-1 to 1) based on the fixed 2400x2400 virtual world
+    let normalized_particle_pos = vec2<f32>(
+        (particle_attrs.particle_pos.x / 2400.0) * 2.0 - 1.0,
+        (1.0 - (particle_attrs.particle_pos.y / 2400.0)) * 2.0 - 1.0
+    );
 
-    // Convert canvas-relative particle position to clip space (-1 to 1)
-    // Invert Y axis for proper screen coordinates
-    let normalized_particle_pos = vec2<f32>((canvas_relative_pos_x / sim_params.canvas_render_width) * 2.0 - 1.0, (1.0 - (canvas_relative_pos_y / sim_params.canvas_render_height)) * 2.0 - 1.0);
-
-    // Scale quad vertex by particle size and convert to clip space dimensions relative to canvas render size
-    let scaled_quad_pos = vec2<f32>(vertex_attrs.quad_pos.x * (particle_radius_pixels / sim_params.canvas_render_width), vertex_attrs.quad_pos.y * (particle_radius_pixels / sim_params.canvas_render_height));
+    // Scale quad vertex by particle size and convert to clip space dimensions
+    // Fixed scaling for 2400x2400 virtual world
+    let scaled_quad_pos = vec2<f32>(
+        vertex_attrs.quad_pos.x * (particle_radius_pixels / 2400.0),
+        vertex_attrs.quad_pos.y * (particle_radius_pixels / 2400.0)
+    );
 
     out.position = vec4<f32>(normalized_particle_pos + scaled_quad_pos, 0.0, 1.0);
     out.particle_color = getColorForType(particle_attrs.particle_type, sim_params.num_types);

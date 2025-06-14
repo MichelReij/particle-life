@@ -3,6 +3,7 @@ console.log("🚀 main.ts loading with proper WASM integration...");
 // Import WASM module using the standard wasm-bindgen approach
 import init, { ParticleLifeEngine } from "./pkg/particle_life_wasm.js";
 import { setParameterUpdateCallbacks, initializeUI } from "./ui";
+import { SimulationParams } from "./particle-life-types";
 
 class App {
     private engine: ParticleLifeEngine | null = null;
@@ -159,6 +160,12 @@ class App {
                     this.engine.update_background_color(r, g, b);
                 }
             },
+            updateBackgroundColorFromTemperature: (temp: number) => {
+                // Update all temperature-related parameters using comprehensive method
+                if (this.engine) {
+                    this.engine.set_temperature(temp);
+                }
+            },
             updateSimulationParameter: (paramName: string, value: number) => {
                 // Update any simulation parameter
                 if (this.engine) {
@@ -177,10 +184,76 @@ class App {
                     this.engine.set_particle_count_from_pressure(pressure);
                 }
             },
+            // Comprehensive parameter methods that handle all effects internally in Rust
+            setTemperature: (temp: number) => {
+                if (this.engine) {
+                    this.engine.set_temperature(temp);
+                }
+            },
+            setPressure: (pressure: number) => {
+                if (this.engine) {
+                    this.engine.set_pressure(pressure);
+                    // Also update particle count
+                    this.engine.set_particle_count_from_pressure(pressure);
+                }
+            },
+            setUVLight: (uv: number) => {
+                if (this.engine) {
+                    this.engine.set_uv_light(uv);
+                }
+            },
+            setElectricalActivity: (electrical: number) => {
+                if (this.engine) {
+                    this.engine.set_electrical_activity(electrical);
+                }
+            },
+            setZoom: (level: number, centerX?: number, centerY?: number) => {
+                console.log(
+                    `🔍 Main.ts setZoom called: level=${level}, center=(${centerX}, ${centerY})`
+                );
+                if (this.engine) {
+                    this.engine.set_zoom(level, centerX, centerY);
+                } else {
+                    console.warn("🔍 Engine not available for setZoom");
+                }
+            },
         });
 
-        // Initialize the full UI system (placeholder - would need proper parameters)
-        // initializeUI(simParams, zoomLevel);
+        // Initialize the full UI system with default parameters
+        const defaultSimParams: SimulationParams = {
+            deltaTime: 0.016,
+            friction: 0.8,
+            numParticles: 1000,
+            numTypes: 4,
+            virtualWorldWidth: 2400,
+            virtualWorldHeight: 2400,
+            canvasRenderWidth: 800,
+            canvasRenderHeight: 600,
+            virtualWorldOffsetX: 0,
+            virtualWorldOffsetY: 0,
+            boundaryMode: 1,
+            particleRenderSize: 2.0,
+            forceScale: 1.0,
+            rSmooth: 0.5,
+            flatForce: false,
+            driftXPerSecond: 0,
+            interTypeAttractionScale: 1.0,
+            interTypeRadiusScale: 1.0,
+            time: 0,
+            fisheyeStrength: 0,
+            backgroundColor: [0.05, 0.05, 0.1],
+            leniaEnabled: false,
+            leniaGrowthMu: 0.15,
+            leniaGrowthSigma: 0.017,
+            leniaKernelRadius: 15.0,
+            lightningFrequency: 5.0,
+            lightningIntensity: 1.0,
+            lightningDuration: 0.1,
+        };
+
+        const defaultZoomLevel = 1.0;
+        console.log("🎯 Initializing UI with default parameters...");
+        initializeUI(defaultSimParams, defaultZoomLevel);
 
         // Particle count slider (legacy - may be handled by initializeUI now)
         const particleCountSlider = document.getElementById(
@@ -253,16 +326,9 @@ class App {
             }
 
             this.frameCount++;
+            // Update FPS counter every 60 frames (removed verbose status logging)
             if (this.frameCount % 60 === 0) {
-                const particleCount = this.engine?.get_particle_count() || 0;
-                console.log(
-                    `🔄 Frame ${this.frameCount}, delta: ${deltaTime.toFixed(
-                        4
-                    )}s, particles: ${particleCount}, FPS: ${this.currentFPS}`
-                );
-                this.updateStatus(
-                    `Frame ${this.frameCount}, particles: ${particleCount}, FPS: ${this.currentFPS}`
-                );
+                // Just update internal FPS counter, no status logging
             }
 
             this.animationId = requestAnimationFrame(animate);

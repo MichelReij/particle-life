@@ -40,37 +40,6 @@ pub fn pressure_to_particle_count(pressure: f32, min_particles: u32, max_particl
     ((target / 64.0).round() * 64.0) as u32
 }
 
-// Convert HSLuv color to RGB
-pub fn hsluv_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
-    // Simplified HSLuv to RGB conversion
-    // This is a basic implementation - for full HSLuv support, you'd want to use a proper library
-
-    let h_norm = (h % 360.0) / 360.0;
-    let s_norm = (s / 100.0).clamp(0.0, 1.0);
-    let l_norm = (l / 100.0).clamp(0.0, 1.0);
-
-    // Convert to HSL first, then to RGB
-    let c = (1.0 - (2.0 * l_norm - 1.0).abs()) * s_norm;
-    let x = c * (1.0 - ((h_norm * 6.0) % 2.0 - 1.0).abs());
-    let m = l_norm - c / 2.0;
-
-    let (r, g, b) = if h_norm < 1.0 / 6.0 {
-        (c, x, 0.0)
-    } else if h_norm < 2.0 / 6.0 {
-        (x, c, 0.0)
-    } else if h_norm < 3.0 / 6.0 {
-        (0.0, c, x)
-    } else if h_norm < 4.0 / 6.0 {
-        (0.0, x, c)
-    } else if h_norm < 5.0 / 6.0 {
-        (x, 0.0, c)
-    } else {
-        (c, 0.0, x)
-    };
-
-    [(r + m), (g + m), (b + m)]
-}
-
 // Calculate background color based on drift speed
 pub fn calculate_background_color_from_drift(drift_x_per_second: f32) -> [f32; 3] {
     let normalized_abs_drift = (drift_x_per_second.abs() / 80.0).min(1.0);
@@ -80,5 +49,7 @@ pub fn calculate_background_color_from_drift(drift_x_per_second: f32) -> [f32; 3
     let saturation = 33.0;
     let lightness = 66.0;
 
-    hsluv_to_rgb(hue, saturation, lightness)
+    // Use the proper hsluv crate for conversion
+    let (r, g, b) = hsluv::hsluv_to_rgb(hue as f64, saturation as f64, lightness as f64);
+    [r as f32, g as f32, b as f32]
 }

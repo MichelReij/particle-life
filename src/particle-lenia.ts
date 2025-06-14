@@ -1680,8 +1680,8 @@ export function updateBackgroundColorAndDrift(
         Math.abs(newDriftXPerSecond) / 80.0 // Match drift range of ±80 px/s
     );
 
-    // Hue transitions from blue (240°) at no drift to red (0°) at max drift
-    const hue = 215 - normalizedAbsDrift * 200; // 240° to 0° (blue to red)
+    // Hue transitions from blue (215) at no drift to red (15°) at max drift
+    const hue = 215 - normalizedAbsDrift * 200; // 215° to 15° (blue to red)
     const saturation = 33;
     const lightness = 66;
 

@@ -35,6 +35,7 @@ pub struct WebGpuRenderer {
     lightning_render_pipeline: wgpu::RenderPipeline,
     fisheye_render_pipeline: wgpu::RenderPipeline,
     vignette_render_pipeline: wgpu::RenderPipeline,
+    zoom_render_pipeline: wgpu::RenderPipeline,
 
     // Bind groups
     compute_bind_groups: [wgpu::BindGroup; 2], // Double-buffered bind groups
@@ -45,6 +46,10 @@ pub struct WebGpuRenderer {
     grid_render_bind_group: wgpu::BindGroup,
     fisheye_render_bind_group: wgpu::BindGroup,
     vignette_render_bind_group: wgpu::BindGroup,
+    zoom_render_bind_group: wgpu::BindGroup,
+
+    // Zoom uniforms buffer
+    zoom_uniforms_buffer: wgpu::Buffer,
 
     // Canvas dimensions
     canvas_width: u32,
@@ -195,16 +200,32 @@ impl WebGpuRenderer {
             mapped_at_creation: false,
         });
 
+        // Create zoom uniforms buffer
+        let zoom_uniforms_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Zoom Uniforms Buffer"),
+            size: 16, // zoom_level(f32), center_x(f32), center_y(f32), padding(f32)
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         // Create post-processing textures
-        let texture_size = wgpu::Extent3d {
-            width: canvas_width,
-            height: canvas_height,
+        // Scene texture should be 2400x2400 to render the full virtual world
+        let scene_texture_size = wgpu::Extent3d {
+            width: 2400,
+            height: 2400,
+            depth_or_array_layers: 1,
+        };
+
+        // Intermediate texture should also be 2400x2400 to match scene texture
+        let intermediate_texture_size = wgpu::Extent3d {
+            width: 2400,
+            height: 2400,
             depth_or_array_layers: 1,
         };
 
         let scene_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Scene Texture"),
-            size: texture_size,
+            size: scene_texture_size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -217,7 +238,7 @@ impl WebGpuRenderer {
 
         let intermediate_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Intermediate Texture"),
-            size: texture_size,
+            size: intermediate_texture_size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -760,6 +781,11 @@ impl WebGpuRenderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/vignette_frag.wgsl").into()),
         });
 
+        let zoom_fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Zoom Fragment Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/zoom_frag.wgsl").into()),
+        });
+
         // Create post-processing bind group layouts
         let post_processing_uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -809,6 +835,43 @@ impl WebGpuRenderer {
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },
                             view_dimension: wgpu::TextureViewDimension::D2,
                             multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        // Create zoom bind group layout (similar to post-processing but with zoom uniforms)
+        let zoom_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Zoom Bind Group Layout"),
+                entries: &[
+                    // Scene sampler
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    // Scene texture
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Zoom uniforms
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
                         },
                         count: None,
                     },
@@ -872,6 +935,29 @@ impl WebGpuRenderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(&intermediate_texture_view),
+                },
+            ],
+        });
+
+        // Initialize zoom uniforms buffer with default values
+        let initial_zoom_uniforms = [1.0f32, 1200.0, 1200.0, 0.0]; // zoom=1.0, center at (1200,1200)
+        queue.write_buffer(&zoom_uniforms_buffer, 0, bytemuck::cast_slice(&initial_zoom_uniforms));
+
+        let zoom_render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Zoom Render Bind Group"),
+            layout: &zoom_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Sampler(&scene_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&intermediate_texture_view), // Read from intermediate texture (after fisheye)
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: zoom_uniforms_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -1057,6 +1143,52 @@ impl WebGpuRenderer {
             cache: None,
         });
 
+        // Create zoom render pipeline
+        let zoom_render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Zoom Render Pipeline Layout"),
+                bind_group_layouts: &[&zoom_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let zoom_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Zoom Render Pipeline"),
+            layout: Some(&zoom_render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &background_vertex_shader, // Reuse same vertex shader
+                entry_point: Some("main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &zoom_fragment_shader,
+                entry_point: Some("main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: None, // Replace
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
         console_log!("✅ WebGPU renderer initialized successfully");
 
         Ok(WebGpuRenderer {
@@ -1085,6 +1217,7 @@ impl WebGpuRenderer {
             lightning_render_pipeline,
             fisheye_render_pipeline,
             vignette_render_pipeline,
+            zoom_render_pipeline,
             compute_bind_groups,
             render_bind_groups,
             lightning_compute_bind_group,
@@ -1093,6 +1226,8 @@ impl WebGpuRenderer {
             grid_render_bind_group,
             fisheye_render_bind_group,
             vignette_render_bind_group,
+            zoom_render_bind_group,
+            zoom_uniforms_buffer,
             canvas_width,
             canvas_height,
         })
@@ -1127,6 +1262,9 @@ impl WebGpuRenderer {
             0,
             &particle_data,
         );
+
+        // Update zoom uniforms with current simulation parameters
+        self.update_zoom_uniforms(simulation_params);
 
         // Get current surface texture
         let output = self
@@ -1231,29 +1369,7 @@ impl WebGpuRenderer {
             particle_pass.draw(0..4, 0..particle_count);
         }
 
-        // Pass 3: Lightning render to scene texture (additive blend)
-        {
-            let mut lightning_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Lightning Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.scene_texture_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load, // Keep existing content
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            lightning_pass.set_pipeline(&self.lightning_render_pipeline);
-            lightning_pass.set_bind_group(0, &self.lightning_render_bind_group, &[]);
-            lightning_pass.draw(0..6, 0..1); // Fullscreen quad
-        }
-
-        // Pass 4: Grid render to scene texture (additive blend)
+        // Pass 3: Grid render to scene texture (additive blend)
         {
             let mut grid_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Grid Render Pass"),
@@ -1275,9 +1391,31 @@ impl WebGpuRenderer {
             grid_pass.draw(0..6, 0..1); // Fullscreen quad
         }
 
-        // Pass 5: Fisheye (if enabled) - scene_texture -> intermediate_texture
-        let use_fisheye = simulation_params.fisheye_strength > 0.0;
-        if use_fisheye {
+        // Pass 4: Lightning render to scene texture (additive blend)
+        {
+            let mut lightning_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Lightning Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_texture_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // Keep existing content
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            lightning_pass.set_pipeline(&self.lightning_render_pipeline);
+            lightning_pass.set_bind_group(0, &self.lightning_render_bind_group, &[]);
+            lightning_pass.draw(0..6, 0..1); // Fullscreen quad
+        }
+
+        // Pass 5: Fisheye (always runs) - scene_texture -> intermediate_texture
+        // The shader decides whether to apply the effect based on fisheye_strength parameter
+        {
             let mut fisheye_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Fisheye Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1298,10 +1436,10 @@ impl WebGpuRenderer {
             fisheye_pass.draw(0..6, 0..1); // Fullscreen quad
         }
 
-        // Pass 6: Final output (vignette if fisheye was applied, or direct copy if not)
+        // Pass 6: Zoom post-processing (final step) - matches TypeScript pipeline
         {
-            let mut final_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Final Render Pass"),
+            let mut zoom_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Zoom Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -1315,19 +1453,11 @@ impl WebGpuRenderer {
                 occlusion_query_set: None,
             });
 
-            if use_fisheye {
-                // Apply vignette to fisheye-processed image
-                final_pass.set_pipeline(&self.vignette_render_pipeline);
-                final_pass.set_bind_group(0, &self.vignette_render_bind_group, &[]);
-            } else {
-                // Direct copy from scene texture (no fisheye processing)
-                // We'll use the vignette pipeline but with the scene texture instead
-                // For now, just use vignette pipeline - we could add a simple copy pipeline if needed
-                final_pass.set_pipeline(&self.vignette_render_pipeline);
-                final_pass.set_bind_group(0, &self.fisheye_render_bind_group, &[]); // This uses scene_texture
-            }
-
-            final_pass.draw(0..6, 0..1); // Fullscreen quad
+            // Always use zoom pipeline as final step (matches TypeScript)
+            // This reads from intermediate_texture (after fisheye processing)
+            zoom_pass.set_pipeline(&self.zoom_render_pipeline);
+            zoom_pass.set_bind_group(0, &self.zoom_render_bind_group, &[]);
+            zoom_pass.draw(0..6, 0..1); // Fullscreen quad
         }
 
         // Submit commands
@@ -1335,5 +1465,21 @@ impl WebGpuRenderer {
         output.present();
 
         Ok(())
+    }
+
+    /// Update zoom uniforms buffer with current zoom parameters
+    pub fn update_zoom_uniforms(&mut self, simulation_params: &SimulationParams) {
+        // Calculate zoom level from viewport size
+        let zoom_level = 2400.0 / simulation_params.viewport_width;
+
+        // Calculate center of the current viewport in virtual world coordinates
+        let center_x = simulation_params.virtual_world_offset_x + (simulation_params.viewport_width / 2.0);
+        let center_y = simulation_params.virtual_world_offset_y + (simulation_params.viewport_height / 2.0);
+
+        // Update zoom uniforms buffer
+        let zoom_uniforms = [zoom_level, center_x, center_y, 0.0f32]; // padding for alignment
+        self.queue.write_buffer(&self.zoom_uniforms_buffer, 0, bytemuck::cast_slice(&zoom_uniforms));
+
+        console_log!("🔍 Updated zoom uniforms: level={:.2}, center=({:.0},{:.0})", zoom_level, center_x, center_y);
     }
 }

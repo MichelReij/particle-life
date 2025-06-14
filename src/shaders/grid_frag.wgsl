@@ -9,6 +9,8 @@ struct SimParams {
     canvasRenderHeight: f32,
     virtualWorldOffsetX: f32,
     virtualWorldOffsetY: f32,
+    viewportWidth: f32,
+    viewportHeight: f32,
     boundaryMode: u32,
     particleRenderSize: f32,
     forceScale: f32,
@@ -57,11 +59,11 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let line_alpha: f32 = 0.1;
     // Jouw huidige waarde
 
-    let center_x = sim_params.virtualWorldOffsetX + sim_params.canvasRenderWidth / 2.0;
-    let center_y = sim_params.virtualWorldOffsetY + sim_params.canvasRenderHeight / 2.0;
+    // Grid should always be centered at the center of the 2400x2400 virtual world
+    let center_x = 1200.0; // Fixed center of virtual world
+    let center_y = 1200.0; // Fixed center of virtual world
 
-    // Calculate grid lines that are aligned with the center axes
-    // We need to find the grid spacing relative to the center position
+    // Calculate grid lines that are aligned with the virtual world center
     let offset_from_center_x = frag_coord.x - center_x;
     let offset_from_center_y = frag_coord.y - center_y;
 

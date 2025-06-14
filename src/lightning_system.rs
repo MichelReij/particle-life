@@ -169,11 +169,7 @@ impl LightningSystem {
 
         self.next_flash_time = current_time + randomized_interval;
 
-        console_log!(
-            "⏰ Next lightning flash scheduled in {:.2}s (activity: {:.1}%)",
-            randomized_interval,
-            activity_factor * 100.0
-        );
+        // Removed verbose lightning logging
     }
 
     fn update_segment_visibility(&mut self, current_time: f32, params: &SimulationParams) {

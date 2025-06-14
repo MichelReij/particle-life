@@ -173,37 +173,66 @@ function electricalActivityToInterTypeAttractionScale(
 let parameterUpdateCallbacks = {
     updateDriftAndBackground: (value: number) => {},
     updateBackgroundColor: (r: number, g: number, b: number) => {},
+    updateBackgroundColorFromTemperature: (temp: number) => {},
     updateSimulationParameter: (paramName: string, value: number) => {},
     updateZoom: (level: number, centerX?: number, centerY?: number) => {},
     updateParticleCount: (pressure: number) => {},
+    // New comprehensive parameter methods
+    setTemperature: (temp: number) => {},
+    setPressure: (pressure: number) => {},
+    setUVLight: (uv: number) => {},
+    setElectricalActivity: (electrical: number) => {},
+    setZoom: (level: number, centerX?: number, centerY?: number) => {},
 };
 
 export function setParameterUpdateCallbacks(callbacks: {
     updateDriftAndBackground: (value: number) => void;
     updateBackgroundColor: (r: number, g: number, b: number) => void;
+    updateBackgroundColorFromTemperature: (temp: number) => void;
     updateSimulationParameter: (paramName: string, value: number) => void;
     updateZoom: (level: number, centerX?: number, centerY?: number) => void;
     updateParticleCount: (pressure: number) => void;
+    // New comprehensive parameter methods
+    setTemperature?: (temp: number) => void;
+    setPressure?: (pressure: number) => void;
+    setUVLight?: (uv: number) => void;
+    setElectricalActivity?: (electrical: number) => void;
+    setZoom?: (level: number, centerX?: number, centerY?: number) => void;
 }) {
-    parameterUpdateCallbacks = callbacks;
+    parameterUpdateCallbacks = {
+        ...parameterUpdateCallbacks,
+        ...callbacks,
+        // Provide defaults for optional comprehensive methods
+        setTemperature:
+            callbacks.setTemperature || parameterUpdateCallbacks.setTemperature,
+        setPressure:
+            callbacks.setPressure || parameterUpdateCallbacks.setPressure,
+        setUVLight: callbacks.setUVLight || parameterUpdateCallbacks.setUVLight,
+        setElectricalActivity:
+            callbacks.setElectricalActivity ||
+            parameterUpdateCallbacks.setElectricalActivity,
+        setZoom: callbacks.setZoom || parameterUpdateCallbacks.setZoom,
+    };
 }
 
 // === Parameter Update Functions ===
 
 function updateDriftAndFrictionFromTemperature(temp: number): void {
+    // Use comprehensive temperature method if available (Rust engine)
+    if (parameterUpdateCallbacks.setTemperature) {
+        parameterUpdateCallbacks.setTemperature(temp);
+        return;
+    }
+
+    // Fallback to individual parameter updates (TypeScript engine)
     const newDrift = temperatureToDrift(temp);
     const newFriction = temperatureToFriction(temp);
-    const backgroundColor = temperatureToBackgroundColor(temp);
 
     // Update drift using callback
     parameterUpdateCallbacks.updateDriftAndBackground(newDrift);
 
-    // Update background color
-    parameterUpdateCallbacks.updateBackgroundColor(
-        backgroundColor.r,
-        backgroundColor.g,
-        backgroundColor.b
-    );
+    // Update background color using HSLuv from Rust
+    parameterUpdateCallbacks.updateBackgroundColorFromTemperature(temp);
 
     // Update friction parameter
     parameterUpdateCallbacks.updateSimulationParameter("friction", newFriction);
@@ -230,6 +259,15 @@ function updateDriftAndFrictionFromTemperature(temp: number): void {
 }
 
 function updateParametersFromPressure(pressure: number): void {
+    // Use comprehensive pressure method if available (Rust engine)
+    if (parameterUpdateCallbacks.setPressure) {
+        parameterUpdateCallbacks.setPressure(pressure);
+        // Update particle count display
+        updateParticleCountDisplay(pressure);
+        return;
+    }
+
+    // Fallback to individual parameter updates (TypeScript engine)
     const newRSmooth = pressureToRSmooth(pressure);
     const newForceScale = pressureToForceScale(pressure);
     // REMOVED: Inter-type parameters are now controlled by UV slider
@@ -265,6 +303,13 @@ function updateParametersFromPressure(pressure: number): void {
 }
 
 function updateParametersFromUV(uv: number): void {
+    // Use comprehensive UV method if available (Rust engine)
+    if (parameterUpdateCallbacks.setUVLight) {
+        parameterUpdateCallbacks.setUVLight(uv);
+        return;
+    }
+
+    // Fallback to individual parameter updates (TypeScript engine)
     const newInterTypeRadiusScale = uvToInterTypeRadiusScale(uv);
 
     // Update inter-type radius scale using callback (UV now only controls radius scale)
@@ -285,6 +330,13 @@ function updateParametersFromUV(uv: number): void {
 function updateParametersFromElectricalActivity(
     electricalActivity: number
 ): void {
+    // Use comprehensive electrical activity method if available (Rust engine)
+    if (parameterUpdateCallbacks.setElectricalActivity) {
+        parameterUpdateCallbacks.setElectricalActivity(electricalActivity);
+        return;
+    }
+
+    // Fallback to individual parameter updates (TypeScript engine)
     const newInterTypeAttractionScale =
         electricalActivityToInterTypeAttractionScale(electricalActivity);
 
@@ -759,7 +811,7 @@ function initializeZoomSlider(currentZoomLevel: number): void {
         );
 
         zoomSlider.value = savedZoom.toString();
-        zoomValueDisplay.textContent = savedZoom.toFixed(1);
+        zoomValueDisplay.textContent = savedZoom.toFixed(2);
 
         // Immediately update the engine with the final zoom value to ensure consistency
         if (parameterUpdateCallbacks && parameterUpdateCallbacks.updateZoom) {
@@ -775,16 +827,34 @@ function initializeZoomSlider(currentZoomLevel: number): void {
                 (event.target as HTMLInputElement).value
             );
             console.log(`🎚️ Zoom slider input event: ${newValue}`);
-            zoomValueDisplay.textContent = newValue.toFixed(1);
+            zoomValueDisplay.textContent = newValue.toFixed(2);
             saveToLocalStorage(STORAGE_KEYS.zoom, newValue);
 
             // Constrain zoom center based on new zoom level
             constrainZoomCenter(newValue);
-            parameterUpdateCallbacks.updateZoom(
-                newValue,
-                zoomCenterX,
-                zoomCenterY
-            );
+
+            // Use comprehensive zoom method if available (Rust engine)
+            if (parameterUpdateCallbacks.setZoom) {
+                console.log(
+                    `🔍 Calling setZoom(${newValue}, ${zoomCenterX}, ${zoomCenterY})`
+                );
+                parameterUpdateCallbacks.setZoom(
+                    newValue,
+                    zoomCenterX,
+                    zoomCenterY
+                );
+            } else {
+                console.log(
+                    `🔍 Calling updateZoom fallback(${newValue}, ${zoomCenterX}, ${zoomCenterY})`
+                );
+                // Fallback to updateZoom callback (TypeScript engine)
+                parameterUpdateCallbacks.updateZoom(
+                    newValue,
+                    zoomCenterX,
+                    zoomCenterY
+                );
+            }
+
             updateZoomCenterInfo(newValue);
         });
 
@@ -794,16 +864,28 @@ function initializeZoomSlider(currentZoomLevel: number): void {
                 (event.target as HTMLInputElement).value
             );
             console.log(`Zoom slider change event: ${newValue}`);
-            zoomValueDisplay.textContent = newValue.toFixed(1);
+            zoomValueDisplay.textContent = newValue.toFixed(2);
             saveToLocalStorage(STORAGE_KEYS.zoom, newValue);
 
             // Constrain zoom center based on new zoom level
             constrainZoomCenter(newValue);
-            parameterUpdateCallbacks.updateZoom(
-                newValue,
-                zoomCenterX,
-                zoomCenterY
-            );
+
+            // Use comprehensive zoom method if available (Rust engine)
+            if (parameterUpdateCallbacks.setZoom) {
+                parameterUpdateCallbacks.setZoom(
+                    newValue,
+                    zoomCenterX,
+                    zoomCenterY
+                );
+            } else {
+                // Fallback to updateZoom callback (TypeScript engine)
+                parameterUpdateCallbacks.updateZoom(
+                    newValue,
+                    zoomCenterX,
+                    zoomCenterY
+                );
+            }
+
             updateZoomCenterInfo(newValue);
         });
     }

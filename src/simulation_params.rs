@@ -14,6 +14,9 @@ pub struct SimulationParams {
     pub canvas_render_height: f32,
     pub virtual_world_offset_x: f32,
     pub virtual_world_offset_y: f32,
+    // Viewport size for zoom (the area of virtual world being viewed)
+    pub viewport_width: f32,
+    pub viewport_height: f32,
     pub boundary_mode: u32,
     pub particle_render_size: f32,
     pub force_scale: f32,
@@ -48,8 +51,12 @@ impl SimulationParams {
             virtual_world_height: 2400.0,
             canvas_render_width: 800.0,
             canvas_render_height: 800.0,
+            // Start at top-left corner initially (where particles are visible)
             virtual_world_offset_x: 0.0,
             virtual_world_offset_y: 0.0,
+            // Default viewport is the entire virtual world (zoom level 1.0)
+            viewport_width: 2400.0,
+            viewport_height: 2400.0,
             boundary_mode: 1, // Wrap mode
             particle_render_size: 12.0, // Increased from 12.0 to account for 3x scaling down (2400->800)
             force_scale: 400.0,
@@ -139,28 +146,28 @@ impl SimulationParams {
         buffer.extend_from_slice(&self.canvas_render_height.to_le_bytes()); // 7
         buffer.extend_from_slice(&self.virtual_world_offset_x.to_le_bytes()); // 8
         buffer.extend_from_slice(&self.virtual_world_offset_y.to_le_bytes()); // 9
-        buffer.extend_from_slice(&self.boundary_mode.to_le_bytes()); // 10
-        buffer.extend_from_slice(&self.particle_render_size.to_le_bytes()); // 11
-        buffer.extend_from_slice(&self.force_scale.to_le_bytes()); // 12
-        buffer.extend_from_slice(&self.r_smooth.to_le_bytes()); // 13
-        buffer.extend_from_slice(&(if self.flat_force { 1u32 } else { 0u32 }).to_le_bytes()); // 14
-        buffer.extend_from_slice(&self.drift_x_per_second.to_le_bytes()); // 15
-        buffer.extend_from_slice(&self.inter_type_attraction_scale.to_le_bytes()); // 16
-        buffer.extend_from_slice(&self.inter_type_radius_scale.to_le_bytes()); // 17
-        buffer.extend_from_slice(&self.time.to_le_bytes()); // 18
-        buffer.extend_from_slice(&self.fisheye_strength.to_le_bytes()); // 19
-        buffer.extend_from_slice(&self.background_color_r.to_le_bytes()); // 20
-        buffer.extend_from_slice(&self.background_color_g.to_le_bytes()); // 21
-        buffer.extend_from_slice(&self.background_color_b.to_le_bytes()); // 22
-        buffer.extend_from_slice(&(if self.lenia_enabled { 1u32 } else { 0u32 }).to_le_bytes()); // 23
-        buffer.extend_from_slice(&self.lenia_growth_mu.to_le_bytes()); // 24
-        buffer.extend_from_slice(&self.lenia_growth_sigma.to_le_bytes()); // 25
-        buffer.extend_from_slice(&self.lenia_kernel_radius.to_le_bytes()); // 26
-        buffer.extend_from_slice(&self.lightning_frequency.to_le_bytes()); // 27
-        buffer.extend_from_slice(&self.lightning_intensity.to_le_bytes()); // 28
-        buffer.extend_from_slice(&self.lightning_duration.to_le_bytes()); // 29
-        buffer.extend_from_slice(&0.0f32.to_le_bytes()); // 30 - padding
-        buffer.extend_from_slice(&0.0f32.to_le_bytes()); // 31 - padding
+        buffer.extend_from_slice(&self.viewport_width.to_le_bytes()); // 10
+        buffer.extend_from_slice(&self.viewport_height.to_le_bytes()); // 11
+        buffer.extend_from_slice(&self.boundary_mode.to_le_bytes()); // 12
+        buffer.extend_from_slice(&self.particle_render_size.to_le_bytes()); // 13
+        buffer.extend_from_slice(&self.force_scale.to_le_bytes()); // 14
+        buffer.extend_from_slice(&self.r_smooth.to_le_bytes()); // 15
+        buffer.extend_from_slice(&(if self.flat_force { 1u32 } else { 0u32 }).to_le_bytes()); // 16
+        buffer.extend_from_slice(&self.drift_x_per_second.to_le_bytes()); // 17
+        buffer.extend_from_slice(&self.inter_type_attraction_scale.to_le_bytes()); // 18
+        buffer.extend_from_slice(&self.inter_type_radius_scale.to_le_bytes()); // 19
+        buffer.extend_from_slice(&self.time.to_le_bytes()); // 20
+        buffer.extend_from_slice(&self.fisheye_strength.to_le_bytes()); // 21
+        buffer.extend_from_slice(&self.background_color_r.to_le_bytes()); // 22
+        buffer.extend_from_slice(&self.background_color_g.to_le_bytes()); // 23
+        buffer.extend_from_slice(&self.background_color_b.to_le_bytes()); // 24
+        buffer.extend_from_slice(&(if self.lenia_enabled { 1u32 } else { 0u32 }).to_le_bytes()); // 25
+        buffer.extend_from_slice(&self.lenia_growth_mu.to_le_bytes()); // 26
+        buffer.extend_from_slice(&self.lenia_growth_sigma.to_le_bytes()); // 27
+        buffer.extend_from_slice(&self.lenia_kernel_radius.to_le_bytes()); // 28
+        buffer.extend_from_slice(&self.lightning_frequency.to_le_bytes()); // 29
+        buffer.extend_from_slice(&self.lightning_intensity.to_le_bytes()); // 30
+        buffer.extend_from_slice(&self.lightning_duration.to_le_bytes()); // 31
 
         buffer
     }

@@ -150,16 +150,7 @@ impl ParticleLifeEngine {
 
         self.frame_count += 1;
 
-        // Log performance every 60 frames
-        if let Some(start) = start_time {
-            let end_time = js_sys::Date::now();
-            let frame_time = end_time - start;
-            console_log!(
-                "⚡ Rust frame time: {:.2}ms (delta_time: {:.3}s)",
-                frame_time,
-                delta_time
-            );
-        }
+        // Removed verbose frame time logging
     }
 
     // Particle count management
@@ -207,6 +198,129 @@ impl ParticleLifeEngine {
 
         // Round to nearest multiple of 64 for optimal GPU workgroup dispatch
         ((target / 64.0).round() * 64.0) as u32
+    }
+
+    // Temperature-based background color mapping using HSLuv (private helper)
+    fn temperature_to_background_color(&self, temp: f32) -> (f32, f32, f32) {
+        // Temperature mapping: 3°C to 40°C → Hue 215° to 15°
+        // Clamp temperature to valid range
+        let clamped_temp = temp.max(3.0).min(40.0);
+
+        // Normalize temperature: 0.0 at 3°C, 1.0 at 40°C
+        let normalized_temp = (clamped_temp - 3.0) / (40.0 - 3.0);
+
+        // Map to hue range: 215° (cold/blue) to 15° (hot/red)
+        let hue = 215.0 - normalized_temp * 200.0; // 215° to 15°
+
+        // Fixed saturation and lightness values from particle-lenia system
+        let saturation = 33.0;
+        let lightness = 66.0;
+
+        // Convert HSLuv to RGB
+        let (r, g, b) = hsluv::hsluv_to_rgb(hue as f64, saturation as f64, lightness as f64);
+
+        let hex_color = format!("#{:02X}{:02X}{:02X}",
+            (r * 255.0).round() as u8,
+            (g * 255.0).round() as u8,
+            (b * 255.0).round() as u8
+        );
+        console_log!(
+            "🌡️ Temperature {:.1}°C → HSLuv({:.1}°, {:.1}%, {:.1}%) → {}",
+            temp, hue, saturation, lightness, hex_color
+        );
+
+        (r as f32, g as f32, b as f32)
+    }
+
+    // Set temperature and update all temperature-related simulation parameters
+    #[wasm_bindgen]
+    pub fn set_temperature(&mut self, temp: f32) {
+        // Clamp temperature to valid range (3°C to 40°C)
+        let clamped_temp = temp.max(3.0).min(40.0);
+
+        // 1. Update drift speed: temp [3, 40] → drift [0, -80]
+        let drift = -((clamped_temp - 3.0) * 80.0) / 37.0;
+        self.simulation_params.drift_x_per_second = drift;
+
+        // 2. Update friction: exponential mapping temp [3, 40] → friction [0.98, 0.05]
+        let normalized_temp = (clamped_temp - 3.0) / 37.0;
+        let friction = 0.98 * (-3.0 * normalized_temp).exp();
+        self.simulation_params.friction = friction;
+
+        // 3. Update background color using HSLuv: temp [3, 40] → hue [215°, 15°]
+        let (r, g, b) = self.temperature_to_background_color(clamped_temp);
+        self.simulation_params.background_color_r = r;
+        self.simulation_params.background_color_g = g;
+        self.simulation_params.background_color_b = b;
+
+        // Convert RGB to hex for display
+        let hex_color = format!("#{:02X}{:02X}{:02X}",
+            (r * 255.0) as u8,
+            (g * 255.0) as u8,
+            (b * 255.0) as u8
+        );
+
+        console_log!(
+            "🌡️ Temperature set to {:.1}°C → drift: {:.1}, friction: {:.3}, bg: RGB({:.3}, {:.3}, {:.3}) {}",
+            clamped_temp, drift, friction, r, g, b, hex_color
+        );
+    }
+
+    // Set pressure and update all pressure-related simulation parameters
+    #[wasm_bindgen]
+    pub fn set_pressure(&mut self, pressure: f32) {
+        // Clamp pressure to valid range (0 to 350)
+        let clamped_pressure = pressure.max(0.0).min(350.0);
+
+        // 1. Update force scale: pressure [0, 350] → force_scale [100, 800]
+        let force_scale = 100.0 + (clamped_pressure * 700.0) / 350.0;
+        self.simulation_params.force_scale = force_scale;
+
+        // 2. Update rSmooth: exponential mapping pressure [0, 350] → rSmooth [20, 0.1]
+        let normalized_pressure = clamped_pressure / 350.0;
+        let r_smooth = 20.0 * (-5.3 * normalized_pressure).exp();
+        self.simulation_params.r_smooth = r_smooth;
+
+        // 3. Update particle count (handled separately via set_particle_count_from_pressure)
+
+        console_log!(
+            "🔧 Pressure set to {:.1} → force_scale: {:.1}, r_smooth: {:.3}",
+            clamped_pressure, force_scale, r_smooth
+        );
+    }
+
+    // Set UV light and update all UV-related simulation parameters
+    #[wasm_bindgen]
+    pub fn set_uv_light(&mut self, uv: f32) {
+        // Clamp UV to valid range (0 to 50)
+        let clamped_uv = uv.max(0.0).min(50.0);
+
+        // Update inter-type radius scale: UV [0, 50] → interTypeRadiusScale [0.1, 2.0]
+        let inter_type_radius_scale = 0.1 + (clamped_uv / 50.0) * (2.0 - 0.1);
+        self.simulation_params.inter_type_radius_scale = inter_type_radius_scale;
+
+        console_log!(
+            "☀️ UV light set to {:.1} → inter_type_radius_scale: {:.3}",
+            clamped_uv, inter_type_radius_scale
+        );
+    }
+
+    // Set electrical activity and update all electrical-related simulation parameters
+    #[wasm_bindgen]
+    pub fn set_electrical_activity(&mut self, electrical_activity: f32) {
+        // Clamp electrical activity to valid range (0 to 3)
+        let clamped_electrical = electrical_activity.max(0.0).min(3.0);
+
+        // Update inter-type attraction scale: cubic mapping [0, 3] → interTypeAttractionScale [0, 3]
+        let normalized_electrical = clamped_electrical / 3.0;
+        let cubic_value = normalized_electrical * normalized_electrical * normalized_electrical;
+        let inter_type_attraction_scale = cubic_value * 3.0;
+        self.simulation_params.inter_type_attraction_scale = inter_type_attraction_scale;
+
+        console_log!(
+            "⚡ Electrical activity set to {:.2} → inter_type_attraction_scale: {:.3}",
+            clamped_electrical, inter_type_attraction_scale
+        );
     }
 
     // Lightning system access
@@ -477,5 +591,46 @@ impl ParticleLifeEngine {
         let particle_count = self.pressure_to_particle_count(pressure);
         console_log!("📊 Pressure {} → {} particles", pressure, particle_count);
         self.set_particle_count(particle_count)
+    }
+
+    // Set zoom level and update viewport parameters
+    #[wasm_bindgen]
+    pub fn set_zoom(&mut self, zoom_level: f32, center_x: Option<f32>, center_y: Option<f32>) {
+        // Clamp zoom level to valid range (1.0 to 6.0)
+        let clamped_zoom = zoom_level.max(1.0).min(6.0);
+
+        // Calculate viewport size: at zoom 1.0 = full world (2400x2400), at zoom 2.0 = half world (1200x1200), etc.
+        let viewport_width = 2400.0 / clamped_zoom;
+        let viewport_height = 2400.0 / clamped_zoom;
+
+        // Center the viewport around (1200, 1200) by default
+        let center_x = center_x.unwrap_or(1200.0);
+        let center_y = center_y.unwrap_or(1200.0);
+
+        // Calculate offset to center the viewport
+        let offset_x = center_x - (viewport_width / 2.0);
+        let offset_y = center_y - (viewport_height / 2.0);
+
+        // Clamp offsets to ensure viewport stays within virtual world bounds [0, 2400]
+        let max_offset_x = 2400.0 - viewport_width;
+        let max_offset_y = 2400.0 - viewport_height;
+
+        let clamped_offset_x = offset_x.max(0.0).min(max_offset_x);
+        let clamped_offset_y = offset_y.max(0.0).min(max_offset_y);
+
+        // Update viewport offset AND size
+        self.simulation_params.virtual_world_offset_x = clamped_offset_x;
+        self.simulation_params.virtual_world_offset_y = clamped_offset_y;
+        self.simulation_params.viewport_width = viewport_width;
+        self.simulation_params.viewport_height = viewport_height;
+
+        // canvas_render_width and canvas_render_height remain constant at 800x800
+        // virtual_world_width and virtual_world_height remain constant at 2400x2400
+
+        console_log!(
+            "🔍 Zoom {:.2}x: viewport {:.0}×{:.0}, offset ({:.0},{:.0}), center ({:.0},{:.0})",
+            clamped_zoom, viewport_width, viewport_height,
+            clamped_offset_x, clamped_offset_y, center_x, center_y
+        );
     }
 }
