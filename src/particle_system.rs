@@ -11,12 +11,13 @@ pub struct Particle {
 }
 
 // Size ranges for each particle type (multipliers of base size)
-const PARTICLE_TYPE_SIZE_RANGES: [(f32, f32); 5] = [
-    (1.4, 1.6), // Type 0: Blue   - large, dominant
-    (1.1, 1.3), // Type 1: Orange - medium-large
-    (0.6, 0.8), // Type 2: Red    - small, agile
-    (0.8, 1.0), // Type 3: Purple - smaller, compact
-    (0.9, 1.1), // Type 4: Green  - medium, balanced
+// We'll use the middle value of each range with ±20% randomization
+const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 5] = [
+    1.5, // Type 0: Blue   - large, dominant (middle of 1.4-1.6)
+    1.2, // Type 1: Orange - medium-large (middle of 1.1-1.3)
+    0.7, // Type 2: Red    - small, agile (middle of 0.6-0.8)
+    0.9, // Type 3: Purple - smaller, compact (middle of 0.8-1.0)
+    1.0, // Type 4: Green  - medium, balanced (middle of 0.9-1.1)
 ];
 
 // Custom color palette matching TypeScript version
@@ -50,8 +51,11 @@ impl ParticleSystem {
         // Initialize all particles (even inactive ones)
         for i in 0..max_particles {
             let particle_type = (i % num_types) as u32;
-            let size_range = PARTICLE_TYPE_SIZE_RANGES[particle_type as usize];
-            let size_multiplier = rng.gen_range(size_range.0..size_range.1);
+            let base_multiplier = PARTICLE_TYPE_SIZE_MULTIPLIERS[particle_type as usize];
+
+            // Add ±20% randomization to the base multiplier
+            let randomization_factor = rng.gen_range(-0.2..0.2);
+            let size_multiplier = base_multiplier * (1.0 + randomization_factor);
 
             let particle = Particle {
                 position: [
@@ -111,8 +115,11 @@ impl ParticleSystem {
         // Initialize newly activated particles
         for i in old_count..self.active_count {
             let particle_type = (i % self.num_types) as u32;
-            let size_range = PARTICLE_TYPE_SIZE_RANGES[particle_type as usize];
-            let size_multiplier = rng.gen_range(size_range.0..size_range.1);
+            let base_multiplier = PARTICLE_TYPE_SIZE_MULTIPLIERS[particle_type as usize];
+
+            // Add ±20% randomization to the base multiplier
+            let randomization_factor = rng.gen_range(-0.2..0.2);
+            let size_multiplier = base_multiplier * (1.0 + randomization_factor);
 
             if let Some(particle) = self.particles.get_mut(i as usize) {
                 particle.position = [
@@ -386,8 +393,11 @@ impl ParticleSystem {
         // Update all active particles
         for i in 0..self.active_count as usize {
             if let Some(particle) = self.particles.get_mut(i) {
-                let size_range = PARTICLE_TYPE_SIZE_RANGES[particle.particle_type as usize];
-                let size_multiplier = rng.gen_range(size_range.0..size_range.1);
+                let base_multiplier = PARTICLE_TYPE_SIZE_MULTIPLIERS[particle.particle_type as usize];
+
+                // Add ±20% randomization to the base multiplier
+                let randomization_factor = rng.gen_range(-0.2..0.2);
+                let size_multiplier = base_multiplier * (1.0 + randomization_factor);
                 particle.size = new_base_size * size_multiplier;
             }
         }

@@ -51,7 +51,7 @@ impl SimulationParams {
             virtual_world_offset_x: 0.0,
             virtual_world_offset_y: 0.0,
             boundary_mode: 1, // Wrap mode
-            particle_render_size: 12.0,
+            particle_render_size: 12.0, // Increased from 12.0 to account for 3x scaling down (2400->800)
             force_scale: 400.0,
             r_smooth: 5.0,
             flat_force: false,

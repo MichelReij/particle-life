@@ -100,6 +100,36 @@ function temperatureToFriction(temp: number): number {
     return 0.98 * Math.exp(-3.0 * normalizedTemp); // Exponential decay from 0.98 to 0.05
 }
 
+function temperatureToBackgroundColor(temp: number): {
+    r: number;
+    g: number;
+    b: number;
+} {
+    // Temperature mapping to background color
+    // Cold (3°C): Deep blue/purple
+    // Room temp (20°C): Dark gray/black
+    // Hot (40°C): Red/orange
+    const normalizedTemp = Math.max(0, Math.min(1, (temp - 3) / 37)); // Clamp to [0, 1]
+
+    if (normalizedTemp < 0.5) {
+        // Cold to neutral: blue/purple to black
+        const factor = normalizedTemp * 2; // 0 to 1
+        return {
+            r: factor * 0.1, // 0 to 0.1
+            g: factor * 0.05, // 0 to 0.05
+            b: (1 - factor) * 0.3 + factor * 0.0, // 0.3 to 0
+        };
+    } else {
+        // Neutral to hot: black to red/orange
+        const factor = (normalizedTemp - 0.5) * 2; // 0 to 1
+        return {
+            r: factor * 0.4, // 0 to 0.4
+            g: factor * 0.1, // 0 to 0.1
+            b: 0.0,
+        };
+    }
+}
+
 // Pressure mapping functions - NOW ONLY CONTROLS rSmooth, forceScale, and particle count
 function pressureToRSmooth(pressure: number): number {
     // Non-linear exponential mapping: pressure [0, 350] → rSmooth [20, 0.1]
@@ -142,6 +172,7 @@ function electricalActivityToInterTypeAttractionScale(
 // These functions will be set by the main module to handle simulation updates
 let parameterUpdateCallbacks = {
     updateDriftAndBackground: (value: number) => {},
+    updateBackgroundColor: (r: number, g: number, b: number) => {},
     updateSimulationParameter: (paramName: string, value: number) => {},
     updateZoom: (level: number, centerX?: number, centerY?: number) => {},
     updateParticleCount: (pressure: number) => {},
@@ -149,6 +180,7 @@ let parameterUpdateCallbacks = {
 
 export function setParameterUpdateCallbacks(callbacks: {
     updateDriftAndBackground: (value: number) => void;
+    updateBackgroundColor: (r: number, g: number, b: number) => void;
     updateSimulationParameter: (paramName: string, value: number) => void;
     updateZoom: (level: number, centerX?: number, centerY?: number) => void;
     updateParticleCount: (pressure: number) => void;
@@ -161,9 +193,17 @@ export function setParameterUpdateCallbacks(callbacks: {
 function updateDriftAndFrictionFromTemperature(temp: number): void {
     const newDrift = temperatureToDrift(temp);
     const newFriction = temperatureToFriction(temp);
+    const backgroundColor = temperatureToBackgroundColor(temp);
 
     // Update drift using callback
     parameterUpdateCallbacks.updateDriftAndBackground(newDrift);
+
+    // Update background color
+    parameterUpdateCallbacks.updateBackgroundColor(
+        backgroundColor.r,
+        backgroundColor.g,
+        backgroundColor.b
+    );
 
     // Update friction parameter
     parameterUpdateCallbacks.updateSimulationParameter("friction", newFriction);

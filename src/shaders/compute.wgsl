@@ -76,8 +76,12 @@ struct SimParams {
     // Added time
     fisheyeStrength: f32,
     // Fisheye distortion strength
-    backgroundColor: vec3<f32>,
-    // New: background color
+    background_color_r: f32,
+    // Background color red component
+    background_color_g: f32,
+    // Background color green component
+    background_color_b: f32,
+    // Background color blue component
 
     // Lenia-inspired parameters
     lenia_enabled: u32,

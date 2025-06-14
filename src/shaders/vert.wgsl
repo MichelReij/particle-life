@@ -25,8 +25,12 @@ struct SimParams {
     // Added time
     fisheyeStrength: f32,
     // Fisheye distortion strength
-    backgroundColor: vec3<f32>,
-    // New: background color
+    background_color_r: f32,
+    // Background color red component
+    background_color_g: f32,
+    // Background color green component
+    background_color_b: f32,
+    // Background color blue component
 
     // Lenia-inspired parameters
     lenia_enabled: u32,
@@ -37,6 +41,14 @@ struct SimParams {
     // Lenia growth function spread (σ)
     lenia_kernel_radius: f32,
     // Lenia kernel radius in pixels
+    lightning_frequency: f32,
+    // Lightning strikes per second
+    lightning_intensity: f32,
+    // Lightning brightness/strength (0-1)
+    lightning_duration: f32,
+    // Duration of each lightning flash in seconds
+    _padding: f32,
+    // Padding to align to 16 bytes
 }
 
 @group(0) @binding(2)

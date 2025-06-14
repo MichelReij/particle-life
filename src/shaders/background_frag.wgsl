@@ -19,19 +19,22 @@ struct SimulationParams {
     interTypeRadiusScale: f32,
     time: f32,
     fisheyeStrength: f32,
-    // Fisheye distortion strength
-    backgroundColor: vec3<f32>,
-    // New: background color
+    backgroundColorR: f32,
+    backgroundColorG: f32,
+    backgroundColorB: f32,
+    _padding1: f32,
 
     // Lenia-inspired parameters
     leniaEnabled: u32,
-    // Boolean as u32: enable Lenia-style interactions
     leniaGrowthMu: f32,
-    // Lenia growth function center (μ)
     leniaGrowthSigma: f32,
-    // Lenia growth function spread (σ)
     leniaKernelRadius: f32,
-    // Lenia kernel radius in pixels
+
+    // Lightning parameters
+    lightningFrequency: f32,
+    lightningIntensity: f32,
+    lightningDuration: f32,
+    _padding2: f32,
 }
 
 ;
@@ -41,7 +44,7 @@ var<uniform> sim_params: SimulationParams;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    var final_color = vec4<f32>(sim_params.backgroundColor, 1.0);
+    var final_color = vec4<f32>(sim_params.backgroundColorR, sim_params.backgroundColorG, sim_params.backgroundColorB, 1.0);
     // Base color
 
     // Temporarily disable clouds by setting num_gradients to 0

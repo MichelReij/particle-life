@@ -10,7 +10,7 @@ mod particle_transitions;
 mod shaders;
 mod simulation_params;
 mod spatial_grid;
-mod webgpu_renderer_modern;
+mod webgpu_renderer;
 
 pub use buffer_utils::*;
 pub use interaction_rules::*;
@@ -20,10 +20,7 @@ pub use particle_transitions::*;
 pub use shaders::*;
 pub use simulation_params::*;
 pub use spatial_grid::*;
-pub use webgpu_renderer_modern::WebGpuRenderer;
-pub use simulation_params::*;
-pub use spatial_grid::*;
-// pub use webgpu_renderer_modern::WebGpuRenderer;  // Disabled temporarily
+pub use webgpu_renderer::WebGpuRenderer;
 
 // Initialize panic hook for better error messages in browser console
 #[wasm_bindgen(start)]
@@ -425,7 +422,7 @@ impl ParticleLifeEngine {
     pub fn render(&mut self) -> Result<(), JsValue> {
         if let Some(ref mut renderer) = self.renderer {
             // Use WebGPU renderer
-            renderer.render(&self.particle_system, &self.simulation_params)?;
+            renderer.render(&self.particle_system, &self.simulation_params, &self.interaction_rules)?;
         } else {
             // Fallback to Canvas 2D
             self.render_to_canvas("canvas")?;
@@ -463,5 +460,22 @@ impl ParticleLifeEngine {
         console_log!("🎯 Test graphics rendered - red circle at center");
 
         Ok(())
+    }
+
+    // Update background color (separate R, G, B components)
+    #[wasm_bindgen]
+    pub fn update_background_color(&mut self, r: f32, g: f32, b: f32) {
+        self.simulation_params.background_color_r = r;
+        self.simulation_params.background_color_g = g;
+        self.simulation_params.background_color_b = b;
+        console_log!("🎨 Background color updated: R={:.3}, G={:.3}, B={:.3}", r, g, b);
+    }
+
+    // Set particle count from pressure (using pressure-to-particle mapping)
+    #[wasm_bindgen]
+    pub fn set_particle_count_from_pressure(&mut self, pressure: f32) -> bool {
+        let particle_count = self.pressure_to_particle_count(pressure);
+        console_log!("📊 Pressure {} → {} particles", pressure, particle_count);
+        self.set_particle_count(particle_count)
     }
 }

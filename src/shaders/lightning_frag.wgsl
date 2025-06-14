@@ -29,7 +29,10 @@ struct SimulationParams {
     interTypeRadiusScale: f32,
     time: f32,
     fisheyeStrength: f32,
-    backgroundColor: vec3<f32>,
+    backgroundColorR: f32,
+    backgroundColorG: f32,
+    backgroundColorB: f32,
+    _padding1: f32,
 
     // Lenia-inspired parameters
     leniaEnabled: u32,
@@ -41,6 +44,7 @@ struct SimulationParams {
     lightningFrequency: f32,
     lightningIntensity: f32,
     lightningDuration: f32,
+    _padding2: f32,
 }
 
 @group(0) @binding(0)

@@ -18,21 +18,23 @@ struct SimulationParams {
     interTypeAttractionScale: f32,
     interTypeRadiusScale: f32,
     time: f32,
-    // Time in seconds for animation
     fisheyeStrength: f32,
-    // Fisheye distortion strength
-    backgroundColor: vec3<f32>,
-    // RGB background color
+    backgroundColorR: f32,
+    backgroundColorG: f32,
+    backgroundColorB: f32,
+    _padding1: f32,
 
     // Lenia-inspired parameters
     leniaEnabled: u32,
-    // Boolean as u32: enable Lenia-style interactions
     leniaGrowthMu: f32,
-    // Lenia growth function center (μ)
     leniaGrowthSigma: f32,
-    // Lenia growth function spread (σ)
     leniaKernelRadius: f32,
-    // Lenia kernel radius in pixels
+
+    // Lightning parameters
+    lightningFrequency: f32,
+    lightningIntensity: f32,
+    lightningDuration: f32,
+    _padding2: f32,
 }
 
 ;

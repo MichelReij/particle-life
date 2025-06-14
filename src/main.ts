@@ -2,6 +2,7 @@ console.log("🚀 main.ts loading with proper WASM integration...");
 
 // Import WASM module using the standard wasm-bindgen approach
 import init, { ParticleLifeEngine } from "./pkg/particle_life_wasm.js";
+import { setParameterUpdateCallbacks, initializeUI } from "./ui";
 
 class App {
     private engine: ParticleLifeEngine | null = null;
@@ -144,7 +145,44 @@ class App {
 
         console.log("🔌 Wiring up UI controls...");
 
-        // Particle count slider
+        // Set up UI parameter update callbacks
+        setParameterUpdateCallbacks({
+            updateDriftAndBackground: (value: number) => {
+                // Update drift parameter in the engine
+                if (this.engine) {
+                    this.engine.update_parameter("driftXPerSecond", value);
+                }
+            },
+            updateBackgroundColor: (r: number, g: number, b: number) => {
+                // Update background color parameters in the engine
+                if (this.engine) {
+                    this.engine.update_background_color(r, g, b);
+                }
+            },
+            updateSimulationParameter: (paramName: string, value: number) => {
+                // Update any simulation parameter
+                if (this.engine) {
+                    this.engine.update_parameter(paramName, value);
+                }
+            },
+            updateZoom: (level: number, centerX?: number, centerY?: number) => {
+                // Handle zoom functionality (placeholder for now)
+                console.log(
+                    `🔍 Zoom update: ${level}, center: ${centerX}, ${centerY}`
+                );
+            },
+            updateParticleCount: (pressure: number) => {
+                // Update particle count based on pressure
+                if (this.engine) {
+                    this.engine.set_particle_count_from_pressure(pressure);
+                }
+            },
+        });
+
+        // Initialize the full UI system (placeholder - would need proper parameters)
+        // initializeUI(simParams, zoomLevel);
+
+        // Particle count slider (legacy - may be handled by initializeUI now)
         const particleCountSlider = document.getElementById(
             "particleCountSlider"
         ) as HTMLInputElement;
@@ -158,7 +196,7 @@ class App {
                 particleCountValue.textContent = count.toString();
                 if (this.engine) {
                     this.engine.set_particle_count(count);
-                    console.log(`� Particle count set to: ${count}`);
+                    console.log(`🔢 Particle count set to: ${count}`);
                 }
             };
 
@@ -166,7 +204,6 @@ class App {
             updateParticleCount(); // Set initial value
         }
 
-        // Other controls can be wired up here as needed
         console.log("✅ UI controls wired up");
     }
 
@@ -179,12 +216,6 @@ class App {
         }
 
         console.log("🎮 Starting Rust particle simulation...");
-
-        const ctx = this.canvas.getContext("2d");
-        if (!ctx) {
-            console.error("❌ Could not get 2D context");
-            return;
-        }
 
         this.lastTime = performance.now();
         this.fpsLastTime = this.lastTime;
@@ -213,20 +244,8 @@ class App {
                     // Update the Rust simulation
                     this.engine.update_frame(deltaTime);
 
-                    // Clear canvas
-                    ctx.fillStyle = "#0a0a0a";
-                    ctx.fillRect(0, 0, this.canvas!.width, this.canvas!.height);
-
-                    // Render using Rust
+                    // Render using WebGPU (Rust handles this automatically)
                     this.engine.render();
-
-                    // Optional: render to canvas if the method is available
-                    try {
-                        this.engine.render_to_canvas("canvas");
-                    } catch (e) {
-                        // Fallback: render test graphics
-                        this.engine.render_test_graphics();
-                    }
                 } catch (error) {
                     console.error("💥 Error in Rust simulation:", error);
                     // Don't stop the animation, just log the error

@@ -1,6 +1,4 @@
 struct SimParams {
-    // We might not need all params, but it's good practice to keep it consistent
-    // if we later decide to make the grid dynamic (e.g., scale with canvas size from params).
     deltaTime: f32,
     friction: f32,
     numParticles: u32,
@@ -21,14 +19,22 @@ struct SimParams {
     interTypeRadiusScale: f32,
     time: f32,
     fisheyeStrength: f32,
-    // Fisheye distortion strength
-    backgroundColor: vec3<f32>,
+    backgroundColorR: f32,
+    backgroundColorG: f32,
+    backgroundColorB: f32,
+    _padding1: f32,
 
     // Lenia-inspired parameters
     leniaEnabled: u32,
     leniaGrowthMu: f32,
     leniaGrowthSigma: f32,
     leniaKernelRadius: f32,
+
+    // Lightning parameters
+    lightningFrequency: f32,
+    lightningIntensity: f32,
+    lightningDuration: f32,
+    _padding2: f32,
 }
 
 ;
