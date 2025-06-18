@@ -18,11 +18,9 @@ pub const VIGNETTE_FRAGMENT_SHADER: &str = include_str!("shaders/vignette_frag.w
 
 // Lightning system shaders
 pub const LIGHTNING_VERTEX_SHADER: &str = include_str!("shaders/lightning_vert.wgsl");
-pub const LIGHTNING_FRAGMENT_SHADER: &str = include_str!("shaders/lightning_frag.wgsl");
-pub const LIGHTNING_FRAGMENT_SIMPLE: &str = include_str!("shaders/lightning_frag_simple.wgsl");
+pub const LIGHTNING_FRAGMENT_SHADER: &str = include_str!("shaders/lightning_frag_buffer.wgsl");
 pub const LIGHTNING_FRAGMENT_BUFFER: &str = include_str!("shaders/lightning_frag_buffer.wgsl");
 pub const LIGHTNING_COMPUTE_SHADER: &str = include_str!("shaders/lightning_compute.wgsl");
-pub const LIGHTNING_COMPUTE_FIXED: &str = include_str!("shaders/compute_lightning_fixed.wgsl");
 
 /// Shader type enumeration for easy management
 #[derive(Debug, Clone, Copy)]
@@ -45,10 +43,8 @@ pub enum ShaderType {
     // Lightning system
     LightningVertex,
     LightningFragment,
-    LightningFragmentSimple,
     LightningFragmentBuffer,
     LightningCompute,
-    LightningComputeFixed,
 }
 
 impl ShaderType {
@@ -69,10 +65,8 @@ impl ShaderType {
 
             ShaderType::LightningVertex => LIGHTNING_VERTEX_SHADER,
             ShaderType::LightningFragment => LIGHTNING_FRAGMENT_SHADER,
-            ShaderType::LightningFragmentSimple => LIGHTNING_FRAGMENT_SIMPLE,
             ShaderType::LightningFragmentBuffer => LIGHTNING_FRAGMENT_BUFFER,
             ShaderType::LightningCompute => LIGHTNING_COMPUTE_SHADER,
-            ShaderType::LightningComputeFixed => LIGHTNING_COMPUTE_FIXED,
         }
     }
 
@@ -93,10 +87,8 @@ impl ShaderType {
 
             ShaderType::LightningVertex => "Lightning Vertex Shader",
             ShaderType::LightningFragment => "Lightning Fragment Shader",
-            ShaderType::LightningFragmentSimple => "Lightning Fragment Simple Shader",
             ShaderType::LightningFragmentBuffer => "Lightning Fragment Buffer Shader",
             ShaderType::LightningCompute => "Lightning Compute Shader",
-            ShaderType::LightningComputeFixed => "Lightning Compute Fixed Shader",
         }
     }
 }

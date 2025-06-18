@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
+// Import console_log macro
+use crate::console_log;
+
 #[wasm_bindgen]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationParams {
@@ -38,6 +41,13 @@ pub struct SimulationParams {
     pub lightning_frequency: f32,
     pub lightning_intensity: f32,
     pub lightning_duration: f32,
+    // Particle transition parameters for GPU-based size transitions
+    pub transition_active: bool,
+    pub transition_start_time: f32,
+    pub transition_duration: f32,
+    pub transition_start_count: u32,
+    pub transition_end_count: u32,
+    pub transition_is_grow: bool, // true for grow, false for shrink
 }
 
 impl SimulationParams {
@@ -45,7 +55,7 @@ impl SimulationParams {
         Self {
             delta_time: 1.0 / 60.0,
             friction: 0.1,
-            num_particles: 3200,
+            num_particles: 6400, // Initialize with all particles active to prevent GPU buffer hiccups
             num_types: 5,
             virtual_world_width: 2400.0,
             virtual_world_height: 2400.0,
@@ -57,12 +67,12 @@ impl SimulationParams {
             // Default viewport is the entire virtual world (zoom level 1.0)
             viewport_width: 2400.0,
             viewport_height: 2400.0,
-            boundary_mode: 1, // Wrap mode
+            boundary_mode: 1,           // Wrap mode
             particle_render_size: 12.0, // Increased from 12.0 to account for 3x scaling down (2400->800)
             force_scale: 400.0,
-            r_smooth: 5.0,
+            r_smooth: 10.0, // Increased from 5.0 to make repulsion forces more visible
             flat_force: false,
-            drift_x_per_second: -10.0,
+            drift_x_per_second: 0.0, // Start with no drift to isolate particle interactions
             inter_type_attraction_scale: 1.0,
             inter_type_radius_scale: 1.0,
             time: 0.0,
@@ -70,13 +80,19 @@ impl SimulationParams {
             background_color_r: 0.0,
             background_color_g: 0.0,
             background_color_b: 0.0,
-            lenia_enabled: true,
+            lenia_enabled: false, // Disabled by default to test basic particle interactions
             lenia_growth_mu: 0.18,
             lenia_growth_sigma: 0.025,
             lenia_kernel_radius: 75.0,
             lightning_frequency: 0.7,
             lightning_intensity: 1.0,
             lightning_duration: 0.6,
+            transition_active: false,
+            transition_start_time: 0.0,
+            transition_duration: 1.0,
+            transition_start_count: 0,
+            transition_end_count: 0,
+            transition_is_grow: true,
         }
     }
 
@@ -86,6 +102,33 @@ impl SimulationParams {
 
     pub fn set_delta_time(&mut self, delta_time: f32) {
         self.delta_time = delta_time;
+    }
+
+    pub fn set_num_particles(&mut self, count: u32) {
+        self.num_particles = count;
+    }
+
+    // Start a GPU-based particle transition
+    pub fn start_particle_transition(&mut self, from_count: u32, to_count: u32, current_time: f32) {
+        self.transition_active = true;
+        self.transition_start_time = current_time;
+        self.transition_duration = 1.5; // 1.5 second transitions
+        self.transition_start_count = from_count;
+        self.transition_end_count = to_count;
+        self.transition_is_grow = to_count > from_count;
+    }
+
+    // Stop any active transition
+    pub fn stop_particle_transition(&mut self) {
+        self.transition_active = false;
+    }
+
+    // Check if transition is complete
+    pub fn is_transition_complete(&self, current_time: f32) -> bool {
+        if !self.transition_active {
+            return true;
+        }
+        (current_time - self.transition_start_time) >= self.transition_duration
     }
 
     pub fn update_parameter(&mut self, name: &str, value: f32) -> bool {
@@ -133,12 +176,36 @@ impl SimulationParams {
 
     // Convert to buffer format for GPU upload
     pub fn to_buffer(&self) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(128); // 32 * 4 bytes = 128 bytes
+        self.to_buffer_with_particle_count(self.num_particles)
+    }
 
-        // Match the exact layout from TypeScript
+    // Convert to buffer format for GPU upload with specific particle count
+    pub fn to_buffer_with_particle_count(&self, actual_particle_count: u32) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(144); // 36 * 4 bytes = 144 bytes (added 6 transition fields)
+
+        // Debug log key parameters every 60 frames
+        static mut DEBUG_FRAME_COUNT: u32 = 0;
+        unsafe {
+            DEBUG_FRAME_COUNT += 1;
+            if DEBUG_FRAME_COUNT % 60 == 0 {
+                console_log!(
+                    "🎛️  GPU Buffer: particles={} (actual={}), force_scale={}, r_smooth={}, drift={}, bg_color=({:.2},{:.2},{:.2})",
+                    actual_particle_count,
+                    self.num_particles,
+                    self.force_scale,
+                    self.r_smooth,
+                    self.drift_x_per_second,
+                    self.background_color_r,
+                    self.background_color_g,
+                    self.background_color_b
+                );
+            }
+        }
+
+        // Match the exact layout from WGSL SimParams struct
         buffer.extend_from_slice(&self.delta_time.to_le_bytes()); // 0
         buffer.extend_from_slice(&self.friction.to_le_bytes()); // 1
-        buffer.extend_from_slice(&self.num_particles.to_le_bytes()); // 2
+        buffer.extend_from_slice(&actual_particle_count.to_le_bytes()); // 2 - Use actual count!
         buffer.extend_from_slice(&self.num_types.to_le_bytes()); // 3
         buffer.extend_from_slice(&self.virtual_world_width.to_le_bytes()); // 4
         buffer.extend_from_slice(&self.virtual_world_height.to_le_bytes()); // 5
@@ -146,33 +213,40 @@ impl SimulationParams {
         buffer.extend_from_slice(&self.canvas_render_height.to_le_bytes()); // 7
         buffer.extend_from_slice(&self.virtual_world_offset_x.to_le_bytes()); // 8
         buffer.extend_from_slice(&self.virtual_world_offset_y.to_le_bytes()); // 9
-        buffer.extend_from_slice(&self.viewport_width.to_le_bytes()); // 10
-        buffer.extend_from_slice(&self.viewport_height.to_le_bytes()); // 11
-        buffer.extend_from_slice(&self.boundary_mode.to_le_bytes()); // 12
-        buffer.extend_from_slice(&self.particle_render_size.to_le_bytes()); // 13
-        buffer.extend_from_slice(&self.force_scale.to_le_bytes()); // 14
-        buffer.extend_from_slice(&self.r_smooth.to_le_bytes()); // 15
-        buffer.extend_from_slice(&(if self.flat_force { 1u32 } else { 0u32 }).to_le_bytes()); // 16
-        buffer.extend_from_slice(&self.drift_x_per_second.to_le_bytes()); // 17
-        buffer.extend_from_slice(&self.inter_type_attraction_scale.to_le_bytes()); // 18
-        buffer.extend_from_slice(&self.inter_type_radius_scale.to_le_bytes()); // 19
-        buffer.extend_from_slice(&self.time.to_le_bytes()); // 20
-        buffer.extend_from_slice(&self.fisheye_strength.to_le_bytes()); // 21
-        buffer.extend_from_slice(&self.background_color_r.to_le_bytes()); // 22
-        buffer.extend_from_slice(&self.background_color_g.to_le_bytes()); // 23
-        buffer.extend_from_slice(&self.background_color_b.to_le_bytes()); // 24
-        buffer.extend_from_slice(&(if self.lenia_enabled { 1u32 } else { 0u32 }).to_le_bytes()); // 25
-        buffer.extend_from_slice(&self.lenia_growth_mu.to_le_bytes()); // 26
-        buffer.extend_from_slice(&self.lenia_growth_sigma.to_le_bytes()); // 27
-        buffer.extend_from_slice(&self.lenia_kernel_radius.to_le_bytes()); // 28
-        buffer.extend_from_slice(&self.lightning_frequency.to_le_bytes()); // 29
-        buffer.extend_from_slice(&self.lightning_intensity.to_le_bytes()); // 30
-        buffer.extend_from_slice(&self.lightning_duration.to_le_bytes()); // 31
+                                                                              // NOTE: Removed viewport_width and viewport_height as they don't exist in WGSL
+        buffer.extend_from_slice(&self.boundary_mode.to_le_bytes()); // 10
+        buffer.extend_from_slice(&self.particle_render_size.to_le_bytes()); // 11
+        buffer.extend_from_slice(&self.force_scale.to_le_bytes()); // 12
+        buffer.extend_from_slice(&self.r_smooth.to_le_bytes()); // 13
+        buffer.extend_from_slice(&(if self.flat_force { 1u32 } else { 0u32 }).to_le_bytes()); // 14
+        buffer.extend_from_slice(&self.drift_x_per_second.to_le_bytes()); // 15
+        buffer.extend_from_slice(&self.inter_type_attraction_scale.to_le_bytes()); // 16
+        buffer.extend_from_slice(&self.inter_type_radius_scale.to_le_bytes()); // 17
+        buffer.extend_from_slice(&self.time.to_le_bytes()); // 18
+        buffer.extend_from_slice(&self.fisheye_strength.to_le_bytes()); // 19
+        buffer.extend_from_slice(&self.background_color_r.to_le_bytes()); // 20
+        buffer.extend_from_slice(&self.background_color_g.to_le_bytes()); // 21
+        buffer.extend_from_slice(&self.background_color_b.to_le_bytes()); // 22
+        buffer.extend_from_slice(&(if self.lenia_enabled { 1u32 } else { 0u32 }).to_le_bytes()); // 23
+        buffer.extend_from_slice(&self.lenia_growth_mu.to_le_bytes()); // 24
+        buffer.extend_from_slice(&self.lenia_growth_sigma.to_le_bytes()); // 25
+        buffer.extend_from_slice(&self.lenia_kernel_radius.to_le_bytes()); // 26
+        buffer.extend_from_slice(&self.lightning_frequency.to_le_bytes()); // 27
+        buffer.extend_from_slice(&self.lightning_intensity.to_le_bytes()); // 28
+        buffer.extend_from_slice(&self.lightning_duration.to_le_bytes()); // 29
+                                                                          // Particle transition parameters
+        buffer.extend_from_slice(&(if self.transition_active { 1u32 } else { 0u32 }).to_le_bytes()); // 30
+        buffer.extend_from_slice(&self.transition_start_time.to_le_bytes()); // 31
+        buffer.extend_from_slice(&self.transition_duration.to_le_bytes()); // 32
+        buffer.extend_from_slice(&self.transition_start_count.to_le_bytes()); // 33
+        buffer.extend_from_slice(&self.transition_end_count.to_le_bytes()); // 34
+        buffer
+            .extend_from_slice(&(if self.transition_is_grow { 1u32 } else { 0u32 }).to_le_bytes()); // 35
 
         buffer
     }
 
     pub fn get_buffer_size(&self) -> u32 {
-        128 // 32 * 4 bytes
+        144 // 36 * 4 bytes (added 6 transition fields)
     }
 }

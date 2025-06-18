@@ -5,6 +5,8 @@ struct Particle {
     // and for coloring in the render pass.
     ptype: u32,
     size: f32,
+    target_size: f32,
+    _padding: f32, // Ensure 16-byte alignment
 }
 
 struct InteractionRule {
@@ -21,21 +23,21 @@ struct InteractionRule {
 
 // Lightning data structures (shared with lightning compute and rendering)
 struct LightningSegment {
-    startPos: vec2<f32>,
-    endPos: vec2<f32>,
+    start_pos: vec2<f32>,
+    end_pos: vec2<f32>,
     thickness: f32,
     alpha: f32,
     generation: u32,
-    appearTime: f32,
-    isVisible: u32,
+    appear_time: f32,
+    is_visible: u32,
     _padding: f32,
     // Ensure 16-byte alignment
 }
 
 struct LightningBolt {
-    numSegments: u32,
-    flashId: u32,
-    startTime: f32,
+    num_segments: u32,
+    flash_id: u32,
+    start_time: f32,
     _padding: f32,
     // Ensure 16-byte alignment
 }
@@ -74,7 +76,7 @@ struct SimParams {
     // New parameter
     time: f32,
     // Added time
-    fisheyeStrength: f32,
+    fisheye_strength: f32,
     // Fisheye distortion strength
     background_color_r: f32,
     // Background color red component
@@ -100,6 +102,20 @@ struct SimParams {
     // Lightning brightness/strength (0-1)
     lightning_duration: f32,
     // Duration of each lightning flash in seconds
+
+    // Particle transition parameters for GPU-based size transitions
+    transition_active: u32,
+    // Boolean: is a transition currently active
+    transition_start_time: f32,
+    // When the transition started
+    transition_duration: f32,
+    // How long the transition should take
+    transition_start_count: u32,
+    // Particle count at start of transition
+    transition_end_count: u32,
+    // Target particle count
+    transition_is_grow: u32,
+    // Boolean: true for grow, false for shrink
 }
 
 // Particle data (input)
@@ -211,12 +227,12 @@ fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, particle_vel:
     let bolt = lightning_bolt;
 
     // Skip inactive bolt
-    if (bolt.numSegments == 0u) {
+    if (bolt.num_segments == 0u) {
         return total_em_force;
     }
 
     // Check if this bolt is currently active
-    let bolt_age = time - bolt.startTime;
+    let bolt_age = time - bolt.start_time;
     let flash_duration = sim_params.lightning_duration;
 
     if (bolt_age < 0.0 || bolt_age > flash_duration) {
@@ -224,25 +240,28 @@ fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, particle_vel:
     }
 
     // Process each segment in this bolt
-    for (var seg_idx = 0u; seg_idx < bolt.numSegments; seg_idx++) {
+    for (var seg_idx = 0u; seg_idx < bolt.num_segments; seg_idx++) {
         let segment = lightning_segments[seg_idx];
 
         // Check if segment is visible
-        if (segment.isVisible == 0u) {
+        if (segment.is_visible == 0u) {
             continue;
         }
 
         // Check if segment should be visible at current time
-        let segment_age = time - segment.appearTime;
-        let segment_duration = 0.4;
-        // Same as in lightning compute shader
+        let segment_age = time - segment.appear_time;
 
-        if (segment_age < 0.0 || segment_age > segment_duration) {
+        // SINGLE FRAME ELECTROMAGNETIC EFFECT: Only apply force on the exact frame when segment becomes visible
+        // This means segment_age should be between 0 and 1 frame duration
+        let frame_duration = sim_params.delta_time;
+        // Duration of one frame
+
+        if (segment_age < 0.0 || segment_age > frame_duration) {
             continue;
         }
 
         // Calculate electromagnetic force from this segment
-        let em_force = calculateSegmentElectromagneticForce(particle_pos, particle_vel, segment.startPos, segment.endPos, segment.generation, particle_type, time, segment_age);
+        let em_force = calculateSegmentElectromagneticForce(particle_pos, particle_vel, segment.start_pos, segment.end_pos, segment.generation, particle_type, time, segment_age);
         total_em_force = total_em_force + em_force;
     }
 
@@ -251,105 +270,64 @@ fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, particle_vel:
 
 // Calculate electromagnetic force from a single lightning segment
 fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: vec2<f32>, segment_start: vec2<f32>, segment_end: vec2<f32>, generation: u32, particle_type: u32, time: f32, segment_age: f32) -> vec2<f32> {
-    // Find closest point on segment to particle
+    // SIMPLIFIED REPULSION TEST: Work directly in UV coordinates
+    // Convert particle position from world coordinates to UV coordinates
+    // NOTE: Flip Y coordinate to match lightning rendering coordinate system
+    let particle_uv = vec2<f32>(particle_pos.x / sim_params.virtual_world_width, 1.0 - (particle_pos.y / sim_params.virtual_world_height));
+
+    // Lightning segments are already in UV coordinates (0.0-1.0)
+    // Find closest point on segment to particle (in UV space)
     let segment_vec = segment_end - segment_start;
     let segment_length = length(segment_vec);
 
-    if (segment_length < EPSILON) {
+    if (segment_length < 0.001) {
+        // 0.1% in UV space
         return vec2<f32>(0.0, 0.0);
     }
 
     let segment_dir = segment_vec / segment_length;
-    let to_particle = particle_pos - segment_start;
+    let to_particle = particle_uv - segment_start;
     let projection = dot(to_particle, segment_dir);
 
     // Clamp projection to segment bounds
     let clamped_projection = clamp(projection, 0.0, segment_length);
     let closest_point = segment_start + segment_dir * clamped_projection;
 
-    // Calculate distance and force direction
-    let force_vec = particle_pos - closest_point;
-    let distance = length(force_vec);
+    // Calculate distance in UV coordinates
+    let force_vec_uv = particle_uv - closest_point;
+    let distance_uv = length(force_vec_uv);
 
-    // Calculate influence radius - branch tips have more concentrated but intense fields
-    let base_influence_radius = 150.0;
-    let radius_scale = 1.0 - f32(generation) * 0.15;
-    let influence_radius = base_influence_radius * max(0.5, radius_scale);
+    // Only affect particles within 0.06 UV units (6% of screen) from segment
+    let influence_radius_uv = 0.03;
 
-    if (distance >= influence_radius || distance < EPSILON) {
+    if (distance_uv >= influence_radius_uv || distance_uv < 0.001) {
         return vec2<f32>(0.0, 0.0);
     }
 
-    let normalized_distance = distance / influence_radius;
-    let distance_factor = 1.0 - pow(normalized_distance, 1.5);
+    // Simple repulsion: push particles away from lightning
+    let repulsion_direction = normalize(force_vec_uv);
+    let distance_factor = (influence_radius_uv - distance_uv) / influence_radius_uv;
 
-    // === CHARGE SEPARATION EFFECT ===
-    // Different particle types have different "charge" based on their type
-    let particle_type_f = f32(particle_type);
-    let charge_polarity = sin(particle_type_f * 2.0); // Range: -1 to 1
-    // Some types attracted (negative charge), others repelled (positive charge)
+    // Repulsion strength based on electrical activity and segment generation
+    let repulsion_strength = 50000.0 * sim_params.inter_type_attraction_scale * (1.0 + f32(generation) * 0.5);
+    let repulsion_force_uv = repulsion_direction * distance_factor * repulsion_strength;
 
-    // === ENHANCED MAGNETIC FIELD SPIRALING ===
-    // Lightning creates a magnetic field around the current path
-    // Perpendicular direction for magnetic force (right-hand rule)
-    let perpendicular = vec2<f32>(-segment_dir.y, segment_dir.x);
+    // Convert force back to world coordinates
+    let repulsion_force_world = vec2<f32>(repulsion_force_uv.x * sim_params.virtual_world_width, repulsion_force_uv.y * sim_params.virtual_world_height);
 
-    // Enhanced magnetic force with velocity dependence (Lorentz force: F = q(v × B))
-    let particle_speed = length(particle_vel);
-    let velocity_factor = max(0.5, particle_speed * 0.02); // Increased minimum and scale
+    return repulsion_force_world;
+}
 
-    // Add time-based oscillations for dynamic spiral patterns
-    let time_oscillation = sin(time * 3.0 + particle_type_f) * 0.5 + 1.0; // Range: 0.5 to 1.5
-    let segment_oscillation = sin(segment_age * 5.0) * 0.3 + 1.0; // Segment-specific pulsing
-
-    // Calculate magnetic force strength - much stronger and distance-dependent
-    let magnetic_base_strength = (1.0 - pow(normalized_distance, 0.8)) * sim_params.lightning_intensity;
-    let magnetic_strength = magnetic_base_strength * 1500.0 * velocity_factor * time_oscillation * segment_oscillation;
-
-    // Create multiple spiral components for more complex motion
-    let spiral_direction = perpendicular * charge_polarity;
-    let magnetic_force = spiral_direction * magnetic_strength;
-
-    // Enhanced rotational component with time-varying angle
-    let base_rotation_angle = charge_polarity * 2.0; // Increased base rotation
-    let time_rotation = time * 2.0 + particle_type_f; // Time-varying rotation
-    let dynamic_rotation_angle = base_rotation_angle + sin(time_rotation) * 1.0;
-
-    let cos_rot = cos(dynamic_rotation_angle);
-    let sin_rot = sin(dynamic_rotation_angle);
-    let rotated_perpendicular = vec2<f32>(
-        perpendicular.x * cos_rot - perpendicular.y * sin_rot,
-        perpendicular.x * sin_rot + perpendicular.y * cos_rot
-    );
-    let enhanced_spiral_force = rotated_perpendicular * magnetic_strength * 0.8; // Increased contribution
-
-    // Add velocity-aligned magnetic component for helical motion
-    let velocity_dir = normalize(particle_vel + vec2<f32>(0.001, 0.001)); // Avoid division by zero
-    let velocity_cross_field = vec2<f32>(-velocity_dir.y, velocity_dir.x);
-    let helical_force = velocity_cross_field * magnetic_strength * charge_polarity * 0.6;
-
-    // === ELECTRIC FIELD FORCE ===
-    // Traditional attraction/repulsion based on charge
-    let electric_direction = force_vec / distance;
-    let electric_strength = distance_factor * sim_params.lightning_intensity * 700.0; // Increased slightly
-    let electric_force = electric_direction * electric_strength * charge_polarity;
-
-    // === GENERATION SCALING ===
-    // Higher generations (branch tips) have stronger fields due to charge concentration
-    let generation_scale = 1.0 + f32(generation) * 0.4;
-
-    // === PLASMA EFFECTS FOR VERY CLOSE PARTICLES ===
-    let plasma_threshold = 0.25;
-    var total_force = magnetic_force + enhanced_spiral_force + helical_force + electric_force;
-
-    if (normalized_distance < plasma_threshold) {
-        let plasma_intensity = (plasma_threshold - normalized_distance) / plasma_threshold;
-        let plasma_boost = 1.0 + plasma_intensity * 3.0; // Increased plasma boost
-        total_force = total_force * plasma_boost;
-    }
-
-    // Apply 75% force reduction (halved twice: 0.5 * 0.5 = 0.25)
-    return total_force * generation_scale * 0.25;
+// Simple pseudo-random number generator based on seed (e.g., particle index)
+// Not cryptographically secure, but good enough for visual randomness.
+fn random_float(seed: u32) -> f32 {
+    var s = seed;
+    s = (s ^ 61u) ^ (s >> 16u);
+    s = s + (s << 3u);
+    s = s ^ (s >> 4u);
+    s = s * 0x27d4eb2du;
+    s = s ^ (s >> 15u);
+    return f32(s) / 4294967295.0; // Convert to [0, 1) float
 }
 
 @compute @workgroup_size(64) // Example workgroup size, can be tuned
@@ -526,6 +504,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Add lightning electromagnetic forces
     let lightning_em_force = calculateLightningElectromagneticForce(particle_p.pos, particle_p.vel, sim_params.time, particle_p.ptype);
+
     total_force = total_force + lightning_em_force;
 
     // Update velocity
@@ -584,19 +563,46 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     // No bounce mode implemented as per request.
+    // Handle GPU-based particle size transitions
+    if (sim_params.transition_active != 0u) {
+        let elapsed = sim_params.time - sim_params.transition_start_time;
+        let progress = clamp(elapsed / sim_params.transition_duration, 0.0, 1.0);
+
+        // Determine if this particle should be affected by the transition
+        let in_transition_range = (sim_params.transition_is_grow != 0u &&
+                                  p_idx >= sim_params.transition_start_count &&
+                                  p_idx < sim_params.transition_end_count) ||
+                                 (sim_params.transition_is_grow == 0u &&
+                                  p_idx >= sim_params.transition_end_count &&
+                                  p_idx < sim_params.transition_start_count);
+
+        if (in_transition_range) {
+            // Use the pre-calculated target_size stored in the particle
+            let target_size = particle_p.target_size;
+
+            if (sim_params.transition_is_grow != 0u) {
+                // Grow transition: from minimum visible size to target_size
+                // Note: sizes are in world coordinates (2400x2400), not pixels (800x800)
+                // Scale factor: 2400/800 = 3.0, so 3.0 world units ≈ 1 pixel on screen
+                let min_visible_size = 3.0; // ~1 pixel on screen, small but visible
+
+                // Smooth transition from min size to target size
+                particle_p.size = min_visible_size + (target_size - min_visible_size) * progress;
+            } else {
+                // Shrink transition: from current size to 0.001
+                // For shrinking, we need to know what the original size should be
+                // If the particle currently has a very small size, use the target size as starting point
+                let current_size = particle_p.size;
+                let start_size = max(current_size, target_size);
+                particle_p.size = start_size * (1.0 - progress) + 0.001 * progress;
+            }
+        }
+    }
+
+    // Ensure particles beyond active count are tiny (outside transitions)
+    if (sim_params.transition_active == 0u && p_idx >= sim_params.num_particles) {
+        particle_p.size = 0.001; // Keep inactive particles virtually invisible
+    }
 
     particles_out[p_idx] = particle_p;
-}
-
-// Simple pseudo-random number generator based on seed (e.g., particle index)
-// Not cryptographically secure, but good enough for visual randomness.
-fn random_float(seed: u32) -> f32 {
-    var s = seed;
-    s = (s ^ 61u) ^ (s >> 16u);
-    s = s + (s << 3u);
-    s = s ^ (s >> 4u);
-    s = s * 0x27d4eb2du;
-    s = s ^ (s >> 15u);
-    return f32(s) / 4294967295.0;
-    // Convert to [0, 1) float
 }

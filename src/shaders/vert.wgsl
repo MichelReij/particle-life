@@ -25,7 +25,7 @@ struct SimParams {
     // New parameter
     time: f32,
     // Added time
-    fisheyeStrength: f32,
+    fisheye_strength: f32,
     // Fisheye distortion strength
     background_color_r: f32,
     // Background color red component

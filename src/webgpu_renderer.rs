@@ -1,4 +1,4 @@
-use crate::{console_log, ParticleSystem, SimulationParams, InteractionRules};
+use crate::{console_log, InteractionRules, ParticleSystem, SimulationParams};
 use wasm_bindgen::prelude::*;
 use wgpu::util::DeviceExt;
 
@@ -71,7 +71,8 @@ impl WebGpuRenderer {
             ..Default::default()
         });
 
-        // Create surface from canvas
+        // Create surface from canvas - WGPU 25.0.2 correct web approach
+        // Use SurfaceTarget::Canvas for web canvas elements
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
             .map_err(|e| JsValue::from_str(&format!("Failed to create surface: {:?}", e)))?;
@@ -132,10 +133,10 @@ impl WebGpuRenderer {
 
         // Create quad vertex buffer for instanced rendering (4 vertices for triangle strip)
         let quad_vertices: [f32; 8] = [
-            -1.0, -1.0,  // Bottom-left
-             1.0, -1.0,  // Bottom-right
-            -1.0,  1.0,  // Top-left
-             1.0,  1.0,  // Top-right
+            -1.0, -1.0, // Bottom-left
+            1.0, -1.0, // Bottom-right
+            -1.0, 1.0, // Top-left
+            1.0, 1.0, // Top-right
         ];
 
         let quad_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -153,9 +154,78 @@ impl WebGpuRenderer {
             mapped_at_creation: false,
         });
 
-        // Create particle buffers (double-buffered for ping-pong)
-        let max_particles = 32768;
-        let particle_buffer_size = (max_particles * 24) as u64; // 24 bytes per particle
+        // Create initial particle data (similar to TypeScript createInitialParticles)
+        let max_particles = 8192; // Reduced from 32768 - supports up to 8K particles efficiently
+        let active_particles = 6400; // Initialize all particles that the engine uses
+        let num_types = 5;
+        let virtual_world_width = 2400.0;
+        let virtual_world_height = 2400.0;
+        let particle_render_size = 12.0;
+
+        // Create initial particle data buffer
+        let mut initial_particle_data = Vec::with_capacity((max_particles * 32) as usize);
+
+        for i in 0..max_particles {
+            let particle_type = (i % num_types) as u32;
+
+            // Position (vec2f)
+            let pos_x = if i < active_particles {
+                js_sys::Math::random() as f32 * virtual_world_width
+            } else {
+                0.0 // Inactive particles at origin
+            };
+            let pos_y = if i < active_particles {
+                js_sys::Math::random() as f32 * virtual_world_height
+            } else {
+                0.0
+            };
+
+            // Velocity (vec2f)
+            let vel_x = if i < active_particles {
+                (js_sys::Math::random() as f32 - 0.5) * 4.0
+            } else {
+                0.0
+            };
+            let vel_y = if i < active_particles {
+                (js_sys::Math::random() as f32 - 0.5) * 4.0
+            } else {
+                0.0
+            };
+
+            // Size based on particle type
+            let base_multiplier = match particle_type {
+                0 => 1.5, // Blue - large
+                1 => 1.2, // Orange - medium-large
+                2 => 0.7, // Red - small
+                3 => 0.9, // Purple - medium-small
+                4 => 1.0, // Green - balanced
+                _ => 1.0,
+            };
+            let size_randomization = (js_sys::Math::random() as f32 - 0.5) * 0.4; // ±20%
+            let size_multiplier = base_multiplier * (1.0 + size_randomization);
+            let particle_size = if i < active_particles {
+                particle_render_size * size_multiplier
+            } else {
+                0.0 // Inactive particles have zero size
+            };
+
+            // Pack data as bytes (f32 = 4 bytes, u32 = 4 bytes)
+            initial_particle_data.extend_from_slice(&pos_x.to_le_bytes()); // 0-3
+            initial_particle_data.extend_from_slice(&pos_y.to_le_bytes()); // 4-7
+            initial_particle_data.extend_from_slice(&vel_x.to_le_bytes()); // 8-11
+            initial_particle_data.extend_from_slice(&vel_y.to_le_bytes()); // 12-15
+            initial_particle_data.extend_from_slice(&particle_type.to_le_bytes()); // 16-19
+            initial_particle_data.extend_from_slice(&particle_size.to_le_bytes()); // 20-23
+
+            // Add target_size (same as current size for initial particles)
+            initial_particle_data.extend_from_slice(&particle_size.to_le_bytes()); // 24-27
+
+            // Add padding for 16-byte alignment
+            initial_particle_data.extend_from_slice(&0.0f32.to_le_bytes()); // 28-31
+        }
+
+        // Create particle buffers (double-buffered for ping-pong) with initial data
+        let particle_buffer_size = (max_particles * 32) as u64; // 32 bytes per particle (8 fields * 4 bytes)
         let particle_buffers = [
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Particle Buffer A"),
@@ -174,6 +244,16 @@ impl WebGpuRenderer {
                 mapped_at_creation: false,
             }),
         ];
+
+        // Initialize both buffers with the initial particle data
+        queue.write_buffer(&particle_buffers[0], 0, &initial_particle_data);
+        queue.write_buffer(&particle_buffers[1], 0, &initial_particle_data);
+
+        console_log!(
+            "🎯 Initialized particle buffers with {} active particles out of {} total",
+            active_particles,
+            max_particles
+        );
 
         // Create interaction rules buffer
         let max_types = 16;
@@ -195,7 +275,7 @@ impl WebGpuRenderer {
 
         let lightning_bolt_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lightning Bolt Buffer"),
-            size: 16, // Single bolt structure, 16 bytes
+            size: 24, // Single bolt: 24 bytes (6 u32/f32 fields: num_segments, flash_id, start_time, next_lightning_time, collision_checks_count, padding2)
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -247,7 +327,8 @@ impl WebGpuRenderer {
             view_formats: &[],
         });
 
-        let intermediate_texture_view = intermediate_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let intermediate_texture_view =
+            intermediate_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let scene_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Scene Sampler"),
@@ -501,7 +582,7 @@ impl WebGpuRenderer {
                 buffers: &[
                     // Buffer 0: Particle instance buffer
                     wgpu::VertexBufferLayout {
-                        array_stride: 24, // PARTICLE_SIZE_BYTES: pos(8) + vel(8) + type(4) + size(4) = 24 bytes
+                        array_stride: 32, // PARTICLE_SIZE_BYTES: pos(8) + vel(8) + type(4) + size(4) + target_size(4) + padding(4) = 32 bytes
                         step_mode: wgpu::VertexStepMode::Instance,
                         attributes: &[
                             // location(0): particle position vec2<f32>
@@ -588,7 +669,9 @@ impl WebGpuRenderer {
 
         let lightning_fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Lightning Fragment Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/lightning_frag.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/lightning_frag_buffer.wgsl").into(),
+            ),
         });
 
         // Create lightning compute bind group layout
@@ -637,10 +720,43 @@ impl WebGpuRenderer {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Lightning Render Bind Group Layout"),
                 entries: &[
-                    // Simulation parameters
+                    // Simulation parameters (binding 0)
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
                         visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Lightning segments buffer (binding 9)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 9,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Lightning bolt buffer (binding 10)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 10,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // Simulation parameters for fragment shader (binding 11)
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 11,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -679,6 +795,18 @@ impl WebGpuRenderer {
                     binding: 0,
                     resource: sim_params_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: lightning_segments_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: lightning_bolt_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: sim_params_buffer.as_entire_binding(),
+                },
             ],
         });
 
@@ -690,14 +818,15 @@ impl WebGpuRenderer {
                 push_constant_ranges: &[],
             });
 
-        let lightning_compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Lightning Compute Pipeline"),
-            layout: Some(&lightning_compute_pipeline_layout),
-            module: &lightning_compute_shader,
-            entry_point: Some("main"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            cache: None,
-        });
+        let lightning_compute_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("Lightning Compute Pipeline"),
+                layout: Some(&lightning_compute_pipeline_layout),
+                module: &lightning_compute_shader,
+                entry_point: Some("main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                cache: None,
+            });
 
         // Create lightning render pipeline
         let lightning_render_pipeline_layout =
@@ -707,43 +836,44 @@ impl WebGpuRenderer {
                 push_constant_ranges: &[],
             });
 
-        let lightning_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Lightning Render Pipeline"),
-            layout: Some(&lightning_render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &lightning_vertex_shader,
-                entry_point: Some("main"),
-                buffers: &[], // No vertex buffers - generate fullscreen quad in shader
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &lightning_fragment_shader,
-                entry_point: Some("main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
+        let lightning_render_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Lightning Render Pipeline"),
+                layout: Some(&lightning_render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &lightning_vertex_shader,
+                    entry_point: Some("main"),
+                    buffers: &[], // No vertex buffers - generate fullscreen quad in shader
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &lightning_fragment_shader,
+                    entry_point: Some("main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
 
         // Create compute pipeline
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -761,10 +891,13 @@ impl WebGpuRenderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/background_vert.wgsl").into()),
         });
 
-        let background_fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Background Fragment Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/background_frag.wgsl").into()),
-        });
+        let background_fragment_shader =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Background Fragment Shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("shaders/background_frag.wgsl").into(),
+                ),
+            });
 
         let grid_fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Grid Fragment Shader"),
@@ -882,23 +1015,19 @@ impl WebGpuRenderer {
         let background_render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Background Render Bind Group"),
             layout: &post_processing_uniform_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: sim_params_buffer.as_entire_binding(),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: sim_params_buffer.as_entire_binding(),
+            }],
         });
 
         let grid_render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Grid Render Bind Group"),
             layout: &post_processing_uniform_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: sim_params_buffer.as_entire_binding(),
-                },
-            ],
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: sim_params_buffer.as_entire_binding(),
+            }],
         });
 
         let fisheye_render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -941,7 +1070,11 @@ impl WebGpuRenderer {
 
         // Initialize zoom uniforms buffer with default values
         let initial_zoom_uniforms = [1.0f32, 1200.0, 1200.0, 0.0]; // zoom=1.0, center at (1200,1200)
-        queue.write_buffer(&zoom_uniforms_buffer, 0, bytemuck::cast_slice(&initial_zoom_uniforms));
+        queue.write_buffer(
+            &zoom_uniforms_buffer,
+            0,
+            bytemuck::cast_slice(&initial_zoom_uniforms),
+        );
 
         let zoom_render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Zoom Render Bind Group"),
@@ -970,43 +1103,44 @@ impl WebGpuRenderer {
                 push_constant_ranges: &[],
             });
 
-        let background_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Background Render Pipeline"),
-            layout: Some(&background_render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &background_vertex_shader,
-                entry_point: Some("main"),
-                buffers: &[], // No vertex buffers - generate fullscreen quad in shader
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &background_fragment_shader,
-                entry_point: Some("main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: None, // Replace background
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
+        let background_render_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Background Render Pipeline"),
+                layout: Some(&background_render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &background_vertex_shader,
+                    entry_point: Some("main"),
+                    buffers: &[], // No vertex buffers - generate fullscreen quad in shader
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &background_fragment_shader,
+                    entry_point: Some("main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: None, // Replace background
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
 
         let grid_render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1060,43 +1194,44 @@ impl WebGpuRenderer {
                 push_constant_ranges: &[],
             });
 
-        let fisheye_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Fisheye Render Pipeline"),
-            layout: Some(&fisheye_render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &background_vertex_shader, // Reuse same vertex shader
-                entry_point: Some("main"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &fisheye_fragment_shader,
-                entry_point: Some("main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: None, // Replace
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
+        let fisheye_render_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Fisheye Render Pipeline"),
+                layout: Some(&fisheye_render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &background_vertex_shader, // Reuse same vertex shader
+                    entry_point: Some("main"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &fisheye_fragment_shader,
+                    entry_point: Some("main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: None, // Replace
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
 
         let vignette_render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1105,43 +1240,44 @@ impl WebGpuRenderer {
                 push_constant_ranges: &[],
             });
 
-        let vignette_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Vignette Render Pipeline"),
-            layout: Some(&vignette_render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &background_vertex_shader, // Reuse same vertex shader
-                entry_point: Some("main"),
-                buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &vignette_fragment_shader,
-                entry_point: Some("main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: surface_format,
-                    blend: None, // Replace
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        });
+        let vignette_render_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Vignette Render Pipeline"),
+                layout: Some(&vignette_render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &background_vertex_shader, // Reuse same vertex shader
+                    entry_point: Some("main"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &vignette_fragment_shader,
+                    entry_point: Some("main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: None, // Replace
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
 
         // Create zoom render pipeline
         let zoom_render_pipeline_layout =
@@ -1239,29 +1375,40 @@ impl WebGpuRenderer {
         particle_system: &ParticleSystem,
         simulation_params: &SimulationParams,
         interaction_rules: &InteractionRules,
+        lightning_segments_data: &[u8],
+        lightning_bolts_data: &[u8],
     ) -> Result<(), JsValue> {
-        // Update simulation parameters buffer
-        let sim_params_data = simulation_params.to_buffer();
+        // Only update simulation parameters buffer (contains time and deltaTime which change every frame)
+        let actual_particle_count = particle_system.get_active_count();
+        let sim_params_data =
+            simulation_params.to_buffer_with_particle_count(actual_particle_count);
         self.queue
             .write_buffer(&self.sim_params_buffer, 0, &sim_params_data);
 
-        // Update interaction rules buffer
+        // Update interaction rules buffer ONLY if rules have changed (optimization opportunity)
+        // For now, still updating every frame but this could be optimized
         let rules_data = interaction_rules.to_buffer();
         self.queue
             .write_buffer(&self.interaction_rules_buffer, 0, &rules_data);
 
-        // Update particle colors buffer
+        // Update particle colors buffer ONLY if colors have changed (optimization opportunity)
+        // For now, still updating every frame but this could be optimized
         let colors_data = particle_system.get_colors_buffer();
         self.queue
             .write_buffer(&self.particle_colors_buffer, 0, &colors_data);
 
-        // Update current input particle buffer with current particle data
-        let particle_data = particle_system.to_buffer();
-        self.queue.write_buffer(
-            &self.particle_buffers[self.current_buffer_index],
-            0,
-            &particle_data,
-        );
+        // Update lightning buffers with current lightning data
+        if !lightning_segments_data.is_empty() {
+            self.queue
+                .write_buffer(&self.lightning_segments_buffer, 0, lightning_segments_data);
+        }
+        if !lightning_bolts_data.is_empty() {
+            self.queue
+                .write_buffer(&self.lightning_bolt_buffer, 0, lightning_bolts_data);
+        }
+
+        // DON'T update particle buffer here - let GPU compute shader handle particle state
+        // This was causing double-work and synchronization issues
 
         // Update zoom uniforms with current simulation parameters
         self.update_zoom_uniforms(simulation_params);
@@ -1276,42 +1423,103 @@ impl WebGpuRenderer {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Create command encoder
+        // Create single command encoder for entire frame (matches TypeScript efficiency)
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
+                label: Some("Particle Life Frame Encoder"),
             });
 
-        // Run compute pass (physics simulation)
+        // Lightning Compute Pass - FIRST to generate lightning data (matches TypeScript order)
         {
-            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Physics Compute Pass"),
-                timestamp_writes: None,
-            });
-
-            compute_pass.set_pipeline(&self.compute_pipeline);
-            compute_pass.set_bind_group(0, &self.compute_bind_groups[self.current_buffer_index], &[]);
-
-            let particle_count = particle_system.get_active_count();
-            let workgroup_size = 64;
-            let dispatch_size = (particle_count + workgroup_size - 1) / workgroup_size;
-            compute_pass.dispatch_workgroups(dispatch_size, 1, 1);
-        }
-
-        // Run lightning compute pass (lightning generation)
-        {
-            let mut lightning_compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("Lightning Compute Pass"),
-                timestamp_writes: None,
-            });
+            let mut lightning_compute_pass =
+                encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("Lightning Compute Pass"),
+                    timestamp_writes: None,
+                });
 
             lightning_compute_pass.set_pipeline(&self.lightning_compute_pipeline);
             lightning_compute_pass.set_bind_group(0, &self.lightning_compute_bind_group, &[]);
             lightning_compute_pass.dispatch_workgroups(1, 1, 1); // Single workgroup for lightning generation
-        }        // Switch buffer index for next frame (input/output ping-pong)
+
+            // Debug lightning parameters much less frequently to avoid spam and duplicates
+            // Only log when time is exactly divisible to prevent multiple logs per second
+            let time_seconds = simulation_params.time as u32;
+            let time_fraction = simulation_params.time - time_seconds as f32;
+            if time_seconds > 0
+                && time_seconds % 10 == 0
+                && time_fraction >= 0.0
+                && time_fraction < 0.02
+            {
+                console_log!(
+                    "⚡ Lightning compute: freq={:.3}, intensity={:.3}, duration={:.3}, time={}s, elec_activity={:.3}",
+                    simulation_params.lightning_frequency,
+                    simulation_params.lightning_intensity,
+                    simulation_params.lightning_duration,
+                    time_seconds,
+                    simulation_params.inter_type_attraction_scale
+                );
+
+                // Add logging about expected segment generation
+                console_log!(
+                    "🔧 Lightning compute dispatched - segments should be generated if conditions are met (electrical_activity > 0 and time >= next_flash_time)"
+                );
+            }
+        }
+
+        // Add segment count logging after lightning compute completes
+        // Note: We can't easily read back GPU buffer data, but we can log completion
+        if simulation_params.lightning_frequency > 0.0
+            && simulation_params.inter_type_attraction_scale > 0.0
+        {
+            let time_seconds = simulation_params.time as u32;
+            let time_fraction = simulation_params.time - time_seconds as f32;
+            if time_seconds > 0
+                && time_seconds % 10 == 0
+                && time_fraction >= 0.0
+                && time_fraction < 0.02
+            {
+                console_log!("📊 Lightning compute completed - segments should now be available for rendering (if generated)");
+            }
+        }
+
+        // Physics Compute Pass - runs after lightning data is generated (matches TypeScript order)
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Particle Compute Pass"),
+                timestamp_writes: None,
+            });
+
+            compute_pass.set_pipeline(&self.compute_pipeline);
+            compute_pass.set_bind_group(
+                0,
+                &self.compute_bind_groups[self.current_buffer_index],
+                &[],
+            );
+
+            let particle_count = particle_system.get_active_count();
+            let workgroup_size = 64;
+            let dispatch_size = (particle_count + workgroup_size - 1) / workgroup_size;
+
+            // Debug every 60 frames to see if compute is running
+            static mut FRAME_COUNT: u32 = 0;
+            unsafe {
+                FRAME_COUNT += 1;
+                // Reduced compute logging frequency
+                if FRAME_COUNT % 300 == 0 {
+                    console_log!(
+                        "🧮 Compute: {} particles, {} workgroups",
+                        particle_count,
+                        dispatch_size
+                    );
+                }
+            }
+
+            compute_pass.dispatch_workgroups(dispatch_size, 1, 1);
+        }
+
+        // Calculate output buffer index for rendering (compute writes to the other buffer)
         let output_buffer_index = 1 - self.current_buffer_index;
-        self.current_buffer_index = output_buffer_index;
 
         // Multi-pass rendering pipeline:
         // 1. Background -> scene_texture
@@ -1362,7 +1570,8 @@ impl WebGpuRenderer {
 
             particle_pass.set_pipeline(&self.render_pipeline);
             particle_pass.set_bind_group(0, &self.render_bind_groups[output_buffer_index], &[]);
-            particle_pass.set_vertex_buffer(0, self.particle_buffers[output_buffer_index].slice(..));
+            particle_pass
+                .set_vertex_buffer(0, self.particle_buffers[output_buffer_index].slice(..));
             particle_pass.set_vertex_buffer(1, self.quad_vertex_buffer.slice(..));
 
             let particle_count = particle_system.get_active_count();
@@ -1464,6 +1673,9 @@ impl WebGpuRenderer {
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
+        // Ping-pong buffers - switch for next frame (matches TypeScript pattern)
+        self.current_buffer_index = 1 - self.current_buffer_index;
+
         Ok(())
     }
 
@@ -1473,13 +1685,37 @@ impl WebGpuRenderer {
         let zoom_level = 2400.0 / simulation_params.viewport_width;
 
         // Calculate center of the current viewport in virtual world coordinates
-        let center_x = simulation_params.virtual_world_offset_x + (simulation_params.viewport_width / 2.0);
-        let center_y = simulation_params.virtual_world_offset_y + (simulation_params.viewport_height / 2.0);
+        let center_x =
+            simulation_params.virtual_world_offset_x + (simulation_params.viewport_width / 2.0);
+        let center_y =
+            simulation_params.virtual_world_offset_y + (simulation_params.viewport_height / 2.0);
 
         // Update zoom uniforms buffer
         let zoom_uniforms = [zoom_level, center_x, center_y, 0.0f32]; // padding for alignment
-        self.queue.write_buffer(&self.zoom_uniforms_buffer, 0, bytemuck::cast_slice(&zoom_uniforms));
+        self.queue.write_buffer(
+            &self.zoom_uniforms_buffer,
+            0,
+            bytemuck::cast_slice(&zoom_uniforms),
+        );
 
-        console_log!("🔍 Updated zoom uniforms: level={:.2}, center=({:.0},{:.0})", zoom_level, center_x, center_y);
+        // Only log occasionally to avoid spam
+        // console_log!("🔍 Updated zoom uniforms: level={:.2}, center=({:.0},{:.0})", zoom_level, center_x, center_y);
+    }
+
+    /// Initialize particle buffers with initial particle data
+    /// This must be called after renderer creation to populate the GPU buffers
+    pub fn initialize_particle_buffers(&mut self, particle_system: &ParticleSystem) {
+        let particle_data = particle_system.to_buffer();
+
+        // Initialize both particle buffers with the same initial data
+        self.queue
+            .write_buffer(&self.particle_buffers[0], 0, &particle_data);
+        self.queue
+            .write_buffer(&self.particle_buffers[1], 0, &particle_data);
+
+        console_log!(
+            "🎯 Initialized particle buffers with {} particles",
+            particle_system.get_active_count()
+        );
     }
 }

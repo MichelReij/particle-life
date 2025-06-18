@@ -1,4 +1,4 @@
-use crate::{console_log, ParticleLifeEngine, SimulationParams, ShaderType};
+use crate::{console_log, ParticleLifeEngine, ShaderType, SimulationParams};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::*;
@@ -54,7 +54,8 @@ impl ParticleLifeRenderer {
         // Create GPU resources
         let sim_params_buffer = Self::create_uniform_buffer(&device, 256, "Simulation Parameters");
         let particle_color_buffer = Self::create_storage_buffer(&device, 1024, "Particle Colors");
-        let interaction_rules_buffer = Self::create_storage_buffer(&device, 2048, "Interaction Rules");
+        let interaction_rules_buffer =
+            Self::create_storage_buffer(&device, 2048, "Interaction Rules");
         let (particle_buffer_a, particle_buffer_b) = Self::create_particle_buffers(&device);
         let vertex_buffer = Self::create_quad_vertex_buffer(&device);
 
@@ -76,7 +77,7 @@ impl ParticleLifeRenderer {
             &sim_params_buffer,
             &interaction_rules_buffer,
             &particle_buffer_a,
-            &particle_buffer_b
+            &particle_buffer_b,
         );
 
         let render_bind_group = Self::create_render_bind_group(
@@ -84,7 +85,7 @@ impl ParticleLifeRenderer {
             &render_pipeline,
             &sim_params_buffer,
             &particle_color_buffer,
-            &particle_buffer_a
+            &particle_buffer_a,
         );
 
         Ok(ParticleLifeRenderer {
@@ -114,16 +115,19 @@ impl ParticleLifeRenderer {
         self.engine.update_simulation_params(params);
 
         // Upload to GPU
-        let buffer_data = self.engine.get_simulation_params().to_buffer();
-        self.queue.write_buffer_with_u8_array(&self.sim_params_buffer, 0, &buffer_data);
+        let buffer_data = self.engine.get_simulation_params_buffer(); // Use method with particle count fix
+        self.queue
+            .write_buffer_with_u8_array(&self.sim_params_buffer, 0, &buffer_data);
 
         // Update particle colors
         let color_data = self.engine.get_particle_colors_buffer();
-        self.queue.write_buffer_with_u8_array(&self.particle_color_buffer, 0, &color_data);
+        self.queue
+            .write_buffer_with_u8_array(&self.particle_color_buffer, 0, &color_data);
 
         // Update interaction rules
         let rules_data = self.engine.get_interaction_rules_buffer();
-        self.queue.write_buffer_with_u8_array(&self.interaction_rules_buffer, 0, &rules_data);
+        self.queue
+            .write_buffer_with_u8_array(&self.interaction_rules_buffer, 0, &rules_data);
     }
 
     /// Main render loop - handles both compute and render passes
@@ -140,7 +144,8 @@ impl ParticleLifeRenderer {
         } else {
             &self.particle_buffer_b
         };
-        self.queue.write_buffer_with_u8_array(current_buffer, 0, &particle_data);
+        self.queue
+            .write_buffer_with_u8_array(current_buffer, 0, &particle_data);
 
         // Create command encoder
         let command_encoder = self.device.create_command_encoder();
@@ -167,7 +172,7 @@ impl ParticleLifeRenderer {
             sim_params.background_color_r as f64,
             sim_params.background_color_g as f64,
             sim_params.background_color_b as f64,
-            1.0
+            1.0,
         );
 
         let color_attachment = GpuRenderPassColorAttachment::new(
@@ -177,7 +182,8 @@ impl ParticleLifeRenderer {
             &view,
         );
 
-        let render_pass_descriptor = GpuRenderPassDescriptor::new(&js_sys::Array::from_iter([color_attachment]));
+        let render_pass_descriptor =
+            GpuRenderPassDescriptor::new(&js_sys::Array::from_iter([color_attachment]));
 
         {
             let render_pass = command_encoder.begin_render_pass(&render_pass_descriptor);
@@ -191,7 +197,8 @@ impl ParticleLifeRenderer {
         }
 
         // Submit commands
-        self.queue.submit(&js_sys::Array::from_iter([command_encoder.finish()]));
+        self.queue
+            .submit(&js_sys::Array::from_iter([command_encoder.finish()]));
 
         // Swap buffers for next frame
         self.current_buffer_index = 1 - self.current_buffer_index;
@@ -257,7 +264,9 @@ impl ParticleLifeRenderer {
 
 // Private implementation methods
 impl ParticleLifeRenderer {
-    async fn init_webgpu(canvas: &HtmlCanvasElement) -> Result<(GpuDevice, GpuQueue, GpuCanvasContext, u32, u32), JsValue> {
+    async fn init_webgpu(
+        canvas: &HtmlCanvasElement,
+    ) -> Result<(GpuDevice, GpuQueue, GpuCanvasContext, u32, u32), JsValue> {
         let window = web_sys::window().ok_or("No window object")?;
         let navigator = window.navigator();
         let gpu = navigator.gpu().ok_or("WebGPU not supported")?;
@@ -296,7 +305,7 @@ impl ParticleLifeRenderer {
     fn create_uniform_buffer(device: &GpuDevice, size: u64, label: &str) -> GpuBuffer {
         let mut descriptor = GpuBufferDescriptor::new(
             size as f64,
-            GpuBufferUsage::UNIFORM | GpuBufferUsage::COPY_DST
+            GpuBufferUsage::UNIFORM | GpuBufferUsage::COPY_DST,
         );
         descriptor.label(label);
         device.create_buffer(&descriptor)
@@ -305,7 +314,7 @@ impl ParticleLifeRenderer {
     fn create_storage_buffer(device: &GpuDevice, size: u64, label: &str) -> GpuBuffer {
         let mut descriptor = GpuBufferDescriptor::new(
             size as f64,
-            GpuBufferUsage::STORAGE | GpuBufferUsage::COPY_DST
+            GpuBufferUsage::STORAGE | GpuBufferUsage::COPY_DST,
         );
         descriptor.label(label);
         device.create_buffer(&descriptor)
@@ -316,7 +325,10 @@ impl ParticleLifeRenderer {
 
         let mut descriptor = GpuBufferDescriptor::new(
             buffer_size as f64,
-            GpuBufferUsage::STORAGE | GpuBufferUsage::VERTEX | GpuBufferUsage::COPY_DST | GpuBufferUsage::COPY_SRC
+            GpuBufferUsage::STORAGE
+                | GpuBufferUsage::VERTEX
+                | GpuBufferUsage::COPY_DST
+                | GpuBufferUsage::COPY_SRC,
         );
 
         descriptor.label("Particle Buffer A");
@@ -331,17 +343,17 @@ impl ParticleLifeRenderer {
     fn create_quad_vertex_buffer(device: &GpuDevice) -> GpuBuffer {
         // Create quad vertices for instanced rendering
         let vertices: &[f32] = &[
-            -1.0, -1.0,  // Bottom left
-             1.0, -1.0,  // Bottom right
-            -1.0,  1.0,  // Top left
-             1.0,  1.0,  // Top right
+            -1.0, -1.0, // Bottom left
+            1.0, -1.0, // Bottom right
+            -1.0, 1.0, // Top left
+            1.0, 1.0, // Top right
         ];
 
         let vertex_data = bytemuck::cast_slice(vertices);
 
         let mut descriptor = GpuBufferDescriptor::new(
             vertex_data.len() as f64,
-            GpuBufferUsage::VERTEX | GpuBufferUsage::COPY_DST
+            GpuBufferUsage::VERTEX | GpuBufferUsage::COPY_DST,
         );
         descriptor.label("Quad Vertex Buffer");
 
@@ -362,16 +374,17 @@ impl ParticleLifeRenderer {
 
         let compute_stage = GpuProgrammableStage::new(&shader_module, "main");
 
-        let mut pipeline_descriptor = GpuComputePipelineDescriptor::new(
-            &GpuPipelineLayout::auto_(&device),
-            &compute_stage
-        );
+        let mut pipeline_descriptor =
+            GpuComputePipelineDescriptor::new(&GpuPipelineLayout::auto_(&device), &compute_stage);
         pipeline_descriptor.label("Particle Compute Pipeline");
 
         Ok(device.create_compute_pipeline(&pipeline_descriptor))
     }
 
-    async fn create_render_pipeline(device: &GpuDevice, format: &str) -> Result<GpuRenderPipeline, JsValue> {
+    async fn create_render_pipeline(
+        device: &GpuDevice,
+        format: &str,
+    ) -> Result<GpuRenderPipeline, JsValue> {
         let vertex_source = ShaderType::ParticleVertex.source();
         let fragment_source = ShaderType::ParticleFragment.source();
 
@@ -387,22 +400,18 @@ impl ParticleLifeRenderer {
         let vertex_attribute = GpuVertexAttribute::new(0, GpuVertexFormat::Float32x2, 0);
         let vertex_buffer_layout = GpuVertexBufferLayout::new(
             8, // 2 floats * 4 bytes
-            &js_sys::Array::from_iter([vertex_attribute])
+            &js_sys::Array::from_iter([vertex_attribute]),
         );
         vertex_buffer_layout.set_step_mode(GpuVertexStepMode::Vertex);
 
         let vertex_state = GpuVertexState::new(&vertex_module, "main");
         vertex_state.set_buffers(&js_sys::Array::from_iter([vertex_buffer_layout]));
 
-        let fragment_targets = js_sys::Array::from_iter([
-            GpuColorTargetState::new(format)
-        ]);
+        let fragment_targets = js_sys::Array::from_iter([GpuColorTargetState::new(format)]);
         let fragment_state = GpuFragmentState::new(&fragment_module, "main", &fragment_targets);
 
-        let mut pipeline_descriptor = GpuRenderPipelineDescriptor::new(
-            &GpuPipelineLayout::auto_(&device),
-            &vertex_state
-        );
+        let mut pipeline_descriptor =
+            GpuRenderPipelineDescriptor::new(&GpuPipelineLayout::auto_(&device), &vertex_state);
         pipeline_descriptor.label("Particle Render Pipeline");
         pipeline_descriptor.fragment(&fragment_state);
 

@@ -4,9 +4,7 @@ use wasm_bindgen::prelude::*;
 
 mod buffer_utils;
 mod interaction_rules;
-mod lightning_system;
 mod particle_system;
-mod particle_transitions;
 mod shaders;
 mod simulation_params;
 mod spatial_grid;
@@ -14,15 +12,13 @@ mod webgpu_renderer;
 
 pub use buffer_utils::*;
 pub use interaction_rules::*;
-pub use lightning_system::*;
 pub use particle_system::*;
-pub use particle_transitions::*;
 pub use shaders::*;
 pub use simulation_params::*;
 pub use spatial_grid::*;
-pub use webgpu_renderer::WebGpuRenderer;
+pub use webgpu_renderer::*;
 
-// Initialize panic hook for better error messages in browser console
+// Hook for better error messages in browser console
 #[wasm_bindgen(start)]
 pub fn main() {
     console_error_panic_hook::set_once();
@@ -47,8 +43,6 @@ pub struct ParticleLifeEngine {
     particle_system: ParticleSystem,
     simulation_params: SimulationParams,
     interaction_rules: InteractionRules,
-    particle_transitions: ParticleTransitions,
-    lightning_system: LightningSystem,
     rng: SmallRng,
     current_time: f32,
     last_frame_time: f32,
@@ -60,22 +54,42 @@ pub struct ParticleLifeEngine {
 impl ParticleLifeEngine {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        console_log!("🦀 Initializing Rust ParticleLifeEngine");
+        // Log WASM module build info for version verification - auto-generated at build time
+        console_log!(
+            "🦀 Rust ParticleLifeEngine v{} - BUILD_ID: {}",
+            env!("CARGO_PKG_VERSION"),
+            env!("BUILD_ID")
+        );
+
+        // Calculate and display WASM module age using current timestamp as reference
+        let current_time = js_sys::Date::now(); // Current time in milliseconds
+                                                // Build timestamp - auto-generated at build time
+        let build_timestamp = env!("BUILD_TIMESTAMP").parse::<f64>().unwrap() * 1000.0; // Convert to milliseconds
+        let age_ms = current_time - build_timestamp;
+        let age_seconds = (age_ms / 1000.0) as i32;
+        let age_minutes = age_seconds / 60;
+        let age_hours = age_minutes / 60;
+        let remaining_minutes = age_minutes % 60;
+        let remaining_seconds = age_seconds % 60;
+
+        if age_hours > 0 {
+            console_log!("⏰ WASM Age: {}h {}m ago", age_hours, remaining_minutes);
+        } else if age_minutes > 0 {
+            console_log!("⏰ WASM Age: {}m {}s ago", age_minutes, remaining_seconds);
+        } else {
+            console_log!("⏰ WASM Age: {}s ago", age_seconds);
+        }
 
         let mut rng = SmallRng::from_entropy();
 
         let simulation_params = SimulationParams::new();
         let interaction_rules = InteractionRules::new_random(&mut rng);
         let particle_system = ParticleSystem::new(&simulation_params, &interaction_rules, &mut rng);
-        let particle_transitions = ParticleTransitions::new();
-        let lightning_system = LightningSystem::new();
 
         Self {
             particle_system,
             simulation_params,
             interaction_rules,
-            particle_transitions,
-            lightning_system,
             rng,
             current_time: 0.0,
             last_frame_time: 0.0,
@@ -87,7 +101,10 @@ impl ParticleLifeEngine {
     // Get the current simulation parameters as a buffer for GPU
     #[wasm_bindgen]
     pub fn get_simulation_params_buffer(&self) -> Vec<u8> {
-        self.simulation_params.to_buffer()
+        // Use actual particle count from particle system
+        let actual_particle_count = self.particle_system.get_active_count() as u32;
+        self.simulation_params
+            .to_buffer_with_particle_count(actual_particle_count)
     }
 
     // Get the interaction rules as a buffer for GPU
@@ -117,36 +134,121 @@ impl ParticleLifeEngine {
         Ok(())
     }
 
-    // Update a specific parameter by name
+    // Update a specific parameter by name - routes through individual setters for validation
     #[wasm_bindgen]
     pub fn update_parameter(&mut self, name: &str, value: f32) -> bool {
-        self.simulation_params.update_parameter(name, value)
+        match name {
+            "friction" => {
+                self.set_friction(value);
+                true
+            }
+            "forceScale" => {
+                self.set_force_scale(value);
+                true
+            }
+            "rSmooth" => {
+                self.set_r_smooth(value);
+                true
+            }
+            "driftXPerSecond" => {
+                self.set_drift_x_per_second(value);
+                true
+            }
+            "interTypeAttractionScale" => {
+                self.set_inter_type_attraction_scale(value);
+                true
+            }
+            "interTypeRadiusScale" => {
+                self.set_inter_type_radius_scale(value);
+                true
+            }
+            "fisheyeStrength" => {
+                self.set_fisheye_strength(value);
+                true
+            }
+            "leniaGrowthMu" => {
+                self.set_lenia_growth_mu(value);
+                true
+            }
+            "leniaGrowthSigma" => {
+                self.set_lenia_growth_sigma(value);
+                true
+            }
+            "leniaKernelRadius" => {
+                self.set_lenia_kernel_radius(value);
+                true
+            }
+            "lightningFrequency" => {
+                self.set_lightning_frequency(value);
+                true
+            }
+            "lightningIntensity" => {
+                self.set_lightning_intensity(value);
+                true
+            }
+            "lightningDuration" => {
+                self.set_lightning_duration(value);
+                true
+            }
+            "particleRenderSize" => {
+                self.set_particle_render_size(value);
+                true
+            }
+            _ => {
+                console_log!("⚠️ Unknown parameter: {}", name);
+                false
+            }
+        }
+    }
+
+    // Update a specific boolean parameter by name
+    #[wasm_bindgen]
+    pub fn update_boolean_parameter(&mut self, name: &str, value: bool) -> bool {
+        match name {
+            "flatForce" => {
+                self.set_flat_force(value);
+                true
+            }
+            "leniaEnabled" => {
+                self.set_lenia_enabled(value);
+                true
+            }
+            _ => {
+                console_log!("⚠️ Unknown boolean parameter: {}", name);
+                false
+            }
+        }
     }
 
     // Frame update - called every frame from JavaScript
     #[wasm_bindgen]
     pub fn update_frame(&mut self, delta_time: f32) {
-        let start_time = if self.frame_count % 60 == 0 {
-            Some(js_sys::Date::now())
-        } else {
-            None
-        };
-
         self.current_time += delta_time;
         self.simulation_params.set_time(self.current_time);
         self.simulation_params.set_delta_time(delta_time);
 
-        // Update particle physics simulation
-        self.particle_system
-            .update_physics(&self.simulation_params, &self.interaction_rules);
+        // Debug deltaTime and particle count correlation every 300 frames (5 seconds)
+        if self.frame_count % 300 == 0 {
+            let active_particles = self.particle_system.get_active_count();
+            console_log!(
+                "� Frame {}: particles={}, fps={:.1}",
+                self.frame_count,
+                active_particles,
+                if delta_time > 0.0 {
+                    1.0 / delta_time
+                } else {
+                    0.0
+                }
+            );
+        }
 
-        // Update particle transitions
-        self.particle_transitions
-            .update(self.current_time, &mut self.particle_system);
+        // PHYSICS IS HANDLED BY GPU COMPUTE SHADER - no CPU physics needed
+        // The WebGPU renderer will handle all physics calculations via compute shaders
 
-        // Update lightning system
-        self.lightning_system
-            .update(self.current_time, &self.simulation_params);
+        // Particle transitions are now handled entirely by GPU compute shader
+
+        // Lightning generation is now handled by the GPU compute shader
+        // (Rust lightning_system.update() removed to avoid conflicts)
 
         self.frame_count += 1;
 
@@ -167,24 +269,99 @@ impl ParticleLifeEngine {
 
         let current_count = self.particle_system.get_active_count();
 
-        if count > current_count {
-            // Growing - initialize new particles
-            self.particle_system.grow_particles(count, &mut self.rng);
-            self.particle_transitions.start_grow_transition(
+        if count != current_count {
+            // Start GPU-based transition
+            console_log!(
+                "🕒 Starting transition at time {:.3}s: {} -> {} particles",
+                self.current_time,
+                current_count,
+                count
+            );
+            self.simulation_params.start_particle_transition(
                 current_count,
                 count,
                 self.current_time,
             );
-        } else if count < current_count {
-            // Shrinking - start shrink transition
-            self.particle_transitions.start_shrink_transition(
-                count,
+
+            // For grow transitions, update active count immediately and initialize new particles
+            // For shrink transitions, defer until transition completes
+            if count > current_count {
+                self.particle_system.set_active_count(count);
+                self.simulation_params.set_num_particles(count);
+
+                // Initialize the new particles in the grow range
+                self.initialize_particles_for_grow_transition(current_count, count);
+
+                console_log!(
+                    "🌱 GROW: {} -> {} particles, active_count now: {}, num_particles now: {}",
+                    current_count,
+                    count,
+                    self.particle_system.get_active_count(),
+                    self.simulation_params.num_particles
+                );
+            } else {
+                console_log!(
+                    "🍂 SHRINK: {} -> {} particles, keeping active_count: {} during transition",
+                    current_count,
+                    count,
+                    current_count
+                );
+            }
+            // For shrink: keep old count during transition
+
+            console_log!(
+                "🔄 Starting GPU transition: {} -> {} particles (deferred: {})",
                 current_count,
-                self.current_time,
+                count,
+                if count < current_count {
+                    "true"
+                } else {
+                    "false"
+                }
             );
+        } else {
+            // No change needed
+            self.simulation_params.set_num_particles(count);
         }
 
         true
+    }
+
+    // Initialize particles for grow transition
+    fn initialize_particles_for_grow_transition(&mut self, start_index: u32, end_index: u32) {
+        for i in start_index..end_index {
+            let particle_type = (i % self.particle_system.get_num_types()) as u32;
+            let base_multiplier = self
+                .particle_system
+                .get_size_multiplier_for_type(particle_type);
+
+            // Add ±20% randomization to the base multiplier
+            let randomization_factor = self.rng.gen_range(-0.2..0.2);
+            let size_multiplier = base_multiplier * (1.0 + randomization_factor);
+            let target_size = self.simulation_params.particle_render_size * size_multiplier;
+
+            if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
+                // Initialize position, velocity, type, and target size
+                particle.position = [
+                    self.rng
+                        .gen_range(0.0..self.simulation_params.virtual_world_width),
+                    self.rng
+                        .gen_range(0.0..self.simulation_params.virtual_world_height),
+                ];
+                particle.velocity = [self.rng.gen_range(-2.0..2.0), self.rng.gen_range(-2.0..2.0)];
+                particle.particle_type = particle_type;
+                particle.target_size = target_size;
+
+                // For GPU transitions, start with a very small size (will grow via GPU)
+                particle.size = 0.1; // Start tiny, GPU will handle the growth
+
+                console_log!(
+                    "🌱 Initialized particle {} with target_size={:.2}, starting size=0.1",
+                    i,
+                    target_size
+                );
+            }
+        }
     }
 
     // Pressure-based particle count mapping
@@ -219,14 +396,19 @@ impl ParticleLifeEngine {
         // Convert HSLuv to RGB
         let (r, g, b) = hsluv::hsluv_to_rgb(hue as f64, saturation as f64, lightness as f64);
 
-        let hex_color = format!("#{:02X}{:02X}{:02X}",
+        let hex_color = format!(
+            "#{:02X}{:02X}{:02X}",
             (r * 255.0).round() as u8,
             (g * 255.0).round() as u8,
             (b * 255.0).round() as u8
         );
         console_log!(
             "🌡️ Temperature {:.1}°C → HSLuv({:.1}°, {:.1}%, {:.1}%) → {}",
-            temp, hue, saturation, lightness, hex_color
+            temp,
+            hue,
+            saturation,
+            lightness,
+            hex_color
         );
 
         (r as f32, g as f32, b as f32)
@@ -254,7 +436,8 @@ impl ParticleLifeEngine {
         self.simulation_params.background_color_b = b;
 
         // Convert RGB to hex for display
-        let hex_color = format!("#{:02X}{:02X}{:02X}",
+        let hex_color = format!(
+            "#{:02X}{:02X}{:02X}",
             (r * 255.0) as u8,
             (g * 255.0) as u8,
             (b * 255.0) as u8
@@ -284,8 +467,10 @@ impl ParticleLifeEngine {
         // 3. Update particle count (handled separately via set_particle_count_from_pressure)
 
         console_log!(
-            "🔧 Pressure set to {:.1} → force_scale: {:.1}, r_smooth: {:.3}",
-            clamped_pressure, force_scale, r_smooth
+            "🔧 Pressure {:.1} → force_scale: {:.1}, r_smooth: {:.3}",
+            clamped_pressure,
+            force_scale,
+            r_smooth
         );
     }
 
@@ -301,7 +486,8 @@ impl ParticleLifeEngine {
 
         console_log!(
             "☀️ UV light set to {:.1} → inter_type_radius_scale: {:.3}",
-            clamped_uv, inter_type_radius_scale
+            clamped_uv,
+            inter_type_radius_scale
         );
     }
 
@@ -317,21 +503,37 @@ impl ParticleLifeEngine {
         let inter_type_attraction_scale = cubic_value * 3.0;
         self.simulation_params.inter_type_attraction_scale = inter_type_attraction_scale;
 
+        // Update lightning parameters based on electrical activity
+        // Lightning frequency: 0 at min activity, 1.0 at max activity
+        self.simulation_params.lightning_frequency = normalized_electrical;
+
+        // Lightning intensity: 0.5 at min activity, 2.0 at max activity
+        self.simulation_params.lightning_intensity = 0.5 + (normalized_electrical * 1.5);
+
+        // Lightning duration: 0.3 at min activity, 0.8 at max activity
+        self.simulation_params.lightning_duration = 0.3 + (normalized_electrical * 0.5);
+
         console_log!(
-            "⚡ Electrical activity set to {:.2} → inter_type_attraction_scale: {:.3}",
-            clamped_electrical, inter_type_attraction_scale
+            "⚡ Electrical activity set to {:.2} → inter_type_attraction_scale: {:.3}, lightning_freq: {:.3}, lightning_intensity: {:.3}, lightning_duration: {:.3}",
+            clamped_electrical,
+            inter_type_attraction_scale,
+            self.simulation_params.lightning_frequency,
+            self.simulation_params.lightning_intensity,
+            self.simulation_params.lightning_duration
         );
     }
 
-    // Lightning system access
+    // Lightning system access - now handled by GPU compute shader
     #[wasm_bindgen]
     pub fn get_lightning_segments_buffer(&self) -> Vec<u8> {
-        self.lightning_system.get_segments_buffer()
+        // Return empty buffer - lightning is now generated by GPU compute shader
+        Vec::new()
     }
 
     #[wasm_bindgen]
     pub fn get_lightning_bolts_buffer(&self) -> Vec<u8> {
-        self.lightning_system.get_bolts_buffer()
+        // Return empty buffer - lightning is now generated by GPU compute shader
+        Vec::new()
     }
 
     // Generate new random interaction rules
@@ -339,6 +541,13 @@ impl ParticleLifeEngine {
     pub fn regenerate_rules(&mut self) {
         self.interaction_rules = InteractionRules::new_random(&mut self.rng);
         console_log!("🔄 Generated new interaction rules");
+    }
+
+    // Regenerate interaction rules for physics testing
+    #[wasm_bindgen]
+    pub fn regenerate_interaction_rules(&mut self) {
+        self.interaction_rules = InteractionRules::new_random(&mut self.rng);
+        console_log!("🎲 Generated new interaction rules");
     }
 
     // Get various constants needed by TypeScript
@@ -359,7 +568,7 @@ impl ParticleLifeEngine {
 
     #[wasm_bindgen]
     pub fn get_particle_size_bytes(&self) -> u32 {
-        24 // pos(8) + vel(8) + type(4) + size(4)
+        32 // pos(8) + vel(8) + type(4) + size(4) + target_size(4) + padding(4)
     }
 
     #[wasm_bindgen]
@@ -371,12 +580,12 @@ impl ParticleLifeEngine {
     #[wasm_bindgen]
     pub fn get_debug_info(&self) -> String {
         format!(
-            "Frame: {}, Time: {:.2}s, Particles: {}/{}, Active Transitions: {}",
+            "Frame: {}, Time: {:.2}s, Particles: {}/{}, Current: {}",
             self.frame_count,
             self.current_time,
             self.particle_system.get_active_count(),
             self.particle_system.get_max_particles(),
-            self.particle_transitions.get_active_count()
+            self.get_particle_count()
         )
     }
 
@@ -534,9 +743,63 @@ impl ParticleLifeEngine {
     // Render using WebGPU (preferred) or fallback to Canvas 2D
     #[wasm_bindgen]
     pub fn render(&mut self) -> Result<(), JsValue> {
+        // Check if GPU transition is complete and finalize it
+        if self
+            .simulation_params
+            .is_transition_complete(self.current_time)
+            && self.simulation_params.transition_active
+        {
+            let elapsed = self.current_time - self.simulation_params.transition_start_time;
+            console_log!(
+                "🕒 Transition completing: elapsed={:.3}s, duration={:.3}s, start_time={:.3}s, current_time={:.3}s",
+                elapsed,
+                self.simulation_params.transition_duration,
+                self.simulation_params.transition_start_time,
+                self.current_time
+            );
+
+            // Complete the transition - update final particle counts
+            let target_count = self.simulation_params.transition_end_count;
+
+            if self.simulation_params.transition_is_grow {
+                // For grow transitions, set all grown particles to their final target size
+                let start_count = self.simulation_params.transition_start_count;
+                let end_count = self.simulation_params.transition_end_count;
+                for i in start_count..end_count {
+                    if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
+                        particle.size = particle.target_size;
+                    }
+                }
+                console_log!(
+                    "🌱 Completed grow transition - set {} particles to target size",
+                    end_count - start_count
+                );
+            } else {
+                // For shrink transitions, now update the active count and num_particles
+                self.particle_system.set_active_count(target_count);
+                self.simulation_params.set_num_particles(target_count);
+                console_log!(
+                    "🍂 Completed shrink transition - now {} active particles",
+                    target_count
+                );
+            }
+
+            self.simulation_params.stop_particle_transition();
+        }
+
         if let Some(ref mut renderer) = self.renderer {
-            // Use WebGPU renderer
-            renderer.render(&self.particle_system, &self.simulation_params, &self.interaction_rules)?;
+            // Lightning data is now generated by GPU compute shader, pass empty buffers
+            let lightning_segments_data = Vec::new();
+            let lightning_bolts_data = Vec::new();
+
+            // Use WebGPU renderer - lightning will be generated by compute shader
+            renderer.render(
+                &self.particle_system,
+                &self.simulation_params,
+                &self.interaction_rules,
+                &lightning_segments_data,
+                &lightning_bolts_data,
+            )?;
         } else {
             // Fallback to Canvas 2D
             self.render_to_canvas("canvas")?;
@@ -582,7 +845,12 @@ impl ParticleLifeEngine {
         self.simulation_params.background_color_r = r;
         self.simulation_params.background_color_g = g;
         self.simulation_params.background_color_b = b;
-        console_log!("🎨 Background color updated: R={:.3}, G={:.3}, B={:.3}", r, g, b);
+        console_log!(
+            "🎨 Background color updated: R={:.3}, G={:.3}, B={:.3}",
+            r,
+            g,
+            b
+        );
     }
 
     // Set particle count from pressure (using pressure-to-particle mapping)
@@ -596,8 +864,8 @@ impl ParticleLifeEngine {
     // Set zoom level and update viewport parameters
     #[wasm_bindgen]
     pub fn set_zoom(&mut self, zoom_level: f32, center_x: Option<f32>, center_y: Option<f32>) {
-        // Clamp zoom level to valid range (1.0 to 6.0)
-        let clamped_zoom = zoom_level.max(1.0).min(6.0);
+        // Clamp zoom level to valid range (1.45 to 6.0)
+        let clamped_zoom = zoom_level.max(1.45).min(6.0);
 
         // Calculate viewport size: at zoom 1.0 = full world (2400x2400), at zoom 2.0 = half world (1200x1200), etc.
         let viewport_width = 2400.0 / clamped_zoom;
@@ -629,8 +897,311 @@ impl ParticleLifeEngine {
 
         console_log!(
             "🔍 Zoom {:.2}x: viewport {:.0}×{:.0}, offset ({:.0},{:.0}), center ({:.0},{:.0})",
-            clamped_zoom, viewport_width, viewport_height,
-            clamped_offset_x, clamped_offset_y, center_x, center_y
+            clamped_zoom,
+            viewport_width,
+            viewport_height,
+            clamped_offset_x,
+            clamped_offset_y,
+            center_x,
+            center_y
         );
+    }
+
+    // === COMPREHENSIVE PARAMETER GETTERS ===
+    // These getters allow the UI to read all current simulation parameter values
+
+    #[wasm_bindgen]
+    pub fn get_drift_x_per_second(&self) -> f32 {
+        self.simulation_params.drift_x_per_second
+    }
+
+    #[wasm_bindgen]
+    pub fn get_friction(&self) -> f32 {
+        self.simulation_params.friction
+    }
+
+    #[wasm_bindgen]
+    pub fn get_force_scale(&self) -> f32 {
+        self.simulation_params.force_scale
+    }
+
+    #[wasm_bindgen]
+    pub fn get_r_smooth(&self) -> f32 {
+        self.simulation_params.r_smooth
+    }
+
+    #[wasm_bindgen]
+    pub fn get_inter_type_attraction_scale(&self) -> f32 {
+        self.simulation_params.inter_type_attraction_scale
+    }
+
+    #[wasm_bindgen]
+    pub fn get_inter_type_radius_scale(&self) -> f32 {
+        self.simulation_params.inter_type_radius_scale
+    }
+
+    #[wasm_bindgen]
+    pub fn get_fisheye_strength(&self) -> f32 {
+        self.simulation_params.fisheye_strength
+    }
+
+    #[wasm_bindgen]
+    pub fn get_lenia_enabled(&self) -> bool {
+        self.simulation_params.lenia_enabled
+    }
+
+    #[wasm_bindgen]
+    pub fn get_lenia_growth_mu(&self) -> f32 {
+        self.simulation_params.lenia_growth_mu
+    }
+
+    #[wasm_bindgen]
+    pub fn get_lenia_growth_sigma(&self) -> f32 {
+        self.simulation_params.lenia_growth_sigma
+    }
+
+    #[wasm_bindgen]
+    pub fn get_lenia_kernel_radius(&self) -> f32 {
+        self.simulation_params.lenia_kernel_radius
+    }
+
+    #[wasm_bindgen]
+    pub fn get_lightning_frequency(&self) -> f32 {
+        self.simulation_params.lightning_frequency
+    }
+
+    #[wasm_bindgen]
+    pub fn get_lightning_intensity(&self) -> f32 {
+        self.simulation_params.lightning_intensity
+    }
+
+    #[wasm_bindgen]
+    pub fn get_lightning_duration(&self) -> f32 {
+        self.simulation_params.lightning_duration
+    }
+
+    // Add missing getter methods that are used in main.ts
+    #[wasm_bindgen]
+    pub fn get_particle_render_size(&self) -> f32 {
+        self.simulation_params.particle_render_size
+    }
+
+    #[wasm_bindgen]
+    pub fn get_flat_force(&self) -> bool {
+        self.simulation_params.flat_force
+    }
+
+    // Get lightning collision statistics for performance monitoring
+    #[wasm_bindgen]
+    pub fn log_lightning_collision_stats(&self) {
+        // Get current lightning parameters to estimate collision load
+        let lightning_freq = self.simulation_params.lightning_frequency;
+        let electrical_activity = self.simulation_params.inter_type_attraction_scale;
+        let current_time = self.simulation_params.time;
+
+        // Calculate estimated collision checks per bolt based on our implementation
+        // Each segment can try up to 12 different positions (6 angle variations + 4 random + 2 shorter)
+        // Each position is checked against all existing segments comprehensively
+        // Worst case: 20 segments × 12 attempts × 20 collision checks = ~4,800 checks per bolt
+        let estimated_checks_per_bolt = 20 * 12 * 20; // Conservative estimate
+
+        console_log!("⚡ LIGHTNING COLLISION STATISTICS:");
+        console_log!(
+            "🔍 Collision Detection: COMPREHENSIVE MODE (checks all segments for each position)"
+        );
+        console_log!("� Lightning Frequency: {:.3}", lightning_freq);
+        console_log!("🔌 Electrical Activity: {:.3}", electrical_activity);
+        console_log!("⏱️  Current Time: {:.1}s", current_time);
+        console_log!(
+            "🧮 Estimated Collision Checks per Bolt: ~{}",
+            estimated_checks_per_bolt
+        );
+        console_log!(
+            "💡 Note: Actual count is tracked in GPU buffer but requires readback for display"
+        );
+        console_log!("🎯 Each new segment tries up to 12 positions, each checked against all existing segments");
+        console_log!("🔄 Collision order: Newest segments first (reverse order) in fast check, then comprehensive validation");
+    }
+
+    // === COMPREHENSIVE PARAMETER SETTERS ===
+    // These setters allow the UI to update individual parameters directly
+
+    #[wasm_bindgen]
+    pub fn set_drift_x_per_second(&mut self, value: f32) {
+        self.simulation_params.drift_x_per_second = value;
+        console_log!("🔧 Individual parameter: drift_x_per_second = {:.2}", value);
+    }
+
+    #[wasm_bindgen]
+    pub fn set_friction(&mut self, value: f32) {
+        self.simulation_params.friction = value.max(0.01).min(1.0);
+        console_log!(
+            "🔧 Individual parameter: friction = {:.3}",
+            self.simulation_params.friction
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_force_scale(&mut self, value: f32) {
+        self.simulation_params.force_scale = value.max(100.0).min(800.0);
+        console_log!(
+            "🔧 Individual parameter: force_scale = {:.1}",
+            self.simulation_params.force_scale
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_r_smooth(&mut self, value: f32) {
+        self.simulation_params.r_smooth = value.max(0.1).min(20.0);
+        console_log!(
+            "🔧 Individual parameter: r_smooth = {:.2}",
+            self.simulation_params.r_smooth
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_inter_type_attraction_scale(&mut self, value: f32) {
+        self.simulation_params.inter_type_attraction_scale = value.max(0.0).min(3.0);
+        console_log!(
+            "🔧 Individual parameter: inter_type_attraction_scale = {:.2}",
+            self.simulation_params.inter_type_attraction_scale
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_inter_type_radius_scale(&mut self, value: f32) {
+        self.simulation_params.inter_type_radius_scale = value.max(0.1).min(2.0);
+        console_log!(
+            "🔧 Individual parameter: inter_type_radius_scale = {:.2}",
+            self.simulation_params.inter_type_radius_scale
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_fisheye_strength(&mut self, value: f32) {
+        self.simulation_params.fisheye_strength = value.max(0.0).min(3.0);
+        console_log!(
+            "🔧 Individual parameter: fisheye_strength = {:.2}",
+            self.simulation_params.fisheye_strength
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_lenia_enabled(&mut self, enabled: bool) {
+        self.simulation_params.lenia_enabled = enabled;
+        console_log!("🔧 Individual parameter: lenia_enabled = {}", enabled);
+    }
+
+    #[wasm_bindgen]
+    pub fn set_lenia_growth_mu(&mut self, value: f32) {
+        self.simulation_params.lenia_growth_mu = value.max(0.05).min(0.3);
+        console_log!(
+            "🔧 Individual parameter: lenia_growth_mu = {:.3}",
+            self.simulation_params.lenia_growth_mu
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_lenia_growth_sigma(&mut self, value: f32) {
+        self.simulation_params.lenia_growth_sigma = value.max(0.005).min(0.05);
+        console_log!(
+            "🔧 Individual parameter: lenia_growth_sigma = {:.4}",
+            self.simulation_params.lenia_growth_sigma
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_lenia_kernel_radius(&mut self, value: f32) {
+        self.simulation_params.lenia_kernel_radius = value.max(20.0).min(100.0);
+        console_log!(
+            "🔧 Individual parameter: lenia_kernel_radius = {:.1}",
+            self.simulation_params.lenia_kernel_radius
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_lightning_frequency(&mut self, value: f32) {
+        self.simulation_params.lightning_frequency = value.max(0.0).min(2.0);
+        console_log!(
+            "🔧 Individual parameter: lightning_frequency = {:.2}",
+            self.simulation_params.lightning_frequency
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_lightning_intensity(&mut self, value: f32) {
+        self.simulation_params.lightning_intensity = value.max(0.0).min(2.0);
+        console_log!(
+            "🔧 Individual parameter: lightning_intensity = {:.2}",
+            self.simulation_params.lightning_intensity
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_lightning_duration(&mut self, value: f32) {
+        self.simulation_params.lightning_duration = value.max(0.1).min(2.0);
+        console_log!(
+            "🔧 Individual parameter: lightning_duration = {:.2}",
+            self.simulation_params.lightning_duration
+        );
+    }
+
+    #[wasm_bindgen]
+    pub fn set_flat_force(&mut self, enabled: bool) {
+        self.simulation_params.flat_force = enabled;
+        console_log!("🔧 Individual parameter: flat_force = {}", enabled);
+    }
+
+    #[wasm_bindgen]
+    pub fn set_particle_render_size(&mut self, value: f32) {
+        self.simulation_params.particle_render_size = value.max(1.0).min(50.0);
+        console_log!(
+            "🔧 Individual parameter: particle_render_size = {:.1}",
+            self.simulation_params.particle_render_size
+        );
+    }
+
+    // Physics debugging method
+    #[wasm_bindgen]
+    pub fn debug_particle_physics(&self) -> String {
+        let active_count = self.particle_system.get_active_count();
+
+        if active_count == 0 {
+            return "No particles to debug".to_string();
+        }
+
+        // Sample first 5 particles for debugging
+        let mut debug_info = String::new();
+        let sample_count = 5.min(active_count as usize);
+
+        debug_info.push_str(&format!(
+            "🔬 Physics Debug - Sampling {} particles:\n",
+            sample_count
+        ));
+        debug_info.push_str(&format!(
+            "📊 Current sim params: force_scale={:.1}, friction={:.3}, delta_time={:.4}\n",
+            self.simulation_params.force_scale,
+            self.simulation_params.friction,
+            self.simulation_params.delta_time
+        ));
+
+        for i in 0..sample_count {
+            if let Some(p) = self.particle_system.get_particle(i) {
+                let velocity_magnitude =
+                    (p.velocity[0] * p.velocity[0] + p.velocity[1] * p.velocity[1]).sqrt();
+                debug_info.push_str(&format!(
+                    "P{}: pos=({:.1},{:.1}) vel=({:.3},{:.3}) |v|={:.3} type={}\n",
+                    i,
+                    p.position[0],
+                    p.position[1],
+                    p.velocity[0],
+                    p.velocity[1],
+                    velocity_magnitude,
+                    p.particle_type
+                ));
+            }
+        }
+
+        debug_info
     }
 }

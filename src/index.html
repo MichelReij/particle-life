@@ -17,13 +17,13 @@
                 <input
                     type="range"
                     id="zoomSlider"
-                    min="1.00"
+                    min="1.45"
                     max="6.00"
-                    value="1.00"
+                    value="1.45"
                     step="0.01"
                     class="vertical-slider"
                 />
-                <span id="zoomValue">1.00</span>
+                <span id="zoomValue">1.5</span>
             </div>
             <div id="canvasContainer">
                 <canvas id="canvas" width="800" height="800"></canvas>
@@ -39,22 +39,11 @@
             </div>
             <div id="fps-display"></div>
 
-            <!-- Performance Control Section -->
-            <div id="Performance" class="slider-container">
-                <label for="particleCountSlider"
-                    >Particle Count (Performance Test):</label
-                >
-                <input
-                    type="range"
-                    id="particleCountSlider"
-                    min="100"
-                    max="5000"
-                    value="3200"
-                    step="100"
-                    class="horizontal-slider"
-                />
-                <span id="particleCountValue">3200</span>
-                <button id="performanceTest">Run Performance Test</button>
+            <!-- Physics Debug Section -->
+            <div id="physicsDebug" class="debug-container">
+                <button id="debugPhysicsBtn">🔬 Debug Physics</button>
+                <button id="regenerateRulesBtn">🎲 New Rules</button>
+                <button id="collisionStatsBtn">⚡ Collision Stats</button>
             </div>
 
             <div id="Temp" class="slider-container">

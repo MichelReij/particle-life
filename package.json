@@ -12,6 +12,7 @@
     "main": "src/main.ts",
     "scripts": {
         "build": "webpack",
+        "build:rust": "./build-wasm.sh",
         "start": "webpack serve",
         "dev": "webpack serve"
     },

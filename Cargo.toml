@@ -2,6 +2,7 @@
 name = "particle-life-wasm"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 
 [lib]
 crate-type = ["cdylib"]
@@ -16,7 +17,8 @@ getrandom = { version = "0.2", features = ["js"] }
 rand = { version = "0.8", features = ["small_rng"] }
 console_error_panic_hook = "0.1"
 bytemuck = { version = "1.0", features = ["derive"] }
-wgpu = "25.0.2"
+wgpu = { version = "25.0.2", features = ["webgpu", "webgl"] }
+raw-window-handle = "0.6"
 futures = "0.3"
 hsluv = "0.3.1"
 

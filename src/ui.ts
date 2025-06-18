@@ -175,6 +175,9 @@ let parameterUpdateCallbacks = {
     updateBackgroundColor: (r: number, g: number, b: number) => {},
     updateBackgroundColorFromTemperature: (temp: number) => {},
     updateSimulationParameter: (paramName: string, value: number) => {},
+    updateBooleanParameter: (paramName: string, value: boolean) => {},
+    getParameter: (paramName: string) => 0,
+    getBooleanParameter: (paramName: string) => false,
     updateZoom: (level: number, centerX?: number, centerY?: number) => {},
     updateParticleCount: (pressure: number) => {},
     // New comprehensive parameter methods
@@ -183,6 +186,11 @@ let parameterUpdateCallbacks = {
     setUVLight: (uv: number) => {},
     setElectricalActivity: (electrical: number) => {},
     setZoom: (level: number, centerX?: number, centerY?: number) => {},
+    // Physics debugging methods
+    debugPhysics: () => "Debug not available",
+    regenerateRules: () => {},
+    // Lightning collision debugging
+    logLightningCollisionStats: () => {},
 };
 
 export function setParameterUpdateCallbacks(callbacks: {
@@ -190,6 +198,9 @@ export function setParameterUpdateCallbacks(callbacks: {
     updateBackgroundColor: (r: number, g: number, b: number) => void;
     updateBackgroundColorFromTemperature: (temp: number) => void;
     updateSimulationParameter: (paramName: string, value: number) => void;
+    updateBooleanParameter?: (paramName: string, value: boolean) => void;
+    getParameter?: (paramName: string) => number;
+    getBooleanParameter?: (paramName: string) => boolean;
     updateZoom: (level: number, centerX?: number, centerY?: number) => void;
     updateParticleCount: (pressure: number) => void;
     // New comprehensive parameter methods
@@ -198,11 +209,24 @@ export function setParameterUpdateCallbacks(callbacks: {
     setUVLight?: (uv: number) => void;
     setElectricalActivity?: (electrical: number) => void;
     setZoom?: (level: number, centerX?: number, centerY?: number) => void;
+    // Physics debugging methods
+    debugPhysics?: () => string;
+    regenerateRules?: () => void;
+    // Lightning collision debugging
+    logLightningCollisionStats?: () => void;
 }) {
     parameterUpdateCallbacks = {
         ...parameterUpdateCallbacks,
         ...callbacks,
-        // Provide defaults for optional comprehensive methods
+        // Provide defaults for optional methods
+        updateBooleanParameter:
+            callbacks.updateBooleanParameter ||
+            parameterUpdateCallbacks.updateBooleanParameter,
+        getParameter:
+            callbacks.getParameter || parameterUpdateCallbacks.getParameter,
+        getBooleanParameter:
+            callbacks.getBooleanParameter ||
+            parameterUpdateCallbacks.getBooleanParameter,
         setTemperature:
             callbacks.setTemperature || parameterUpdateCallbacks.setTemperature,
         setPressure:
@@ -212,6 +236,12 @@ export function setParameterUpdateCallbacks(callbacks: {
             callbacks.setElectricalActivity ||
             parameterUpdateCallbacks.setElectricalActivity,
         setZoom: callbacks.setZoom || parameterUpdateCallbacks.setZoom,
+        // Physics debugging methods
+        debugPhysics:
+            callbacks.debugPhysics || parameterUpdateCallbacks.debugPhysics,
+        regenerateRules:
+            callbacks.regenerateRules ||
+            parameterUpdateCallbacks.regenerateRules,
     };
 }
 
@@ -221,6 +251,8 @@ function updateDriftAndFrictionFromTemperature(temp: number): void {
     // Use comprehensive temperature method if available (Rust engine)
     if (parameterUpdateCallbacks.setTemperature) {
         parameterUpdateCallbacks.setTemperature(temp);
+        // Synchronize all parameter displays to reflect changes
+        synchronizeAllParameterDisplays();
         return;
     }
 
@@ -264,6 +296,8 @@ function updateParametersFromPressure(pressure: number): void {
         parameterUpdateCallbacks.setPressure(pressure);
         // Update particle count display
         updateParticleCountDisplay(pressure);
+        // Synchronize all parameter displays to reflect changes
+        synchronizeAllParameterDisplays();
         return;
     }
 
@@ -306,6 +340,8 @@ function updateParametersFromUV(uv: number): void {
     // Use comprehensive UV method if available (Rust engine)
     if (parameterUpdateCallbacks.setUVLight) {
         parameterUpdateCallbacks.setUVLight(uv);
+        // Synchronize all parameter displays to reflect changes
+        synchronizeAllParameterDisplays();
         return;
     }
 
@@ -333,6 +369,8 @@ function updateParametersFromElectricalActivity(
     // Use comprehensive electrical activity method if available (Rust engine)
     if (parameterUpdateCallbacks.setElectricalActivity) {
         parameterUpdateCallbacks.setElectricalActivity(electricalActivity);
+        // Synchronize all parameter displays to reflect changes
+        synchronizeAllParameterDisplays();
         return;
     }
 
@@ -354,6 +392,147 @@ function updateParametersFromElectricalActivity(
         2
     );
 }
+
+// === Parameter Synchronization System ===
+// Updates all detail sliders to reflect current engine parameter values
+function synchronizeAllParameterDisplays(): void {
+    // Get all current parameter values from the engine
+    const params = {
+        driftXPerSecond:
+            parameterUpdateCallbacks.getParameter("driftXPerSecond"),
+        friction: parameterUpdateCallbacks.getParameter("friction"),
+        forceScale: parameterUpdateCallbacks.getParameter("forceScale"),
+        rSmooth: parameterUpdateCallbacks.getParameter("rSmooth"),
+        interTypeAttractionScale: parameterUpdateCallbacks.getParameter(
+            "interTypeAttractionScale"
+        ),
+        interTypeRadiusScale: parameterUpdateCallbacks.getParameter(
+            "interTypeRadiusScale"
+        ),
+        fisheyeStrength:
+            parameterUpdateCallbacks.getParameter("fisheyeStrength"),
+        particleRenderSize:
+            parameterUpdateCallbacks.getParameter("particleRenderSize"),
+        leniaGrowthMu: parameterUpdateCallbacks.getParameter("leniaGrowthMu"),
+        leniaGrowthSigma:
+            parameterUpdateCallbacks.getParameter("leniaGrowthSigma"),
+        leniaKernelRadius:
+            parameterUpdateCallbacks.getParameter("leniaKernelRadius"),
+        lightningFrequency:
+            parameterUpdateCallbacks.getParameter("lightningFrequency"),
+        lightningIntensity:
+            parameterUpdateCallbacks.getParameter("lightningIntensity"),
+        lightningDuration:
+            parameterUpdateCallbacks.getParameter("lightningDuration"),
+        // Boolean parameters
+        flatForce: parameterUpdateCallbacks.getBooleanParameter("flatForce"),
+        leniaEnabled:
+            parameterUpdateCallbacks.getBooleanParameter("leniaEnabled"),
+    };
+
+    // Update all slider values and displays
+    updateSliderDisplay("driftSlider", "driftValue", params.driftXPerSecond, 2);
+    updateSliderDisplay("frictionSlider", "frictionValue", params.friction, 3);
+    updateSliderDisplay(
+        "forceScaleSlider",
+        "forceScaleValue",
+        params.forceScale,
+        2
+    );
+    updateSliderDisplay("rSmoothSlider", "rSmoothValue", params.rSmooth, 2);
+    updateSliderDisplay(
+        "interTypeAttractionScaleSlider",
+        "interTypeAttractionScaleValue",
+        params.interTypeAttractionScale,
+        3
+    );
+    updateSliderDisplay(
+        "interTypeRadiusScaleSlider",
+        "interTypeRadiusScaleValue",
+        params.interTypeRadiusScale,
+        3
+    );
+    updateSliderDisplay(
+        "fisheyeStrengthSlider",
+        "fisheyeStrengthValue",
+        params.fisheyeStrength,
+        2
+    );
+    updateSliderDisplay(
+        "particleRenderSizeSlider",
+        "particleRenderSizeValue",
+        params.particleRenderSize,
+        1
+    );
+    updateSliderDisplay(
+        "leniaGrowthMuSlider",
+        "leniaGrowthMuValue",
+        params.leniaGrowthMu,
+        3
+    );
+    updateSliderDisplay(
+        "leniaGrowthSigmaSlider",
+        "leniaGrowthSigmaValue",
+        params.leniaGrowthSigma,
+        3
+    );
+    updateSliderDisplay(
+        "leniaKernelRadiusSlider",
+        "leniaKernelRadiusValue",
+        params.leniaKernelRadius,
+        1
+    );
+    updateSliderDisplay(
+        "lightningFrequencySlider",
+        "lightningFrequencyValue",
+        params.lightningFrequency,
+        2
+    );
+    updateSliderDisplay(
+        "lightningIntensitySlider",
+        "lightningIntensityValue",
+        params.lightningIntensity,
+        2
+    );
+    updateSliderDisplay(
+        "lightningDurationSlider",
+        "lightningDurationValue",
+        params.lightningDuration,
+        2
+    );
+
+    // Update boolean parameter displays
+    updateBooleanDisplay(
+        "flatForceCheckbox",
+        "flatForceStatus",
+        params.flatForce
+    );
+    updateBooleanDisplay(
+        "leniaEnabledCheckbox",
+        "leniaEnabledStatus",
+        params.leniaEnabled
+    );
+}
+
+// Helper function to update a boolean parameter display
+function updateBooleanDisplay(
+    checkboxId: string,
+    statusId: string,
+    value: boolean
+): void {
+    const checkbox = document.getElementById(checkboxId) as HTMLInputElement;
+    const status = document.getElementById(statusId);
+
+    if (checkbox) {
+        checkbox.checked = value;
+    }
+    if (status) {
+        status.textContent = value ? "On" : "Off";
+    }
+}
+
+// Export the synchronization function for use by parameter setters
+export { synchronizeAllParameterDisplays };
 
 // === Utility Functions ===
 
@@ -571,12 +750,16 @@ export function initializeUI(
     initializeZoomSlider(currentZoomLevel);
     initializeLeniaControls(simParams);
     initializeEnvironmentalSliders();
+    initializePhysicsDebug();
 
     // Initialize JoyStick after a short delay to ensure DOM is ready
     setTimeout(() => {
         initJoyStick(currentZoomLevel);
         updateZoomCenterInfo(currentZoomLevel);
     }, 100);
+
+    // Initialize physics debugging UI
+    initializePhysicsDebug();
 
     console.log("UI initialization complete");
 }
@@ -590,16 +773,19 @@ function initializeDriftSlider(simParams: SimulationParams): void {
     const driftValueDisplay = document.getElementById("driftValue");
 
     if (driftSlider && driftValueDisplay) {
-        // Load saved value or use default
-        const savedDrift = loadFromLocalStorage(
-            STORAGE_KEYS.drift,
-            simParams.driftXPerSecond
-        );
-        simParams.driftXPerSecond = savedDrift;
-        parameterUpdateCallbacks.updateDriftAndBackground(savedDrift);
+        // Get current value from engine, fall back to localStorage or default
+        let currentValue =
+            parameterUpdateCallbacks.getParameter("driftXPerSecond");
+        if (currentValue === 0) {
+            currentValue = loadFromLocalStorage(
+                STORAGE_KEYS.drift,
+                simParams.driftXPerSecond
+            );
+            parameterUpdateCallbacks.updateDriftAndBackground(currentValue);
+        }
 
-        driftSlider.value = savedDrift.toString();
-        driftValueDisplay.textContent = savedDrift.toFixed(2);
+        driftSlider.value = currentValue.toString();
+        driftValueDisplay.textContent = currentValue.toFixed(2);
 
         driftSlider.addEventListener("input", (event) => {
             const newDrift = parseFloat(
@@ -619,12 +805,17 @@ function initializeForceScaleSlider(simParams: SimulationParams): void {
     const forceScaleValueDisplay = document.getElementById("forceScaleValue");
 
     if (forceScaleSlider && forceScaleValueDisplay) {
-        simParams.forceScale = loadFromLocalStorage(
-            STORAGE_KEYS.forceScale,
-            simParams.forceScale
-        );
-        forceScaleSlider.value = simParams.forceScale.toString();
-        forceScaleValueDisplay.textContent = simParams.forceScale.toFixed(2);
+        // Get current value from engine, fall back to localStorage or default
+        let currentValue = parameterUpdateCallbacks.getParameter("forceScale");
+        if (currentValue === 0) {
+            currentValue = loadFromLocalStorage(
+                STORAGE_KEYS.forceScale,
+                simParams.forceScale
+            );
+        }
+
+        forceScaleSlider.value = currentValue.toString();
+        forceScaleValueDisplay.textContent = currentValue.toFixed(2);
 
         forceScaleSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
@@ -647,12 +838,17 @@ function initializeFrictionSlider(simParams: SimulationParams): void {
     const frictionValueDisplay = document.getElementById("frictionValue");
 
     if (frictionSlider && frictionValueDisplay) {
-        simParams.friction = loadFromLocalStorage(
-            STORAGE_KEYS.friction,
-            simParams.friction
-        );
-        frictionSlider.value = simParams.friction.toString();
-        frictionValueDisplay.textContent = simParams.friction.toFixed(2);
+        // Get current value from engine, fall back to localStorage or default
+        let currentValue = parameterUpdateCallbacks.getParameter("friction");
+        if (currentValue === 0) {
+            currentValue = loadFromLocalStorage(
+                STORAGE_KEYS.friction,
+                simParams.friction
+            );
+        }
+
+        frictionSlider.value = currentValue.toString();
+        frictionValueDisplay.textContent = currentValue.toFixed(3);
 
         frictionSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
@@ -662,7 +858,7 @@ function initializeFrictionSlider(simParams: SimulationParams): void {
                 "friction",
                 newValue
             );
-            frictionValueDisplay.textContent = newValue.toFixed(2);
+            frictionValueDisplay.textContent = newValue.toFixed(3);
             saveToLocalStorage(STORAGE_KEYS.friction, newValue);
         });
     }
@@ -675,12 +871,17 @@ function initializeRSmoothSlider(simParams: SimulationParams): void {
     const rSmoothValueDisplay = document.getElementById("rSmoothValue");
 
     if (rSmoothSlider && rSmoothValueDisplay) {
-        simParams.rSmooth = loadFromLocalStorage(
-            STORAGE_KEYS.rSmooth,
-            simParams.rSmooth
-        );
-        rSmoothSlider.value = simParams.rSmooth.toString();
-        rSmoothValueDisplay.textContent = simParams.rSmooth.toFixed(2);
+        // Get current value from engine, fall back to localStorage or default
+        let currentValue = parameterUpdateCallbacks.getParameter("rSmooth");
+        if (currentValue === 0) {
+            currentValue = loadFromLocalStorage(
+                STORAGE_KEYS.rSmooth,
+                simParams.rSmooth
+            );
+        }
+
+        rSmoothSlider.value = currentValue.toString();
+        rSmoothValueDisplay.textContent = currentValue.toFixed(2);
 
         rSmoothSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
@@ -709,14 +910,20 @@ function initializeInterTypeScaleSliders(simParams: SimulationParams): void {
         interTypeAttractionScaleSlider &&
         interTypeAttractionScaleValueDisplay
     ) {
-        simParams.interTypeAttractionScale = loadFromLocalStorage(
-            STORAGE_KEYS.interTypeAttractionScale,
-            simParams.interTypeAttractionScale
+        // Get current value from engine, fall back to localStorage or default
+        let currentValue = parameterUpdateCallbacks.getParameter(
+            "interTypeAttractionScale"
         );
-        interTypeAttractionScaleSlider.value =
-            simParams.interTypeAttractionScale.toString();
+        if (currentValue === 0) {
+            currentValue = loadFromLocalStorage(
+                STORAGE_KEYS.interTypeAttractionScale,
+                simParams.interTypeAttractionScale
+            );
+        }
+
+        interTypeAttractionScaleSlider.value = currentValue.toString();
         interTypeAttractionScaleValueDisplay.textContent =
-            simParams.interTypeAttractionScale.toFixed(2);
+            currentValue.toFixed(2);
 
         interTypeAttractionScaleSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
@@ -741,14 +948,19 @@ function initializeInterTypeScaleSliders(simParams: SimulationParams): void {
     );
 
     if (interTypeRadiusScaleSlider && interTypeRadiusScaleValueDisplay) {
-        simParams.interTypeRadiusScale = loadFromLocalStorage(
-            STORAGE_KEYS.interTypeRadiusScale,
-            simParams.interTypeRadiusScale
+        // Get current value from engine, fall back to localStorage or default
+        let currentValue = parameterUpdateCallbacks.getParameter(
+            "interTypeRadiusScale"
         );
-        interTypeRadiusScaleSlider.value =
-            simParams.interTypeRadiusScale.toString();
-        interTypeRadiusScaleValueDisplay.textContent =
-            simParams.interTypeRadiusScale.toFixed(2);
+        if (currentValue === 0) {
+            currentValue = loadFromLocalStorage(
+                STORAGE_KEYS.interTypeRadiusScale,
+                simParams.interTypeRadiusScale
+            );
+        }
+
+        interTypeRadiusScaleSlider.value = currentValue.toString();
+        interTypeRadiusScaleValueDisplay.textContent = currentValue.toFixed(2);
 
         interTypeRadiusScaleSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
@@ -773,13 +985,18 @@ function initializeFisheyeSlider(simParams: SimulationParams): void {
     );
 
     if (fisheyeStrengthSlider && fisheyeStrengthValueDisplay) {
-        simParams.fisheyeStrength = loadFromLocalStorage(
-            STORAGE_KEYS.fisheyeStrength,
-            simParams.fisheyeStrength
-        );
-        fisheyeStrengthSlider.value = simParams.fisheyeStrength.toString();
-        fisheyeStrengthValueDisplay.textContent =
-            simParams.fisheyeStrength.toFixed(2);
+        // Get current value from engine, fall back to localStorage or default
+        let currentValue =
+            parameterUpdateCallbacks.getParameter("fisheyeStrength");
+        if (currentValue === 0) {
+            currentValue = loadFromLocalStorage(
+                STORAGE_KEYS.fisheyeStrength,
+                simParams.fisheyeStrength
+            );
+        }
+
+        fisheyeStrengthSlider.value = currentValue.toString();
+        fisheyeStrengthValueDisplay.textContent = currentValue.toFixed(2);
 
         fisheyeStrengthSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
@@ -802,21 +1019,19 @@ function initializeZoomSlider(currentZoomLevel: number): void {
     const zoomValueDisplay = document.getElementById("zoomValue");
 
     if (zoomSlider && zoomValueDisplay) {
-        const savedZoom = loadFromLocalStorage(
-            STORAGE_KEYS.zoom,
-            currentZoomLevel
-        );
+        // Always start at the minimum zoom level (1.45), ignore localStorage
+        const initialZoom = Math.max(1.45, currentZoomLevel);
         console.log(
-            `Initializing zoom slider: engine=${currentZoomLevel}, saved=${savedZoom}, HTML default=${zoomSlider.value}`
+            `Initializing zoom slider: engine=${currentZoomLevel}, initial=${initialZoom}, HTML default=${zoomSlider.value}`
         );
 
-        zoomSlider.value = savedZoom.toString();
-        zoomValueDisplay.textContent = savedZoom.toFixed(2);
+        zoomSlider.value = initialZoom.toString();
+        zoomValueDisplay.textContent = initialZoom.toFixed(1); // Show 1 decimal
 
         // Immediately update the engine with the final zoom value to ensure consistency
         if (parameterUpdateCallbacks && parameterUpdateCallbacks.updateZoom) {
             parameterUpdateCallbacks.updateZoom(
-                savedZoom,
+                initialZoom,
                 zoomCenterX,
                 zoomCenterY
             );
@@ -827,8 +1042,8 @@ function initializeZoomSlider(currentZoomLevel: number): void {
                 (event.target as HTMLInputElement).value
             );
             console.log(`🎚️ Zoom slider input event: ${newValue}`);
-            zoomValueDisplay.textContent = newValue.toFixed(2);
-            saveToLocalStorage(STORAGE_KEYS.zoom, newValue);
+            zoomValueDisplay.textContent = newValue.toFixed(1); // Show 1 decimal
+            // Don't save to localStorage - always reset to minimum on reload
 
             // Constrain zoom center based on new zoom level
             constrainZoomCenter(newValue);
@@ -864,8 +1079,8 @@ function initializeZoomSlider(currentZoomLevel: number): void {
                 (event.target as HTMLInputElement).value
             );
             console.log(`Zoom slider change event: ${newValue}`);
-            zoomValueDisplay.textContent = newValue.toFixed(2);
-            saveToLocalStorage(STORAGE_KEYS.zoom, newValue);
+            zoomValueDisplay.textContent = newValue.toFixed(1); // Show 1 decimal
+            // Don't save to localStorage - always reset to minimum on reload
 
             // Constrain zoom center based on new zoom level
             constrainZoomCenter(newValue);
@@ -899,15 +1114,22 @@ function initializeLeniaControls(simParams: SimulationParams): void {
     const leniaEnabledStatus = document.getElementById("leniaEnabledStatus");
 
     if (leniaEnabledCheckbox && leniaEnabledStatus) {
-        leniaEnabledCheckbox.checked = simParams.leniaEnabled;
-        leniaEnabledStatus.textContent = simParams.leniaEnabled ? "On" : "Off";
+        // Get current value from engine, fall back to sim params
+        let currentValue =
+            parameterUpdateCallbacks.getBooleanParameter("leniaEnabled");
+        if (!currentValue) {
+            currentValue = simParams.leniaEnabled;
+        }
+
+        leniaEnabledCheckbox.checked = currentValue;
+        leniaEnabledStatus.textContent = currentValue ? "On" : "Off";
 
         leniaEnabledCheckbox.addEventListener("change", (event) => {
             const newValue = (event.target as HTMLInputElement).checked;
             leniaEnabledStatus.textContent = newValue ? "On" : "Off";
-            parameterUpdateCallbacks.updateSimulationParameter(
+            parameterUpdateCallbacks.updateBooleanParameter(
                 "leniaEnabled",
-                newValue ? 1 : 0
+                newValue
             );
         });
     }
@@ -919,8 +1141,15 @@ function initializeLeniaControls(simParams: SimulationParams): void {
     const leniaGrowthMuValue = document.getElementById("leniaGrowthMuValue");
 
     if (leniaGrowthMuSlider && leniaGrowthMuValue) {
-        leniaGrowthMuSlider.value = simParams.leniaGrowthMu.toString();
-        leniaGrowthMuValue.textContent = simParams.leniaGrowthMu.toFixed(3);
+        // Get current value from engine, fall back to sim params
+        let currentValue =
+            parameterUpdateCallbacks.getParameter("leniaGrowthMu");
+        if (currentValue === 0) {
+            currentValue = simParams.leniaGrowthMu;
+        }
+
+        leniaGrowthMuSlider.value = currentValue.toString();
+        leniaGrowthMuValue.textContent = currentValue.toFixed(3);
 
         leniaGrowthMuSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
@@ -943,9 +1172,15 @@ function initializeLeniaControls(simParams: SimulationParams): void {
     );
 
     if (leniaGrowthSigmaSlider && leniaGrowthSigmaValue) {
-        leniaGrowthSigmaSlider.value = simParams.leniaGrowthSigma.toString();
-        leniaGrowthSigmaValue.textContent =
-            simParams.leniaGrowthSigma.toFixed(3);
+        // Get current value from engine, fall back to sim params
+        let currentValue =
+            parameterUpdateCallbacks.getParameter("leniaGrowthSigma");
+        if (currentValue === 0) {
+            currentValue = simParams.leniaGrowthSigma;
+        }
+
+        leniaGrowthSigmaSlider.value = currentValue.toString();
+        leniaGrowthSigmaValue.textContent = currentValue.toFixed(3);
 
         leniaGrowthSigmaSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
@@ -968,9 +1203,15 @@ function initializeLeniaControls(simParams: SimulationParams): void {
     );
 
     if (leniaKernelRadiusSlider && leniaKernelRadiusValue) {
-        leniaKernelRadiusSlider.value = simParams.leniaKernelRadius.toString();
-        leniaKernelRadiusValue.textContent =
-            simParams.leniaKernelRadius.toFixed(1);
+        // Get current value from engine, fall back to sim params
+        let currentValue =
+            parameterUpdateCallbacks.getParameter("leniaKernelRadius");
+        if (currentValue === 0) {
+            currentValue = simParams.leniaKernelRadius;
+        }
+
+        leniaKernelRadiusSlider.value = currentValue.toString();
+        leniaKernelRadiusValue.textContent = currentValue.toFixed(1);
 
         leniaKernelRadiusSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
@@ -1094,10 +1335,8 @@ function initializeEnvironmentalSliders(): void {
 function updateZoomCenterInfo(currentZoomLevel: number): void {
     const zoomCenterInfo = document.getElementById("zoomCenterInfo");
     if (zoomCenterInfo) {
-        const maxMovementRange = Math.max(
-            0,
-            111.24 * currentZoomLevel - 122.29
-        );
+        // Use the same formula as in the joystick callback for consistency
+        const maxMovementRange = Math.max(0, 112 * currentZoomLevel - 150);
         zoomCenterInfo.innerHTML = `Center: (${zoomCenterX.toFixed(
             0
         )}, ${zoomCenterY.toFixed(0)})<br>Range: ${maxMovementRange.toFixed(
@@ -1169,4 +1408,61 @@ export function cleanup(): void {
         }
     }
     (window as any).__webgpuDevice = undefined;
+}
+
+// === Physics Debugging Functions ===
+function initializePhysicsDebug(): void {
+    const debugPhysicsBtn = document.getElementById("debugPhysicsBtn");
+    const regenerateRulesBtn = document.getElementById("regenerateRulesBtn");
+    const collisionStatsBtn = document.getElementById("collisionStatsBtn");
+
+    if (debugPhysicsBtn) {
+        debugPhysicsBtn.addEventListener("click", () => {
+            if (parameterUpdateCallbacks.debugPhysics) {
+                const physicsInfo = parameterUpdateCallbacks.debugPhysics();
+                console.log("🔬 PHYSICS DEBUG:");
+                console.log(physicsInfo);
+                // alert(
+                //     "Physics debug info logged to console! Check the browser developer tools."
+                // );
+            } else {
+                console.log(
+                    "❌ Physics debugging not available - engine not initialized or using TypeScript version"
+                );
+                alert("Physics debugging only available with Rust engine");
+            }
+        });
+    }
+
+    if (collisionStatsBtn) {
+        collisionStatsBtn.addEventListener("click", () => {
+            if (parameterUpdateCallbacks.logLightningCollisionStats) {
+                parameterUpdateCallbacks.logLightningCollisionStats();
+                console.log("⚡ LIGHTNING COLLISION STATS LOGGED");
+            } else {
+                console.log(
+                    "❌ Lightning collision stats not available - engine not initialized or using TypeScript version"
+                );
+                alert(
+                    "Lightning collision stats only available with Rust engine"
+                );
+            }
+        });
+    }
+
+    if (regenerateRulesBtn) {
+        regenerateRulesBtn.addEventListener("click", () => {
+            if (parameterUpdateCallbacks.regenerateRules) {
+                parameterUpdateCallbacks.regenerateRules();
+                // alert(
+                //     "New interaction rules generated! Physics behavior should change."
+                // );
+            } else {
+                console.log(
+                    "❌ Rule regeneration not available - engine not initialized or you're using the TypeScript version"
+                );
+                alert("Rule regeneration only available with Rust engine");
+            }
+        });
+    }
 }

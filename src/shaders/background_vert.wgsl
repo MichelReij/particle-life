@@ -1,11 +1,11 @@
-struct SimulationParams {
+struct SimParams {
     deltaTime: f32,
     friction: f32,
     numParticles: u32,
     numTypes: u32,
     virtualWorldWidth: f32,
     virtualWorldHeight: f32,
-    canvasRenderWidth: f32,
+    canvas_render_width: f32,
     canvasRenderHeight: f32,
     virtualWorldOffsetX: f32,
     virtualWorldOffsetY: f32,
@@ -18,7 +18,7 @@ struct SimulationParams {
     interTypeAttractionScale: f32,
     interTypeRadiusScale: f32,
     time: f32,
-    fisheyeStrength: f32,
+    fisheye_strength: f32,
     backgroundColorR: f32,
     backgroundColorG: f32,
     backgroundColorB: f32,
@@ -40,7 +40,7 @@ struct SimulationParams {
 ;
 
 @group(0) @binding(0)
-var<uniform> sim_params: SimulationParams;
+var<uniform> sim_params: SimParams;
 
 @vertex
 fn main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {

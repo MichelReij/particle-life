@@ -25,7 +25,7 @@ impl InteractionRules {
                 let rule = if i == j {
                     // Self-interaction: stronger repulsive
                     InteractionRule {
-                        attraction: rng.gen_range(-0.4..-0.1), // -0.4 to -0.1
+                        attraction: rng.gen_range(-2.0..-0.5), // -2.0 to -0.5 (stronger repulsion)
                         min_radius: rng.gen_range(5.0..15.0),  // 5 to 15
                         max_radius: rng.gen_range(20.0..50.0), // min_radius + (15 to 35)
                     }
@@ -33,7 +33,7 @@ impl InteractionRules {
                     // Inter-type interaction
                     let min_radius = rng.gen_range(10.0..30.0);
                     InteractionRule {
-                        attraction: rng.gen_range(-0.1..0.3), // -0.1 to 0.3
+                        attraction: rng.gen_range(-0.5..1.5), // -0.5 to 1.5 (stronger forces)
                         min_radius,
                         max_radius: min_radius + rng.gen_range(20.0..80.0), // min + (20 to 80)
                     }

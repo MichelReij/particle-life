@@ -38,8 +38,6 @@ class App {
                 "x",
                 this.canvas.height
             );
-            this.canvas.style.borderRadius = "10px";
-            this.canvas.style.border = "2px solid #ff8800";
             this.updateStatus("Canvas initialized...");
 
             // Initialize WASM module
@@ -172,11 +170,74 @@ class App {
                     this.engine.update_parameter(paramName, value);
                 }
             },
+            updateBooleanParameter: (paramName: string, value: boolean) => {
+                // Update any boolean simulation parameter
+                if (this.engine) {
+                    this.engine.update_boolean_parameter(paramName, value);
+                }
+            },
+            getParameter: (paramName: string) => {
+                // Get any simulation parameter value
+                if (!this.engine) return 0;
+
+                switch (paramName) {
+                    case "driftXPerSecond":
+                        return this.engine.get_drift_x_per_second();
+                    case "friction":
+                        return this.engine.get_friction();
+                    case "forceScale":
+                        return this.engine.get_force_scale();
+                    case "rSmooth":
+                        return this.engine.get_r_smooth();
+                    case "interTypeAttractionScale":
+                        return this.engine.get_inter_type_attraction_scale();
+                    case "interTypeRadiusScale":
+                        return this.engine.get_inter_type_radius_scale();
+                    case "fisheyeStrength":
+                        return this.engine.get_fisheye_strength();
+                    case "leniaGrowthMu":
+                        return this.engine.get_lenia_growth_mu();
+                    case "leniaGrowthSigma":
+                        return this.engine.get_lenia_growth_sigma();
+                    case "leniaKernelRadius":
+                        return this.engine.get_lenia_kernel_radius();
+                    case "lightningFrequency":
+                        return this.engine.get_lightning_frequency();
+                    case "lightningIntensity":
+                        return this.engine.get_lightning_intensity();
+                    case "lightningDuration":
+                        return this.engine.get_lightning_duration();
+                    case "particleRenderSize":
+                        return this.engine.get_particle_render_size();
+                    default:
+                        console.warn(`Unknown parameter: ${paramName}`);
+                        return 0;
+                }
+            },
+            getBooleanParameter: (paramName: string) => {
+                // Get any boolean simulation parameter value
+                if (!this.engine) return false;
+
+                switch (paramName) {
+                    case "flatForce":
+                        return this.engine.get_flat_force();
+                    case "leniaEnabled":
+                        return this.engine.get_lenia_enabled();
+                    default:
+                        console.warn(`Unknown boolean parameter: ${paramName}`);
+                        return false;
+                }
+            },
             updateZoom: (level: number, centerX?: number, centerY?: number) => {
-                // Handle zoom functionality (placeholder for now)
+                // Handle zoom functionality (legacy callback - calls setZoom internally)
                 console.log(
-                    `🔍 Zoom update: ${level}, center: ${centerX}, ${centerY}`
+                    `🔍 Legacy updateZoom: ${level}, center: ${centerX}, ${centerY}`
                 );
+                if (this.engine) {
+                    this.engine.set_zoom(level, centerX, centerY);
+                } else {
+                    console.warn("🔍 Engine not available for updateZoom");
+                }
             },
             updateParticleCount: (pressure: number) => {
                 // Update particle count based on pressure
@@ -217,6 +278,31 @@ class App {
                     console.warn("🔍 Engine not available for setZoom");
                 }
             },
+            // Physics debugging and rule regeneration
+            debugPhysics: () => {
+                if (this.engine) {
+                    return this.engine.debug_particle_physics();
+                } else {
+                    return "Engine not available for physics debugging";
+                }
+            },
+            regenerateRules: () => {
+                if (this.engine) {
+                    this.engine.regenerate_interaction_rules();
+                    console.log("🎲 Interaction rules regenerated via UI");
+                } else {
+                    console.warn("Engine not available for rule regeneration");
+                }
+            },
+            // Lightning collision debugging
+            logLightningCollisionStats: () => {
+                if (this.engine) {
+                    this.engine.log_lightning_collision_stats();
+                    console.log("⚡ Lightning collision stats requested");
+                } else {
+                    console.warn("Engine not available for collision stats");
+                }
+            },
         });
 
         // Initialize the full UI system with default parameters
@@ -251,31 +337,9 @@ class App {
             lightningDuration: 0.1,
         };
 
-        const defaultZoomLevel = 1.0;
+        const defaultZoomLevel = 1.45;
         console.log("🎯 Initializing UI with default parameters...");
         initializeUI(defaultSimParams, defaultZoomLevel);
-
-        // Particle count slider (legacy - may be handled by initializeUI now)
-        const particleCountSlider = document.getElementById(
-            "particleCountSlider"
-        ) as HTMLInputElement;
-        const particleCountValue = document.getElementById(
-            "particleCountValue"
-        ) as HTMLSpanElement;
-
-        if (particleCountSlider && particleCountValue) {
-            const updateParticleCount = () => {
-                const count = parseInt(particleCountSlider.value);
-                particleCountValue.textContent = count.toString();
-                if (this.engine) {
-                    this.engine.set_particle_count(count);
-                    console.log(`🔢 Particle count set to: ${count}`);
-                }
-            };
-
-            particleCountSlider.addEventListener("input", updateParticleCount);
-            updateParticleCount(); // Set initial value
-        }
 
         console.log("✅ UI controls wired up");
     }
@@ -326,10 +390,7 @@ class App {
             }
 
             this.frameCount++;
-            // Update FPS counter every 60 frames (removed verbose status logging)
-            if (this.frameCount % 60 === 0) {
-                // Just update internal FPS counter, no status logging
-            }
+            // Removed 60-frame checks that could cause hiccups
 
             this.animationId = requestAnimationFrame(animate);
         };

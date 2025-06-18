@@ -1,52 +1,49 @@
-struct SimulationParams {
-    deltaTime: f32,
+struct SimParams {
+    delta_time: f32,
     friction: f32,
-    numParticles: u32,
-    numTypes: u32,
-    virtualWorldWidth: f32,
-    virtualWorldHeight: f32,
-    canvasRenderWidth: f32,
-    canvasRenderHeight: f32,
-    virtualWorldOffsetX: f32,
-    virtualWorldOffsetY: f32,
-    viewportWidth: f32,
-    viewportHeight: f32,
-    boundaryMode: u32,
-    particleRenderSize: f32,
-    forceScale: f32,
-    rSmooth: f32,
-    flatForce: u32,
-    driftXPerSecond: f32,
-    interTypeAttractionScale: f32,
-    interTypeRadiusScale: f32,
+    num_particles: u32,
+    num_types: u32,
+
+    virtual_world_width: f32,
+    virtual_world_height: f32,
+    canvas_render_width: f32,
+    canvas_render_height: f32,
+    virtual_world_offset_x: f32,
+    virtual_world_offset_y: f32,
+    boundary_mode: u32,
+    particle_render_size: f32,
+    force_scale: f32,
+    r_smooth: f32,
+    flat_force: u32,
+    drift_x_per_second: f32,
+    inter_type_attraction_scale: f32,
+    inter_type_radius_scale: f32,
     time: f32,
     fisheyeStrength: f32,
-    backgroundColorR: f32,
-    backgroundColorG: f32,
-    backgroundColorB: f32,
-    _padding1: f32,
+    background_color_r: f32,
+    background_color_g: f32,
+    background_color_b: f32,
 
     // Lenia-inspired parameters
-    leniaEnabled: u32,
-    leniaGrowthMu: f32,
-    leniaGrowthSigma: f32,
-    leniaKernelRadius: f32,
+    lenia_enabled: u32,
+    lenia_growth_mu: f32,
+    lenia_growth_sigma: f32,
+    lenia_kernel_radius: f32,
 
     // Lightning parameters
-    lightningFrequency: f32,
-    lightningIntensity: f32,
-    lightningDuration: f32,
-    _padding2: f32,
+    lightning_frequency: f32,
+    lightning_intensity: f32,
+    lightning_duration: f32,
 }
 
 ;
 
 @group(0) @binding(0)
-var<uniform> sim_params: SimulationParams;
+var<uniform> sim_params: SimParams;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    var final_color = vec4<f32>(sim_params.backgroundColorR, sim_params.backgroundColorG, sim_params.backgroundColorB, 1.0);
+    var final_color = vec4<f32>(sim_params.background_color_r, sim_params.background_color_g, sim_params.background_color_b, 1.0);
     // Base color
 
     // Temporarily disable clouds by setting num_gradients to 0
@@ -88,7 +85,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
         let current_aspect_ratio = base_aspect_ratio * ((1.0 - aspect_random_amplitude_factor) + aspect_oscillation * aspect_random_amplitude_factor * 2.0);
 
         // --- Radius Oscillation ---
-        let radius_base = sim_params.canvasRenderHeight * 0.20;
+        let radius_base = sim_params.canvas_render_height * 0.20;
         // Individual frequency for radius: range ~[0.002, 0.007]
         let radius_random_freq_factor = seed3 * 0.005 + 0.002;
         // Individual amplitude for radius variation: range ~[0.1, 0.3]
@@ -130,12 +127,12 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
         // Corrected drift effect calculation for 100% parallax
         // Use the accumulated virtual world offset, normalized by virtual world width.
         // This directly reflects the "camera" movement.
-        let drift_effect_normalized = sim_params.virtualWorldOffsetX / sim_params.virtualWorldWidth;
+        let drift_effect_normalized = sim_params.virtual_world_offset_x / sim_params.virtual_world_width;
 
         let unwrapped_center_x_norm = base_x_continuous_norm - drift_effect_normalized;
 
         // Effective total width for wrapping = 1.0 (normalized canvas width) + normalized cloud width (half on each side)
-        let cloud_half_width_norm = cloud_half_width_pixels / sim_params.canvasRenderWidth;
+        let cloud_half_width_norm = cloud_half_width_pixels / sim_params.canvas_render_width;
         let effective_wrapping_width_norm = 1.0 + 2.0 * cloud_half_width_norm;
 
         // Apply custom modulo to wrap around the effective_wrapping_width_norm.
@@ -154,7 +151,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
         wrapped_val = val_to_wrap - period_of_wrap * floor(val_to_wrap / period_of_wrap);
 
         let wrapped_center_x_norm = wrapped_val - cloud_half_width_norm;
-        let final_center_x = wrapped_center_x_norm * sim_params.canvasRenderWidth;
+        let final_center_x = wrapped_center_x_norm * sim_params.canvas_render_width;
 
         // Vertical movement with individual sinusoidal oscillation
         let y_random_freq_factor = fract(gradient_id * 0.7315 + 0.4823) * 0.008 + 0.007;
@@ -166,7 +163,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
 
         // Map to normalized screen coordinates: center around 0.5, amplitude 0.75 to get range [-0.25, 1.25]
         let center_y_norm = 0.5 + y_oscillation * 0.75;
-        let final_center_y = center_y_norm * sim_params.canvasRenderHeight;
+        let final_center_y = center_y_norm * sim_params.canvas_render_height;
         // Y can now be outside [0, canvasHeight]
 
         let gradient_center = vec2<f32>(final_center_x, final_center_y);

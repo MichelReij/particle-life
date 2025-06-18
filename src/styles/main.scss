@@ -168,9 +168,9 @@ body {
         canvas {
             width        : 800px;
             height       : 800px;
-            max-width    : 100%;
             display      : block;
             border-radius: 50%;
+            border       : 5px solid #e3c463;
         }
     }
 

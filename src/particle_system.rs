@@ -8,6 +8,7 @@ pub struct Particle {
     pub velocity: [f32; 2],
     pub particle_type: u32,
     pub size: f32,
+    pub target_size: f32,
 }
 
 // Size ranges for each particle type (multipliers of base size)
@@ -65,6 +66,7 @@ impl ParticleSystem {
                 velocity: [rng.gen_range(-2.0..2.0), rng.gen_range(-2.0..2.0)],
                 particle_type,
                 size: params.particle_render_size * size_multiplier, // Use SimulationParams.particle_render_size
+                target_size: params.particle_render_size * size_multiplier, // Store the intended size
             };
             particles.push(particle);
         }
@@ -129,6 +131,8 @@ impl ParticleSystem {
                 particle.velocity = [rng.gen_range(-2.0..2.0), rng.gen_range(-2.0..2.0)];
                 particle.particle_type = particle_type;
                 particle.size = self.base_particle_size * size_multiplier; // Use the base size from SimulationParams
+                particle.target_size = self.base_particle_size * size_multiplier;
+                // Store the intended size
             }
         }
     }
@@ -138,12 +142,16 @@ impl ParticleSystem {
     }
 
     pub fn get_particle_mut(&mut self, index: usize) -> Option<&mut Particle> {
-        self.particles.get_mut(index)
+        if index < self.particles.len() {
+            Some(&mut self.particles[index])
+        } else {
+            None
+        }
     }
 
     // Convert particles to buffer format for GPU upload
     pub fn to_buffer(&self) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(self.max_particles as usize * 24);
+        let mut buffer = Vec::with_capacity(self.max_particles as usize * 32); // 8 fields * 4 bytes = 32 bytes per particle
 
         for i in 0..self.max_particles as usize {
             if let Some(particle) = self.particles.get(i) {
@@ -160,9 +168,15 @@ impl ParticleSystem {
 
                 // Size (f32) - 4 bytes
                 buffer.extend_from_slice(&particle.size.to_le_bytes());
+
+                // Target size (f32) - 4 bytes
+                buffer.extend_from_slice(&particle.target_size.to_le_bytes());
+
+                // Padding (f32) - 4 bytes (for 16-byte alignment)
+                buffer.extend_from_slice(&0.0f32.to_le_bytes());
             } else {
                 // Fill with zeros for missing particles
-                buffer.extend_from_slice(&[0u8; 24]);
+                buffer.extend_from_slice(&[0u8; 32]);
             }
         }
 
@@ -393,7 +407,8 @@ impl ParticleSystem {
         // Update all active particles
         for i in 0..self.active_count as usize {
             if let Some(particle) = self.particles.get_mut(i) {
-                let base_multiplier = PARTICLE_TYPE_SIZE_MULTIPLIERS[particle.particle_type as usize];
+                let base_multiplier =
+                    PARTICLE_TYPE_SIZE_MULTIPLIERS[particle.particle_type as usize];
 
                 // Add ±20% randomization to the base multiplier
                 let randomization_factor = rng.gen_range(-0.2..0.2);
@@ -401,5 +416,9 @@ impl ParticleSystem {
                 particle.size = new_base_size * size_multiplier;
             }
         }
+    }
+
+    pub fn get_size_multiplier_for_type(&self, particle_type: u32) -> f32 {
+        PARTICLE_TYPE_SIZE_MULTIPLIERS[particle_type as usize]
     }
 }

@@ -1,42 +1,39 @@
 struct SimParams {
-    deltaTime: f32,
+    delta_time: f32,
     friction: f32,
-    numParticles: u32,
-    numTypes: u32,
-    virtualWorldWidth: f32,
-    virtualWorldHeight: f32,
-    canvasRenderWidth: f32,
-    canvasRenderHeight: f32,
-    virtualWorldOffsetX: f32,
-    virtualWorldOffsetY: f32,
-    viewportWidth: f32,
-    viewportHeight: f32,
-    boundaryMode: u32,
-    particleRenderSize: f32,
-    forceScale: f32,
-    rSmooth: f32,
-    flatForce: u32,
-    driftXPerSecond: f32,
-    interTypeAttractionScale: f32,
-    interTypeRadiusScale: f32,
+    num_particles: u32,
+    num_types: u32,
+
+    virtual_world_width: f32,
+    virtual_world_height: f32,
+    canvas_render_width: f32,
+    canvas_render_height: f32,
+    virtual_world_offset_x: f32,
+    virtual_world_offset_y: f32,
+    boundary_mode: u32,
+    particle_render_size: f32,
+    force_scale: f32,
+    r_smooth: f32,
+    flat_force: u32,
+    drift_x_per_second: f32,
+    inter_type_attraction_scale: f32,
+    inter_type_radius_scale: f32,
     time: f32,
-    fisheyeStrength: f32,
-    backgroundColorR: f32,
-    backgroundColorG: f32,
-    backgroundColorB: f32,
-    _padding1: f32,
+    fisheye_strength: f32,
+    background_color_r: f32,
+    background_color_g: f32,
+    background_color_b: f32,
 
     // Lenia-inspired parameters
-    leniaEnabled: u32,
-    leniaGrowthMu: f32,
-    leniaGrowthSigma: f32,
-    leniaKernelRadius: f32,
+    lenia_enabled: u32,
+    lenia_growth_mu: f32,
+    lenia_growth_sigma: f32,
+    lenia_kernel_radius: f32,
 
     // Lightning parameters
-    lightningFrequency: f32,
-    lightningIntensity: f32,
-    lightningDuration: f32,
-    _padding2: f32,
+    lightning_frequency: f32,
+    lightning_intensity: f32,
+    lightning_duration: f32,
 }
 
 ;
@@ -50,26 +47,26 @@ var scene_texture: texture_2d<f32>;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    // frag_coord.xy is in canvas coordinates (0 to canvasRenderWidth/Height)
+    // frag_coord.xy is in canvas coordinates (0 to canvas_render_width/height)
     // Convert to UV coordinates for sampling the intermediate texture
-    let canvas_uv = frag_coord.xy / vec2<f32>(sim_params.canvasRenderWidth, sim_params.canvasRenderHeight);
+    let canvas_uv = frag_coord.xy / vec2<f32>(sim_params.canvas_render_width, sim_params.canvas_render_height);
 
     // Convert canvas UV to intermediate texture coordinates
     // The intermediate texture is virtual world sized, and canvas content is at offset
-    let intermediate_texture_x = canvas_uv.x * sim_params.canvasRenderWidth + sim_params.virtualWorldOffsetX;
-    let intermediate_texture_y = canvas_uv.y * sim_params.canvasRenderHeight + sim_params.virtualWorldOffsetY;
-    let intermediate_texture_uv = vec2<f32>(intermediate_texture_x / sim_params.virtualWorldWidth, intermediate_texture_y / sim_params.virtualWorldHeight);
+    let intermediate_texture_x = canvas_uv.x * sim_params.canvas_render_width + sim_params.virtual_world_offset_x;
+    let intermediate_texture_y = canvas_uv.y * sim_params.canvas_render_height + sim_params.virtual_world_offset_y;
+    let intermediate_texture_uv = vec2<f32>(intermediate_texture_x / sim_params.virtual_world_width, intermediate_texture_y / sim_params.virtual_world_height);
 
     let scene_color = textureSample(scene_texture, scene_sampler, intermediate_texture_uv);
 
     // Calculate the center of the canvas for vignette effect
-    let center = vec2<f32>(sim_params.canvasRenderWidth / 2.0, sim_params.canvasRenderHeight / 2.0);
+    let center = vec2<f32>(sim_params.canvas_render_width / 2.0, sim_params.canvas_render_height / 2.0);
 
     // Calculate the distance of the current fragment from the center
     let dist = distance(frag_coord.xy, center);
 
     // Make vignette radius relative to canvas size (50% of canvas width)
-    let vignette_radius = sim_params.canvasRenderWidth * 0.5;
+    let vignette_radius = sim_params.canvas_render_width * 0.5;
     // Calculate vignette alpha: 0.0 at center, smoothly to 0.5 at vignette_radius (50% transparent)
     let vignette_alpha_factor = smoothstep(0.0, vignette_radius, dist);
     let vignette_target_opacity = 0.5;
