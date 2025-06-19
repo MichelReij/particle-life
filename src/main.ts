@@ -461,6 +461,11 @@ class App {
             console.log("🧹 Rust engine freed");
         }
     }
+
+    // Getter for debugging access
+    get simulation() {
+        return this.engine;
+    }
 }
 
 // Initialize the app when DOM is loaded
@@ -469,6 +474,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.log("🌟 DOM loaded, creating app...");
     const app = new App();
     await app.init();
+
+    // Expose the simulation to the global window object for debugging
+    (window as any).app = app;
+    (window as any).simulation = app.simulation;
+    console.log("🔧 Exposed app and simulation to window object for debugging");
 
     window.addEventListener("beforeunload", () => {
         app.destroy();

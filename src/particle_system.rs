@@ -9,16 +9,19 @@ pub struct Particle {
     pub particle_type: u32,
     pub size: f32,
     pub target_size: f32,
+    pub transition_start: f32, // Start time of transition, 0 means no transition
+    pub transition_type: u32,  // 0 = grow, 1 = shrink
+    pub is_active: bool,       // Whether this particle is active/visible
 }
 
 // Size ranges for each particle type (multipliers of base size)
 // We'll use the middle value of each range with ±20% randomization
 const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 5] = [
-    1.5, // Type 0: Blue   - large, dominant (middle of 1.4-1.6)
-    1.2, // Type 1: Orange - medium-large (middle of 1.1-1.3)
-    0.7, // Type 2: Red    - small, agile (middle of 0.6-0.8)
-    0.9, // Type 3: Purple - smaller, compact (middle of 0.8-1.0)
-    1.0, // Type 4: Green  - medium, balanced (middle of 0.9-1.1)
+    1.5, // Type 0: Blue   - large, dominant
+    1.2, // Type 1: Orange - medium-large
+    0.7, // Type 2: Red    - small, agile
+    0.9, // Type 3: Purple - smaller, compact
+    1.0, // Type 4: Green  - medium, balanced
 ];
 
 // Custom color palette matching TypeScript version
@@ -67,6 +70,9 @@ impl ParticleSystem {
                 particle_type,
                 size: params.particle_render_size * size_multiplier, // Use SimulationParams.particle_render_size
                 target_size: params.particle_render_size * size_multiplier, // Store the intended size
+                transition_start: 0.0,               // No transition initially
+                transition_type: 0,                  // Default to grow type
+                is_active: i < params.num_particles, // Only first num_particles are initially active
             };
             particles.push(particle);
         }
@@ -107,7 +113,15 @@ impl ParticleSystem {
     }
 
     pub fn set_active_count(&mut self, count: u32) {
-        self.active_count = count.min(self.max_particles);
+        let new_count = count.min(self.max_particles);
+        self.active_count = new_count;
+
+        // Update is_active flag for all affected particles
+        for i in 0..self.max_particles as usize {
+            if let Some(particle) = self.particles.get_mut(i) {
+                particle.is_active = (i as u32) < new_count;
+            }
+        }
     }
 
     pub fn grow_particles(&mut self, new_count: u32, rng: &mut SmallRng) {
@@ -132,7 +146,8 @@ impl ParticleSystem {
                 particle.particle_type = particle_type;
                 particle.size = self.base_particle_size * size_multiplier; // Use the base size from SimulationParams
                 particle.target_size = self.base_particle_size * size_multiplier;
-                // Store the intended size
+                particle.is_active = true; // Activate the particle
+                                           // Store the intended size
             }
         }
     }
@@ -151,7 +166,7 @@ impl ParticleSystem {
 
     // Convert particles to buffer format for GPU upload
     pub fn to_buffer(&self) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(self.max_particles as usize * 32); // 8 fields * 4 bytes = 32 bytes per particle
+        let mut buffer = Vec::with_capacity(self.max_particles as usize * 48); // 12 fields * 4 bytes = 48 bytes per particle (16-byte aligned)
 
         for i in 0..self.max_particles as usize {
             if let Some(particle) = self.particles.get(i) {
@@ -172,11 +187,22 @@ impl ParticleSystem {
                 // Target size (f32) - 4 bytes
                 buffer.extend_from_slice(&particle.target_size.to_le_bytes());
 
-                // Padding (f32) - 4 bytes (for 16-byte alignment)
+                // Transition start (f32) - 4 bytes
+                buffer.extend_from_slice(&particle.transition_start.to_le_bytes());
+
+                // Transition type (u32) - 4 bytes
+                buffer.extend_from_slice(&particle.transition_type.to_le_bytes());
+
+                // Is active (u32) - 4 bytes (bool serialized as u32: 0 or 1)
+                let is_active_u32 = if particle.is_active { 1u32 } else { 0u32 };
+                buffer.extend_from_slice(&is_active_u32.to_le_bytes());
+
+                // Padding (f32) - 8 bytes (for 16-byte alignment, total 48 bytes)
+                buffer.extend_from_slice(&0.0f32.to_le_bytes());
                 buffer.extend_from_slice(&0.0f32.to_le_bytes());
             } else {
                 // Fill with zeros for missing particles
-                buffer.extend_from_slice(&[0u8; 32]);
+                buffer.extend_from_slice(&[0u8; 48]);
             }
         }
 
@@ -215,20 +241,25 @@ impl ParticleSystem {
 
     // Update physics for all active particles
     pub fn update_physics(&mut self, params: &SimulationParams, rules: &InteractionRules) {
-        let active_count = self.active_count as usize;
-
-        // Clear and populate spatial grid
+        // Clear and populate spatial grid with only active particles
         self.spatial_grid.clear();
-        for i in 0..active_count {
+        for i in 0..self.max_particles as usize {
             if let Some(particle) = self.particles.get(i) {
-                self.spatial_grid.insert(i, particle);
+                if particle.is_active {
+                    self.spatial_grid.insert(i, particle);
+                }
             }
         }
 
-        // Calculate forces for all active particles using spatial optimization
-        let mut forces: Vec<[f32; 2]> = vec![[0.0, 0.0]; active_count];
+        // Collect indices of active particles
+        let active_indices: Vec<usize> = (0..self.max_particles as usize)
+            .filter(|&i| self.particles.get(i).map(|p| p.is_active).unwrap_or(false))
+            .collect();
 
-        for i in 0..active_count {
+        // Calculate forces for all active particles using spatial optimization
+        let mut forces: Vec<[f32; 2]> = vec![[0.0, 0.0]; active_indices.len()];
+
+        for (idx, &i) in active_indices.iter().enumerate() {
             if let Some(particle_a) = self.particles.get(i) {
                 let mut total_force = [0.0f32, 0.0f32];
 
@@ -240,11 +271,14 @@ impl ParticleSystem {
 
                 // Calculate forces from nearby particles only
                 for &j in &nearby_particles {
-                    if i == j || j >= active_count {
+                    if i == j {
                         continue;
                     }
 
                     if let Some(particle_b) = self.particles.get(j) {
+                        if !particle_b.is_active {
+                            continue;
+                        }
                         // Calculate distance vector
                         let dx = particle_b.position[0] - particle_a.position[0];
                         let dy = particle_b.position[1] - particle_a.position[1];
@@ -336,14 +370,14 @@ impl ParticleSystem {
                     }
                 }
 
-                forces[i] = total_force;
+                forces[idx] = total_force;
             }
         }
 
         // Apply forces and update positions
-        for i in 0..active_count {
+        for (idx, &i) in active_indices.iter().enumerate() {
             if let Some(particle) = self.particles.get_mut(i) {
-                let force = forces[i];
+                let force = forces[idx];
 
                 // Update velocity with force and friction
                 particle.velocity[0] =
@@ -405,15 +439,18 @@ impl ParticleSystem {
         self.base_particle_size = new_base_size;
 
         // Update all active particles
-        for i in 0..self.active_count as usize {
+        for i in 0..self.max_particles as usize {
             if let Some(particle) = self.particles.get_mut(i) {
-                let base_multiplier =
-                    PARTICLE_TYPE_SIZE_MULTIPLIERS[particle.particle_type as usize];
+                if particle.is_active {
+                    let base_multiplier =
+                        PARTICLE_TYPE_SIZE_MULTIPLIERS[particle.particle_type as usize];
 
-                // Add ±20% randomization to the base multiplier
-                let randomization_factor = rng.gen_range(-0.2..0.2);
-                let size_multiplier = base_multiplier * (1.0 + randomization_factor);
-                particle.size = new_base_size * size_multiplier;
+                    // Add ±20% randomization to the base multiplier
+                    let randomization_factor = rng.gen_range(-0.2..0.2);
+                    let size_multiplier = base_multiplier * (1.0 + randomization_factor);
+                    particle.size = new_base_size * size_multiplier;
+                    particle.target_size = new_base_size * size_multiplier;
+                }
             }
         }
     }

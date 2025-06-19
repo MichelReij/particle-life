@@ -155,7 +155,7 @@ impl WebGpuRenderer {
         });
 
         // Create initial particle data (similar to TypeScript createInitialParticles)
-        let max_particles = 8192; // Reduced from 32768 - supports up to 8K particles efficiently
+        let max_particles = 6400; // Reduced from 32768 - supports up to 8K particles efficiently
         let active_particles = 6400; // Initialize all particles that the engine uses
         let num_types = 5;
         let virtual_world_width = 2400.0;
@@ -163,34 +163,18 @@ impl WebGpuRenderer {
         let particle_render_size = 12.0;
 
         // Create initial particle data buffer
-        let mut initial_particle_data = Vec::with_capacity((max_particles * 32) as usize);
+        let mut initial_particle_data = Vec::with_capacity((max_particles * 48) as usize);
 
         for i in 0..max_particles {
             let particle_type = (i % num_types) as u32;
 
-            // Position (vec2f)
-            let pos_x = if i < active_particles {
-                js_sys::Math::random() as f32 * virtual_world_width
-            } else {
-                0.0 // Inactive particles at origin
-            };
-            let pos_y = if i < active_particles {
-                js_sys::Math::random() as f32 * virtual_world_height
-            } else {
-                0.0
-            };
+            // Position (vec2f) - ALL particles get random positions
+            let pos_x = js_sys::Math::random() as f32 * virtual_world_width;
+            let pos_y = js_sys::Math::random() as f32 * virtual_world_height;
 
-            // Velocity (vec2f)
-            let vel_x = if i < active_particles {
-                (js_sys::Math::random() as f32 - 0.5) * 4.0
-            } else {
-                0.0
-            };
-            let vel_y = if i < active_particles {
-                (js_sys::Math::random() as f32 - 0.5) * 4.0
-            } else {
-                0.0
-            };
+            // Velocity (vec2f) - ALL particles get random velocities
+            let vel_x = (js_sys::Math::random() as f32 - 0.5) * 4.0;
+            let vel_y = (js_sys::Math::random() as f32 - 0.5) * 4.0;
 
             // Size based on particle type
             let base_multiplier = match particle_type {
@@ -203,11 +187,18 @@ impl WebGpuRenderer {
             };
             let size_randomization = (js_sys::Math::random() as f32 - 0.5) * 0.4; // ±20%
             let size_multiplier = base_multiplier * (1.0 + size_randomization);
-            let particle_size = if i < active_particles {
-                particle_render_size * size_multiplier
-            } else {
-                0.0 // Inactive particles have zero size
-            };
+            let target_size = particle_render_size * size_multiplier;
+
+            // Debug: Log suspicious large target_size values
+            if target_size > 30.0 {
+                web_sys::console::log_1(&format!(
+                    "⚠️ Large target_size detected: particle {}, type {}, base_multiplier {}, size_multiplier {}, target_size {}",
+                    i, particle_type, base_multiplier, size_multiplier, target_size
+                ).into());
+            }
+
+            // ALL particles get proper size and target_size (inactive particles just won't be rendered)
+            let particle_size = target_size;
 
             // Pack data as bytes (f32 = 4 bytes, u32 = 4 bytes)
             initial_particle_data.extend_from_slice(&pos_x.to_le_bytes()); // 0-3
@@ -218,14 +209,23 @@ impl WebGpuRenderer {
             initial_particle_data.extend_from_slice(&particle_size.to_le_bytes()); // 20-23
 
             // Add target_size (same as current size for initial particles)
-            initial_particle_data.extend_from_slice(&particle_size.to_le_bytes()); // 24-27
+            initial_particle_data.extend_from_slice(&target_size.to_le_bytes()); // 24-27
 
-            // Add padding for 16-byte alignment
-            initial_particle_data.extend_from_slice(&0.0f32.to_le_bytes()); // 28-31
+            // Add new transition fields
+            initial_particle_data.extend_from_slice(&0.0f32.to_le_bytes()); // 28-31: transition_start (no transition initially)
+            initial_particle_data.extend_from_slice(&0u32.to_le_bytes()); // 32-35: transition_type (0 = grow)
+
+            // Add is_active field (true for particles within initial count)
+            let is_active = if i < active_particles { 1u32 } else { 0u32 };
+            initial_particle_data.extend_from_slice(&is_active.to_le_bytes()); // 36-39: is_active
+
+            // Add padding for 16-byte alignment (8 bytes total padding)
+            initial_particle_data.extend_from_slice(&0.0f32.to_le_bytes()); // 40-43: padding1
+            initial_particle_data.extend_from_slice(&0.0f32.to_le_bytes()); // 44-47: padding2
         }
 
         // Create particle buffers (double-buffered for ping-pong) with initial data
-        let particle_buffer_size = (max_particles * 32) as u64; // 32 bytes per particle (8 fields * 4 bytes)
+        let particle_buffer_size = (max_particles * 48) as u64; // 48 bytes per particle (12 fields * 4 bytes, 16-byte aligned)
         let particle_buffers = [
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Particle Buffer A"),
@@ -582,7 +582,7 @@ impl WebGpuRenderer {
                 buffers: &[
                     // Buffer 0: Particle instance buffer
                     wgpu::VertexBufferLayout {
-                        array_stride: 32, // PARTICLE_SIZE_BYTES: pos(8) + vel(8) + type(4) + size(4) + target_size(4) + padding(4) = 32 bytes
+                        array_stride: 48, // pos(8) + vel(8) + type(4) + size(4) + target_size(4) + transition_start(4) + transition_type(4) + is_active(4) + padding(8) = 48 bytes (16-byte aligned)
                         step_mode: wgpu::VertexStepMode::Instance,
                         attributes: &[
                             // location(0): particle position vec2<f32>
@@ -608,6 +608,30 @@ impl WebGpuRenderer {
                                 shader_location: 3,
                                 offset: 20,
                                 format: wgpu::VertexFormat::Float32,
+                            },
+                            // location(5): target size f32
+                            wgpu::VertexAttribute {
+                                shader_location: 5,
+                                offset: 24,
+                                format: wgpu::VertexFormat::Float32,
+                            },
+                            // location(6): transition start f32
+                            wgpu::VertexAttribute {
+                                shader_location: 6,
+                                offset: 28,
+                                format: wgpu::VertexFormat::Float32,
+                            },
+                            // location(7): transition type u32
+                            wgpu::VertexAttribute {
+                                shader_location: 7,
+                                offset: 32,
+                                format: wgpu::VertexFormat::Uint32,
+                            },
+                            // location(8): is active u32 (bool as u32)
+                            wgpu::VertexAttribute {
+                                shader_location: 8,
+                                offset: 36,
+                                format: wgpu::VertexFormat::Uint32,
                             },
                         ],
                     },
@@ -1407,8 +1431,9 @@ impl WebGpuRenderer {
                 .write_buffer(&self.lightning_bolt_buffer, 0, lightning_bolts_data);
         }
 
-        // DON'T update particle buffer here - let GPU compute shader handle particle state
-        // This was causing double-work and synchronization issues
+        // DON'T update particle buffer every frame - let GPU compute shader handle particle state
+        // HOWEVER, we DO need to update it when particle count changes (active/inactive flags change)
+        // This is handled by calling initialize_particle_buffers() when needed
 
         // Update zoom uniforms with current simulation parameters
         self.update_zoom_uniforms(simulation_params);
@@ -1714,8 +1739,78 @@ impl WebGpuRenderer {
             .write_buffer(&self.particle_buffers[1], 0, &particle_data);
 
         console_log!(
-            "🎯 Initialized particle buffers with {} particles",
+            "🎯 Initialized both particle buffers with {} particles",
             particle_system.get_active_count()
         );
+    }
+
+    /// Update particle data during simulation (only updates input buffer to preserve physics)
+    pub fn update_particle_active_states(&mut self, particle_system: &ParticleSystem) {
+        // Instead of uploading the entire buffer, only update the is_active flags at specific byte offsets
+        // This preserves the live GPU physics data (positions, velocities) while updating metadata
+
+        let max_particles = particle_system.get_max_particles() as usize;
+        let active_count = particle_system.get_active_count() as usize;
+
+        // Update only the is_active field at offset 36 for each particle (48 bytes apart)
+        for i in 0..max_particles {
+            let byte_offset = (i * 48 + 36) as u64; // is_active is at offset 36 in each 48-byte particle
+            let is_active = if i < active_count { 1u32 } else { 0u32 };
+
+            self.queue.write_buffer(
+                &self.particle_buffers[self.current_buffer_index],
+                byte_offset,
+                &is_active.to_le_bytes(),
+            );
+        }
+
+        console_log!(
+            "🔄 Updated only is_active flags in input buffer {} for {} particles (preserving physics data)",
+            self.current_buffer_index,
+            particle_system.get_active_count()
+        );
+    }
+
+    /// Update only transition fields for particles to avoid overwriting live GPU physics data
+    /// This preserves positions and velocities while updating transition_start and transition_type
+    pub fn update_particle_transitions(&mut self, particle_system: &ParticleSystem) {
+        let max_particles = particle_system.get_max_particles() as usize;
+
+        // Create a buffer to hold only the transition updates
+        let mut updates = Vec::new();
+
+        for i in 0..max_particles {
+            if let Some(particle) = particle_system.get_particle(i) {
+                // Only update if particle has transition data
+                if particle.transition_start > 0.0 {
+                    let particle_offset = i * 48; // 48 bytes per particle
+
+                    // Update transition_start field (offset 28, 4 bytes)
+                    let transition_start_offset = particle_offset + 28;
+                    updates.push((
+                        transition_start_offset,
+                        particle.transition_start.to_le_bytes().to_vec(),
+                    ));
+
+                    // Update transition_type field (offset 32, 4 bytes)
+                    let transition_type_offset = particle_offset + 32;
+                    updates.push((
+                        transition_type_offset,
+                        particle.transition_type.to_le_bytes().to_vec(),
+                    ));
+                }
+            }
+        }
+
+        // Apply all updates to the input buffer (preserves physics data in output buffer)
+        for (offset, data) in updates {
+            self.queue.write_buffer(
+                &self.particle_buffers[self.current_buffer_index],
+                offset as u64,
+                &data,
+            );
+        }
+
+        console_log!("🔄 Updated transition fields for particles with active transitions");
     }
 }

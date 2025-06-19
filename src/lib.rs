@@ -292,33 +292,39 @@ impl ParticleLifeEngine {
                 // Initialize the new particles in the grow range
                 self.initialize_particles_for_grow_transition(current_count, count);
 
-                console_log!(
-                    "🌱 GROW: {} -> {} particles, active_count now: {}, num_particles now: {}",
-                    current_count,
-                    count,
-                    self.particle_system.get_active_count(),
-                    self.simulation_params.num_particles
-                );
+                // Update only transition fields without overwriting GPU physics data
+                if let Some(ref mut renderer) = self.renderer {
+                    renderer.update_particle_transitions(&self.particle_system);
+                }
+
+                // console_log!(
+                //     "🌱 GROW: {} -> {} particles, active_count now: {}, num_particles now: {}",
+                //     current_count,
+                //     count,
+                //     self.particle_system.get_active_count(),
+                //     self.simulation_params.num_particles
+                // );
             } else {
-                console_log!(
-                    "🍂 SHRINK: {} -> {} particles, keeping active_count: {} during transition",
-                    current_count,
-                    count,
-                    current_count
-                );
+                // Initialize particles for shrink transition
+                self.initialize_particles_for_shrink_transition(count, current_count);
+
+                // Update only transition fields without overwriting GPU physics data
+                if let Some(ref mut renderer) = self.renderer {
+                    renderer.update_particle_transitions(&self.particle_system);
+                }
             }
             // For shrink: keep old count during transition
 
-            console_log!(
-                "🔄 Starting GPU transition: {} -> {} particles (deferred: {})",
-                current_count,
-                count,
-                if count < current_count {
-                    "true"
-                } else {
-                    "false"
-                }
-            );
+            // console_log!(
+            //     "🔄 Starting GPU transition: {} -> {} particles (deferred: {})",
+            //     current_count,
+            //     count,
+            //     if count < current_count {
+            //         "true"
+            //     } else {
+            //         "false"
+            //     }
+            // );
         } else {
             // No change needed
             self.simulation_params.set_num_particles(count);
@@ -330,15 +336,7 @@ impl ParticleLifeEngine {
     // Initialize particles for grow transition
     fn initialize_particles_for_grow_transition(&mut self, start_index: u32, end_index: u32) {
         for i in start_index..end_index {
-            let particle_type = (i % self.particle_system.get_num_types()) as u32;
-            let base_multiplier = self
-                .particle_system
-                .get_size_multiplier_for_type(particle_type);
-
-            // Add ±20% randomization to the base multiplier
-            let randomization_factor = self.rng.gen_range(-0.2..0.2);
-            let size_multiplier = base_multiplier * (1.0 + randomization_factor);
-            let target_size = self.simulation_params.particle_render_size * size_multiplier;
+            // let particle_type = (i % self.particle_system.get_num_types()) as u32;
 
             if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
                 // Initialize position, velocity, type, and target size
@@ -349,17 +347,51 @@ impl ParticleLifeEngine {
                         .gen_range(0.0..self.simulation_params.virtual_world_height),
                 ];
                 particle.velocity = [self.rng.gen_range(-2.0..2.0), self.rng.gen_range(-2.0..2.0)];
-                particle.particle_type = particle_type;
-                particle.target_size = target_size;
 
-                // For GPU transitions, start with a very small size (will grow via GPU)
+                // For GPU transitions, start the growth with a very small size (will grow via GPU)
                 particle.size = 0.1; // Start tiny, GPU will handle the growth
 
-                console_log!(
-                    "🌱 Initialized particle {} with target_size={:.2}, starting size=0.1",
-                    i,
-                    target_size
-                );
+                // Set transition fields for grow transition
+                particle.transition_start = self.current_time;
+                particle.transition_type = 0; // 0 = grow
+                particle.is_active = false; // GPU will set this to true at transition start
+
+                // console_log!(
+                //     "🌱 Initialized particle {} with target_size={:.2}, starting size=0.1, transition_start={:.3}, is_active=true",
+                //     i,
+                //     particle.target_size,
+                //     self.current_time
+                // );
+            }
+        }
+    }
+
+    // Initialize particles for shrink transition
+    fn initialize_particles_for_shrink_transition(&mut self, start_index: u32, end_index: u32) {
+        for i in start_index..end_index {
+            if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
+                // Set transition fields for shrink transition
+                particle.transition_start = self.current_time;
+                particle.transition_type = 1; // 1 = shrink
+                                              // Keep is_active = true during transition, will be set to false when transition completes
+
+                // console_log!(
+                //     "🍂 Set shrink transition for particle {} at time {:.3}, is_active remains true during transition",
+                //     i,
+                //     self.current_time
+                // );
+            }
+        }
+    }
+
+    // Clear transition fields for particles not in transition
+    fn clear_transition_fields_for_particles(&mut self, start_index: u32, end_index: u32) {
+        for i in start_index..end_index {
+            if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
+                // Clear transition fields (no transition)
+                particle.transition_start = 0.0;
+                particle.transition_type = 0;
+                // Keep is_active as is (don't change active state for existing particles)
             }
         }
     }
@@ -466,12 +498,12 @@ impl ParticleLifeEngine {
 
         // 3. Update particle count (handled separately via set_particle_count_from_pressure)
 
-        console_log!(
-            "🔧 Pressure {:.1} → force_scale: {:.1}, r_smooth: {:.3}",
-            clamped_pressure,
-            force_scale,
-            r_smooth
-        );
+        // console_log!(
+        //     "🔧 Pressure {:.1} → force_scale: {:.1}, r_smooth: {:.3}",
+        //     clamped_pressure,
+        //     force_scale,
+        //     r_smooth
+        // );
     }
 
     // Set UV light and update all UV-related simulation parameters
@@ -484,11 +516,11 @@ impl ParticleLifeEngine {
         let inter_type_radius_scale = 0.1 + (clamped_uv / 50.0) * (2.0 - 0.1);
         self.simulation_params.inter_type_radius_scale = inter_type_radius_scale;
 
-        console_log!(
-            "☀️ UV light set to {:.1} → inter_type_radius_scale: {:.3}",
-            clamped_uv,
-            inter_type_radius_scale
-        );
+        // console_log!(
+        //     "☀️ UV light set to {:.1} → inter_type_radius_scale: {:.3}",
+        //     clamped_uv,
+        //     inter_type_radius_scale
+        // );
     }
 
     // Set electrical activity and update all electrical-related simulation parameters
@@ -513,14 +545,14 @@ impl ParticleLifeEngine {
         // Lightning duration: 0.3 at min activity, 0.8 at max activity
         self.simulation_params.lightning_duration = 0.3 + (normalized_electrical * 0.5);
 
-        console_log!(
-            "⚡ Electrical activity set to {:.2} → inter_type_attraction_scale: {:.3}, lightning_freq: {:.3}, lightning_intensity: {:.3}, lightning_duration: {:.3}",
-            clamped_electrical,
-            inter_type_attraction_scale,
-            self.simulation_params.lightning_frequency,
-            self.simulation_params.lightning_intensity,
-            self.simulation_params.lightning_duration
-        );
+        // console_log!(
+        //     "⚡ Electrical activity set to {:.2} → inter_type_attraction_scale: {:.3}, lightning_freq: {:.3}, lightning_intensity: {:.3}, lightning_duration: {:.3}",
+        //     clamped_electrical,
+        //     inter_type_attraction_scale,
+        //     self.simulation_params.lightning_frequency,
+        //     self.simulation_params.lightning_intensity,
+        //     self.simulation_params.lightning_duration
+        // );
     }
 
     // Lightning system access - now handled by GPU compute shader
@@ -568,7 +600,7 @@ impl ParticleLifeEngine {
 
     #[wasm_bindgen]
     pub fn get_particle_size_bytes(&self) -> u32 {
-        32 // pos(8) + vel(8) + type(4) + size(4) + target_size(4) + padding(4)
+        48 // pos(8) + vel(8) + type(4) + size(4) + target_size(4) + transition_start(4) + transition_type(4) + is_active(4) + padding(8) = 48 bytes (16-byte aligned)
     }
 
     #[wasm_bindgen]
@@ -758,28 +790,19 @@ impl ParticleLifeEngine {
                 self.current_time
             );
 
-            // Complete the transition - update final particle counts
             let target_count = self.simulation_params.transition_end_count;
 
             if self.simulation_params.transition_is_grow {
-                // For grow transitions, set all grown particles to their final target size
-                let start_count = self.simulation_params.transition_start_count;
-                let end_count = self.simulation_params.transition_end_count;
-                for i in start_count..end_count {
-                    if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
-                        particle.size = particle.target_size;
-                    }
-                }
                 console_log!(
-                    "🌱 Completed grow transition - set {} particles to target size",
-                    end_count - start_count
+                    "🌱 Completed grow transition - GPU handled all size and activation changes"
                 );
             } else {
-                // For shrink transitions, now update the active count and num_particles
+                // For shrink transitions, update the CPU-side active count to match GPU state
                 self.particle_system.set_active_count(target_count);
                 self.simulation_params.set_num_particles(target_count);
+
                 console_log!(
-                    "🍂 Completed shrink transition - now {} active particles",
+                    "🍂 Completed shrink transition - CPU active count now matches GPU: {}",
                     target_count
                 );
             }
@@ -1170,13 +1193,13 @@ impl ParticleLifeEngine {
             return "No particles to debug".to_string();
         }
 
-        // Sample first 5 particles for debugging
+        // Sample first 10 particles for debugging, including inactive ones
         let mut debug_info = String::new();
-        let sample_count = 5.min(active_count as usize);
+        let sample_count = 10.min(self.particle_system.get_max_particles() as usize);
 
         debug_info.push_str(&format!(
-            "🔬 Physics Debug - Sampling {} particles:\n",
-            sample_count
+            "🔬 Physics Debug - Sampling {} particles (active_count={}):\n",
+            sample_count, active_count
         ));
         debug_info.push_str(&format!(
             "📊 Current sim params: force_scale={:.1}, friction={:.3}, delta_time={:.4}\n",
@@ -1190,14 +1213,175 @@ impl ParticleLifeEngine {
                 let velocity_magnitude =
                     (p.velocity[0] * p.velocity[0] + p.velocity[1] * p.velocity[1]).sqrt();
                 debug_info.push_str(&format!(
-                    "P{}: pos=({:.1},{:.1}) vel=({:.3},{:.3}) |v|={:.3} type={}\n",
+                    "P{}: pos=({:.1},{:.1}) vel=({:.3},{:.3}) |v|={:.3} type={} size={:.1} active={} transition={}\n",
                     i,
                     p.position[0],
                     p.position[1],
                     p.velocity[0],
                     p.velocity[1],
                     velocity_magnitude,
-                    p.particle_type
+                    p.particle_type,
+                    p.size,
+                    p.is_active,
+                    p.transition_start > 0.0
+                ));
+            }
+        }
+
+        debug_info
+    }
+
+    // Debug particle states
+    #[wasm_bindgen]
+    pub fn debug_particle_states(&self) -> String {
+        let mut active_count = 0;
+        let mut inactive_count = 0;
+        let mut transition_count = 0;
+
+        for i in 0..self.particle_system.get_max_particles() as usize {
+            if let Some(p) = self.particle_system.get_particle(i) {
+                if p.is_active {
+                    active_count += 1;
+                } else {
+                    inactive_count += 1;
+                }
+                if p.transition_start > 0.0 {
+                    transition_count += 1;
+                }
+            }
+        }
+
+        format!(
+            "🎯 Particle States: {} active, {} inactive, {} in transition (expected active: {})",
+            active_count,
+            inactive_count,
+            transition_count,
+            self.particle_system.get_active_count()
+        )
+    }
+
+    // Force a complete buffer refresh by uploading all particle data again
+    #[wasm_bindgen]
+    pub fn debug_force_buffer_refresh(&mut self) -> String {
+        // The particle buffer gets updated automatically on each render frame
+        // This function mainly serves to confirm the renderer status
+        if self.renderer.is_some() {
+            let particle_buffer = self.particle_system.to_buffer();
+            format!(
+                "🔄 Renderer active: {} bytes of particle data ready for next frame",
+                particle_buffer.len()
+            )
+        } else {
+            "❌ No WebGPU renderer available".to_string()
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn debug_sample_particle_buffer(&self) -> String {
+        // Sample the first few particles from the buffer to see what data is actually being sent to GPU
+        let buffer = self.particle_system.to_buffer();
+        let mut debug_info = String::new();
+
+        debug_info.push_str("🔍 Raw buffer data for first 3 particles:\n");
+
+        for p in 0..3 {
+            let offset = p * 48; // 48 bytes per particle (16-byte aligned)
+            if offset + 47 < buffer.len() {
+                // Extract the raw bytes for is_active field (offset 36-39)
+                let is_active_bytes = &buffer[offset + 36..offset + 40];
+                let is_active = u32::from_le_bytes([
+                    is_active_bytes[0],
+                    is_active_bytes[1],
+                    is_active_bytes[2],
+                    is_active_bytes[3],
+                ]);
+
+                // Extract position (offset 0-7)
+                let pos_x_bytes = &buffer[offset..offset + 4];
+                let pos_y_bytes = &buffer[offset + 4..offset + 8];
+                let pos_x = f32::from_le_bytes([
+                    pos_x_bytes[0],
+                    pos_x_bytes[1],
+                    pos_x_bytes[2],
+                    pos_x_bytes[3],
+                ]);
+                let pos_y = f32::from_le_bytes([
+                    pos_y_bytes[0],
+                    pos_y_bytes[1],
+                    pos_y_bytes[2],
+                    pos_y_bytes[3],
+                ]);
+
+                debug_info.push_str(&format!(
+                    "P{}: pos=({:.1},{:.1}) is_active={}\n",
+                    p, pos_x, pos_y, is_active
+                ));
+            }
+        }
+
+        debug_info
+    }
+
+    // Inspect inactive particles specifically
+    #[wasm_bindgen]
+    pub fn debug_inactive_particles(&self) -> String {
+        // Check the last 10 particles which should be inactive when particle count < max
+        let max_particles = self.particle_system.get_max_particles() as usize;
+        let active_count = self.particle_system.get_active_count() as usize;
+        let buffer = self.particle_system.to_buffer();
+
+        let mut debug_info = String::new();
+        debug_info.push_str(&format!(
+            "🔍 Checking last 10 particles (should be inactive if active_count < max):\n"
+        ));
+        debug_info.push_str(&format!(
+            "Active: {}, Max: {}, Checking particles {} to {}:\n",
+            active_count,
+            max_particles,
+            max_particles.saturating_sub(10),
+            max_particles - 1
+        ));
+
+        for p in max_particles.saturating_sub(10)..max_particles {
+            let offset = p * 48; // 48 bytes per particle (16-byte aligned)
+            if offset + 47 < buffer.len() {
+                // Extract is_active field (offset 36-39)
+                let is_active_bytes = &buffer[offset + 36..offset + 40];
+                let is_active = u32::from_le_bytes([
+                    is_active_bytes[0],
+                    is_active_bytes[1],
+                    is_active_bytes[2],
+                    is_active_bytes[3],
+                ]);
+
+                // Extract position (offset 0-7)
+                let pos_x_bytes = &buffer[offset..offset + 4];
+                let pos_y_bytes = &buffer[offset + 4..offset + 8];
+                let pos_x = f32::from_le_bytes([
+                    pos_x_bytes[0],
+                    pos_x_bytes[1],
+                    pos_x_bytes[2],
+                    pos_x_bytes[3],
+                ]);
+                let pos_y = f32::from_le_bytes([
+                    pos_y_bytes[0],
+                    pos_y_bytes[1],
+                    pos_y_bytes[2],
+                    pos_y_bytes[3],
+                ]);
+
+                let expected_active = p < active_count;
+                let status = if is_active == 1 && expected_active {
+                    "✓"
+                } else if is_active == 0 && !expected_active {
+                    "✓"
+                } else {
+                    "✗"
+                };
+
+                debug_info.push_str(&format!(
+                    "P{}: pos=({:.1},{:.1}) is_active={} expected={} {}\n",
+                    p, pos_x, pos_y, is_active, expected_active as u32, status
                 ));
             }
         }

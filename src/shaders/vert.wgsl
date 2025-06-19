@@ -72,6 +72,10 @@ struct ParticleInstanceInput {
     @location(1) particle_vel: vec2<f32>,
     @location(2) particle_type: u32,
     @location(3) particle_size: f32,
+    @location(5) target_size: f32,
+    @location(6) transition_start: f32,
+    @location(7) transition_type: u32,
+    @location(8) is_active: u32,
 }
 
 ;
@@ -94,38 +98,52 @@ fn getColorForType(ptype: u32, num_types: u32) -> vec4<f32> {
 fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    // Cull "dead" particles that were moved far away by the compute shader
-    // The compute shader moves them to (-100000.0, -100000.0).
-    // Check against a value like -50000.0 to catch these.
-    if (particle_attrs.particle_pos.x < - 50000.0) {
-        out.position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
-        // Position completely outside clip space [-1,1]
+    // Cull inactive particles using the is_active flag
+    if (particle_attrs.is_active == 0u) {
+        // Position far outside clip space and make completely transparent
+        out.position = vec4<f32>(- 10.0, - 10.0, - 10.0, 1.0);
+        // Make completely transparent
         out.particle_color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-        // Make transparent
+        // Set UV coordinates
         out.quad_uv = vec2<f32>(0.0, 0.0);
-        // Set UV for dead particles
         return out;
     }
 
+    // DEBUG: Color particles based on is_active value to diagnose the issue
+    var debug_color = getColorForType(particle_attrs.particle_type, sim_params.num_types);
+
+    // Debug color coding:
+    // Normal color = is_active == 1u (expected)
+    // Bright red = is_active != 0u and is_active != 1u (corrupted)
+    // Bright blue = is_active == 0u (inactive, should be culled above)
+    // Bright yellow = any other unexpected case
+
+    if (particle_attrs.is_active == 0u) {
+        debug_color = vec4<f32>(0.0, 0.0, 1.0, 1.0);
+        // Blue for inactive (shouldn't happen since culled above)
+    }
+    else if (particle_attrs.is_active == 1u) {
+        // Keep normal color - this is expected
+    }
+    else {
+        // Red for corrupted values (not 0 or 1)
+        debug_color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
+    }
+
     // Use per-particle size instead of global particle_render_size
-    let particle_radius_pixels = particle_attrs.particle_size;
+    let particle_radius_pixels = clamp(particle_attrs.particle_size, 1.0, 30.0);
+    // Safety clamp in vertex shader too!
 
     // Particle position is in virtual world coordinates (0-2400 range)
     // Convert directly to clip space (-1 to 1) based on the fixed 2400x2400 virtual world
-    let normalized_particle_pos = vec2<f32>(
-        (particle_attrs.particle_pos.x / 2400.0) * 2.0 - 1.0,
-        (1.0 - (particle_attrs.particle_pos.y / 2400.0)) * 2.0 - 1.0
-    );
+    let normalized_particle_pos = vec2<f32>((particle_attrs.particle_pos.x / 2400.0) * 2.0 - 1.0, (1.0 - (particle_attrs.particle_pos.y / 2400.0)) * 2.0 - 1.0);
 
     // Scale quad vertex by particle size and convert to clip space dimensions
     // Fixed scaling for 2400x2400 virtual world
-    let scaled_quad_pos = vec2<f32>(
-        vertex_attrs.quad_pos.x * (particle_radius_pixels / 2400.0),
-        vertex_attrs.quad_pos.y * (particle_radius_pixels / 2400.0)
-    );
+    let scaled_quad_pos = vec2<f32>(vertex_attrs.quad_pos.x * (particle_radius_pixels / 2400.0), vertex_attrs.quad_pos.y * (particle_radius_pixels / 2400.0));
 
     out.position = vec4<f32>(normalized_particle_pos + scaled_quad_pos, 0.0, 1.0);
-    out.particle_color = getColorForType(particle_attrs.particle_type, sim_params.num_types);
+    out.particle_color = debug_color;
 
     // Calculate UV coordinates for the quad (convert from [-1,1] to [0,1])
     out.quad_uv = (vertex_attrs.quad_pos + 1.0) * 0.5;

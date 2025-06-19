@@ -607,19 +607,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // Much more realistic thickness scaling
                 var segment_thickness: f32;
                 if (generation == 0u) {
-                    segment_thickness = 0.0015 + segment_randoms[3] * 0.001;
+                    segment_thickness = 0.0005 + segment_randoms[3] * 0.0004;
                     // 0.00150 - 0.00250
                 }
                 else if (generation == 1u) {
-                    segment_thickness = 0.00125 + segment_randoms[3] * 0.0005;
+                    segment_thickness = 0.0004 + segment_randoms[3] * 0.0003;
                     // 0.00125 - 0.00175
                 }
                 else if (generation == 2u) {
-                    segment_thickness = 0.00125 + segment_randoms[3] * 0.00025;
+                    segment_thickness = 0.0003 + segment_randoms[3] * 0.0002;
                     // 0.00125 - 0.00150
                 }
                 else {
-                    segment_thickness = 0.00125;
+                    segment_thickness = 0.0002 + segment_randoms[3] * 0.0001;
                     // Minimum thickness
                 }
 

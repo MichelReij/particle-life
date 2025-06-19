@@ -6,7 +6,15 @@ struct Particle {
     ptype: u32,
     size: f32,
     target_size: f32,
-    _padding: f32, // Ensure 16-byte alignment
+    transition_start: f32,
+    // Start time of transition, 0 means no transition
+    transition_type: u32,
+    // 0 = grow, 1 = shrink
+    is_active: u32,
+    // Whether this particle is active/visible (bool as u32)
+    _padding1: f32,
+    _padding2: f32,
+    // Ensure 16-byte alignment (48 bytes total)
 }
 
 struct InteractionRule {
@@ -162,6 +170,12 @@ fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32) -> f32 {
 
     for (var i: u32 = 0u; i < sim_params.num_particles; i = i + 1u) {
         let other_particle = particles_in[i];
+
+        // Skip inactive particles in density calculations
+        if (other_particle.is_active == 0u) {
+            continue;
+        }
+
         var diff = other_particle.pos - particle_pos;
 
         // Apply world wrapping for density calculation
@@ -297,10 +311,11 @@ fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: v
     let force_vec_uv = particle_uv - closest_point;
     let distance_uv = length(force_vec_uv);
 
-    // Only affect particles within 0.06 UV units (6% of screen) from segment
+    // Only affect particles within 0.06 UV units (3% of screen) from segment
     let influence_radius_uv = 0.03;
 
-    if (distance_uv >= influence_radius_uv || distance_uv < 0.001) {
+    if (distance_uv >= influence_radius_uv) {
+        // || distance_uv < 0.001) {
         return vec2<f32>(0.0, 0.0);
     }
 
@@ -309,7 +324,7 @@ fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: v
     let distance_factor = (influence_radius_uv - distance_uv) / influence_radius_uv;
 
     // Repulsion strength based on electrical activity and segment generation
-    let repulsion_strength = 50000.0 * sim_params.inter_type_attraction_scale * (1.0 + f32(generation) * 0.5);
+    let repulsion_strength = 150000.0 * sim_params.inter_type_attraction_scale * (1.0 + f32(generation) * 0.5);
     let repulsion_force_uv = repulsion_direction * distance_factor * repulsion_strength;
 
     // Convert force back to world coordinates
@@ -327,7 +342,8 @@ fn random_float(seed: u32) -> f32 {
     s = s ^ (s >> 4u);
     s = s * 0x27d4eb2du;
     s = s ^ (s >> 15u);
-    return f32(s) / 4294967295.0; // Convert to [0, 1) float
+    return f32(s) / 4294967295.0;
+    // Convert to [0, 1) float
 }
 
 @compute @workgroup_size(64) // Example workgroup size, can be tuned
@@ -339,6 +355,43 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     var particle_p = particles_in[p_idx];
+
+    // Debug: Detect and clamp giant particles early
+    if (particle_p.size > 100.0 || particle_p.target_size > 100.0) {
+        // Set giant particle to a conspicuous but reasonable size for debugging
+        particle_p.size = 25.0;
+        particle_p.target_size = 25.0;
+        // Make it red for visibility (type 2)
+        particle_p.ptype = 2u;
+    }
+
+    // Safety: Fix any corrupted target_size values (should be 5-50 range)
+    particle_p.target_size = clamp(particle_p.target_size, 5.0, 50.0);
+
+    // Safety: Fix any corrupted current size values
+    particle_p.size = clamp(particle_p.size, 0.1, 100.0);
+
+    // Safety: Fix any corrupted positions
+    particle_p.pos.x = clamp(particle_p.pos.x, 0.0, sim_params.virtual_world_width);
+    particle_p.pos.y = clamp(particle_p.pos.y, 0.0, sim_params.virtual_world_height);
+
+    // Safety: Fix any corrupted velocities
+    particle_p.vel.x = clamp(particle_p.vel.x, - 100.0, 100.0);
+    particle_p.vel.y = clamp(particle_p.vel.y, - 100.0, 100.0);
+
+    // Skip inactive particles - they don't participate in physics
+    if (particle_p.is_active == 0u) {
+        // Just copy the inactive particle to output without processing
+        particles_out[p_idx] = particle_p;
+        return;
+    }
+
+    // Debug: Ensure is_active is always 1 for active particles
+    if (particle_p.is_active != 1u) {
+        // Force it to 1 if it's not 0 or 1 (corrupted data)
+        particle_p.is_active = 1u;
+    }
+
     var total_force = vec2<f32>(0.0, 0.0);
 
     // Calculate Lenia forces if enabled
@@ -374,6 +427,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
 
         let particle_q = particles_in[q_idx];
+
+        // Skip interactions with inactive particles
+        if (particle_q.is_active == 0u) {
+            continue;
+        }
 
         var diff = particle_q.pos - particle_p.pos;
 
@@ -562,47 +620,49 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // particle_p.ptype = u32(random_float(global_id.x + u32(particle_p.pos.y)) * f32(sim_params.num_types)); // Optionally randomize type
         }
     }
-    // No bounce mode implemented as per request.
-    // Handle GPU-based particle size transitions
-    if (sim_params.transition_active != 0u) {
-        let elapsed = sim_params.time - sim_params.transition_start_time;
+
+    // Handle per-particle transitions (much simpler than global transition logic!)
+    if (particle_p.transition_start > 0.0) {
+        let elapsed = sim_params.time - particle_p.transition_start;
         let progress = clamp(elapsed / sim_params.transition_duration, 0.0, 1.0);
 
-        // Determine if this particle should be affected by the transition
-        let in_transition_range = (sim_params.transition_is_grow != 0u &&
-                                  p_idx >= sim_params.transition_start_count &&
-                                  p_idx < sim_params.transition_end_count) ||
-                                 (sim_params.transition_is_grow == 0u &&
-                                  p_idx >= sim_params.transition_end_count &&
-                                  p_idx < sim_params.transition_start_count);
-
-        if (in_transition_range) {
-            // Use the pre-calculated target_size stored in the particle
-            let target_size = particle_p.target_size;
-
-            if (sim_params.transition_is_grow != 0u) {
-                // Grow transition: from minimum visible size to target_size
-                // Note: sizes are in world coordinates (2400x2400), not pixels (800x800)
-                // Scale factor: 2400/800 = 3.0, so 3.0 world units ≈ 1 pixel on screen
-                let min_visible_size = 3.0; // ~1 pixel on screen, small but visible
-
-                // Smooth transition from min size to target size
-                particle_p.size = min_visible_size + (target_size - min_visible_size) * progress;
-            } else {
-                // Shrink transition: from current size to 0.001
-                // For shrinking, we need to know what the original size should be
-                // If the particle currently has a very small size, use the target size as starting point
-                let current_size = particle_p.size;
-                let start_size = max(current_size, target_size);
-                particle_p.size = start_size * (1.0 - progress) + 0.001 * progress;
+        if (progress < 1.0) {
+            // Transition in progress
+            if (particle_p.transition_type == 0u) {
+                // Grow transition: activate immediately and interpolate size
+                particle_p.is_active = 1u;
+                // Activate at start of grow transition
+                let min_visible_size = 3.0;
+                particle_p.size = min_visible_size + (particle_p.target_size - min_visible_size) * progress;
+            }
+            else {
+                // Shrink transition: stay active but interpolate size down
+                // Don't deactivate until transition completes
+                let min_visible_size = 0.1;
+                particle_p.size = particle_p.target_size * (1.0 - progress) + min_visible_size * progress;
+            }
+        }
+        else {
+            // Transition complete
+            if (particle_p.transition_type == 0u) {
+                // Grow complete: set to target size and clear transition
+                particle_p.size = particle_p.target_size;
+                particle_p.transition_start = 0.0;
+                // is_active already set to 1u above
+            }
+            else {
+                // Shrink complete: deactivate particle and clear transition
+                particle_p.is_active = 0u;
+                // Deactivate at END of shrink transition
+                particle_p.size = 0.1;
+                particle_p.transition_start = 0.0;
             }
         }
     }
 
-    // Ensure particles beyond active count are tiny (outside transitions)
-    if (sim_params.transition_active == 0u && p_idx >= sim_params.num_particles) {
-        particle_p.size = 0.001; // Keep inactive particles virtually invisible
-    }
+    // Final safety clamps to prevent visual issues
+    particle_p.target_size = clamp(particle_p.target_size, 5.0, 22.0);
+    particle_p.size = clamp(particle_p.size, 1.0, particle_p.target_size);
 
     particles_out[p_idx] = particle_p;
 }
