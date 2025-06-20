@@ -2,8 +2,6 @@
 // This module handles all HTML/DOM interactions, slider controls, and localStorage
 
 import { SimulationParams, BoundaryMode } from "./particle-life-types";
-// Import pressure-to-particle mapping for UI display
-import { pressureToParticleCount } from "./particle-lenia";
 
 // Environmental parameters for the UI controls
 let temperature = 20; // Default temperature
@@ -83,6 +81,21 @@ export function loadFromLocalStorage(
 }
 
 // === Parameter Mapping Functions ===
+// Particle count constants (moved from deleted particle-lenia.ts)
+const MAX_PARTICLES = 6400;
+const MIN_PARTICLES = 1600;
+
+/**
+ * Convert pressure value to particle count
+ * Pressure range: 1-10 bars -> Particle count: 1600-6400
+ */
+function pressureToParticleCount(pressure: number): number {
+    // Linear mapping from pressure (1-10) to particle count (1600-6400)
+    const normalized = (pressure - 1) / 9; // Normalize to 0-1
+    return Math.round(
+        MIN_PARTICLES + normalized * (MAX_PARTICLES - MIN_PARTICLES)
+    );
+}
 
 // Temperature mapping functions
 function temperatureToDrift(temp: number): number {
