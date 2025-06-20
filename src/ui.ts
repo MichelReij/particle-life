@@ -186,11 +186,8 @@ let parameterUpdateCallbacks = {
     setUVLight: (uv: number) => {},
     setElectricalActivity: (electrical: number) => {},
     setZoom: (level: number, centerX?: number, centerY?: number) => {},
-    // Physics debugging methods
-    debugPhysics: () => "Debug not available",
+    // Rule regeneration
     regenerateRules: () => {},
-    // Lightning collision debugging
-    logLightningCollisionStats: () => {},
 };
 
 export function setParameterUpdateCallbacks(callbacks: {
@@ -209,11 +206,8 @@ export function setParameterUpdateCallbacks(callbacks: {
     setUVLight?: (uv: number) => void;
     setElectricalActivity?: (electrical: number) => void;
     setZoom?: (level: number, centerX?: number, centerY?: number) => void;
-    // Physics debugging methods
-    debugPhysics?: () => string;
+    // Rule regeneration
     regenerateRules?: () => void;
-    // Lightning collision debugging
-    logLightningCollisionStats?: () => void;
 }) {
     parameterUpdateCallbacks = {
         ...parameterUpdateCallbacks,
@@ -236,9 +230,7 @@ export function setParameterUpdateCallbacks(callbacks: {
             callbacks.setElectricalActivity ||
             parameterUpdateCallbacks.setElectricalActivity,
         setZoom: callbacks.setZoom || parameterUpdateCallbacks.setZoom,
-        // Physics debugging methods
-        debugPhysics:
-            callbacks.debugPhysics || parameterUpdateCallbacks.debugPhysics,
+        // Rule regeneration
         regenerateRules:
             callbacks.regenerateRules ||
             parameterUpdateCallbacks.regenerateRules,
@@ -750,16 +742,12 @@ export function initializeUI(
     initializeZoomSlider(currentZoomLevel);
     initializeLeniaControls(simParams);
     initializeEnvironmentalSliders();
-    initializePhysicsDebug();
 
     // Initialize JoyStick after a short delay to ensure DOM is ready
     setTimeout(() => {
         initJoyStick(currentZoomLevel);
         updateZoomCenterInfo(currentZoomLevel);
     }, 100);
-
-    // Initialize physics debugging UI
-    initializePhysicsDebug();
 
     console.log("UI initialization complete");
 }
@@ -1408,61 +1396,4 @@ export function cleanup(): void {
         }
     }
     (window as any).__webgpuDevice = undefined;
-}
-
-// === Physics Debugging Functions ===
-function initializePhysicsDebug(): void {
-    const debugPhysicsBtn = document.getElementById("debugPhysicsBtn");
-    const regenerateRulesBtn = document.getElementById("regenerateRulesBtn");
-    const collisionStatsBtn = document.getElementById("collisionStatsBtn");
-
-    if (debugPhysicsBtn) {
-        debugPhysicsBtn.addEventListener("click", () => {
-            if (parameterUpdateCallbacks.debugPhysics) {
-                const physicsInfo = parameterUpdateCallbacks.debugPhysics();
-                console.log("🔬 PHYSICS DEBUG:");
-                console.log(physicsInfo);
-                // alert(
-                //     "Physics debug info logged to console! Check the browser developer tools."
-                // );
-            } else {
-                console.log(
-                    "❌ Physics debugging not available - engine not initialized or using TypeScript version"
-                );
-                alert("Physics debugging only available with Rust engine");
-            }
-        });
-    }
-
-    if (collisionStatsBtn) {
-        collisionStatsBtn.addEventListener("click", () => {
-            if (parameterUpdateCallbacks.logLightningCollisionStats) {
-                parameterUpdateCallbacks.logLightningCollisionStats();
-                console.log("⚡ LIGHTNING COLLISION STATS LOGGED");
-            } else {
-                console.log(
-                    "❌ Lightning collision stats not available - engine not initialized or using TypeScript version"
-                );
-                alert(
-                    "Lightning collision stats only available with Rust engine"
-                );
-            }
-        });
-    }
-
-    if (regenerateRulesBtn) {
-        regenerateRulesBtn.addEventListener("click", () => {
-            if (parameterUpdateCallbacks.regenerateRules) {
-                parameterUpdateCallbacks.regenerateRules();
-                // alert(
-                //     "New interaction rules generated! Physics behavior should change."
-                // );
-            } else {
-                console.log(
-                    "❌ Rule regeneration not available - engine not initialized or you're using the TypeScript version"
-                );
-                alert("Rule regeneration only available with Rust engine");
-            }
-        });
-    }
 }

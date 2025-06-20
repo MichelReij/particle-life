@@ -278,29 +278,13 @@ class App {
                     console.warn("🔍 Engine not available for setZoom");
                 }
             },
-            // Physics debugging and rule regeneration
-            debugPhysics: () => {
-                if (this.engine) {
-                    return this.engine.debug_particle_physics();
-                } else {
-                    return "Engine not available for physics debugging";
-                }
-            },
+            // Rule regeneration
             regenerateRules: () => {
                 if (this.engine) {
                     this.engine.regenerate_interaction_rules();
                     console.log("🎲 Interaction rules regenerated via UI");
                 } else {
                     console.warn("Engine not available for rule regeneration");
-                }
-            },
-            // Lightning collision debugging
-            logLightningCollisionStats: () => {
-                if (this.engine) {
-                    this.engine.log_lightning_collision_stats();
-                    console.log("⚡ Lightning collision stats requested");
-                } else {
-                    console.warn("Engine not available for collision stats");
                 }
             },
         });

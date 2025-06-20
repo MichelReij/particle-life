@@ -5,7 +5,6 @@ use wasm_bindgen::prelude::*;
 mod buffer_utils;
 mod interaction_rules;
 mod particle_system;
-mod shaders;
 mod simulation_params;
 mod spatial_grid;
 mod webgpu_renderer;
@@ -13,7 +12,6 @@ mod webgpu_renderer;
 pub use buffer_utils::*;
 pub use interaction_rules::*;
 pub use particle_system::*;
-pub use shaders::*;
 pub use simulation_params::*;
 pub use spatial_grid::*;
 pub use webgpu_renderer::*;
@@ -1014,38 +1012,6 @@ impl ParticleLifeEngine {
         self.simulation_params.flat_force
     }
 
-    // Get lightning collision statistics for performance monitoring
-    #[wasm_bindgen]
-    pub fn log_lightning_collision_stats(&self) {
-        // Get current lightning parameters to estimate collision load
-        let lightning_freq = self.simulation_params.lightning_frequency;
-        let electrical_activity = self.simulation_params.inter_type_attraction_scale;
-        let current_time = self.simulation_params.time;
-
-        // Calculate estimated collision checks per bolt based on our implementation
-        // Each segment can try up to 12 different positions (6 angle variations + 4 random + 2 shorter)
-        // Each position is checked against all existing segments comprehensively
-        // Worst case: 20 segments × 12 attempts × 20 collision checks = ~4,800 checks per bolt
-        let estimated_checks_per_bolt = 20 * 12 * 20; // Conservative estimate
-
-        console_log!("⚡ LIGHTNING COLLISION STATISTICS:");
-        console_log!(
-            "🔍 Collision Detection: COMPREHENSIVE MODE (checks all segments for each position)"
-        );
-        console_log!("� Lightning Frequency: {:.3}", lightning_freq);
-        console_log!("🔌 Electrical Activity: {:.3}", electrical_activity);
-        console_log!("⏱️  Current Time: {:.1}s", current_time);
-        console_log!(
-            "🧮 Estimated Collision Checks per Bolt: ~{}",
-            estimated_checks_per_bolt
-        );
-        console_log!(
-            "💡 Note: Actual count is tracked in GPU buffer but requires readback for display"
-        );
-        console_log!("🎯 Each new segment tries up to 12 positions, each checked against all existing segments");
-        console_log!("🔄 Collision order: Newest segments first (reverse order) in fast check, then comprehensive validation");
-    }
-
     // === COMPREHENSIVE PARAMETER SETTERS ===
     // These setters allow the UI to update individual parameters directly
 
@@ -1182,210 +1148,5 @@ impl ParticleLifeEngine {
             "🔧 Individual parameter: particle_render_size = {:.1}",
             self.simulation_params.particle_render_size
         );
-    }
-
-    // Physics debugging method
-    #[wasm_bindgen]
-    pub fn debug_particle_physics(&self) -> String {
-        let active_count = self.particle_system.get_active_count();
-
-        if active_count == 0 {
-            return "No particles to debug".to_string();
-        }
-
-        // Sample first 10 particles for debugging, including inactive ones
-        let mut debug_info = String::new();
-        let sample_count = 10.min(self.particle_system.get_max_particles() as usize);
-
-        debug_info.push_str(&format!(
-            "🔬 Physics Debug - Sampling {} particles (active_count={}):\n",
-            sample_count, active_count
-        ));
-        debug_info.push_str(&format!(
-            "📊 Current sim params: force_scale={:.1}, friction={:.3}, delta_time={:.4}\n",
-            self.simulation_params.force_scale,
-            self.simulation_params.friction,
-            self.simulation_params.delta_time
-        ));
-
-        for i in 0..sample_count {
-            if let Some(p) = self.particle_system.get_particle(i) {
-                let velocity_magnitude =
-                    (p.velocity[0] * p.velocity[0] + p.velocity[1] * p.velocity[1]).sqrt();
-                debug_info.push_str(&format!(
-                    "P{}: pos=({:.1},{:.1}) vel=({:.3},{:.3}) |v|={:.3} type={} size={:.1} active={} transition={}\n",
-                    i,
-                    p.position[0],
-                    p.position[1],
-                    p.velocity[0],
-                    p.velocity[1],
-                    velocity_magnitude,
-                    p.particle_type,
-                    p.size,
-                    p.is_active,
-                    p.transition_start > 0.0
-                ));
-            }
-        }
-
-        debug_info
-    }
-
-    // Debug particle states
-    #[wasm_bindgen]
-    pub fn debug_particle_states(&self) -> String {
-        let mut active_count = 0;
-        let mut inactive_count = 0;
-        let mut transition_count = 0;
-
-        for i in 0..self.particle_system.get_max_particles() as usize {
-            if let Some(p) = self.particle_system.get_particle(i) {
-                if p.is_active {
-                    active_count += 1;
-                } else {
-                    inactive_count += 1;
-                }
-                if p.transition_start > 0.0 {
-                    transition_count += 1;
-                }
-            }
-        }
-
-        format!(
-            "🎯 Particle States: {} active, {} inactive, {} in transition (expected active: {})",
-            active_count,
-            inactive_count,
-            transition_count,
-            self.particle_system.get_active_count()
-        )
-    }
-
-    // Force a complete buffer refresh by uploading all particle data again
-    #[wasm_bindgen]
-    pub fn debug_force_buffer_refresh(&mut self) -> String {
-        // The particle buffer gets updated automatically on each render frame
-        // This function mainly serves to confirm the renderer status
-        if self.renderer.is_some() {
-            let particle_buffer = self.particle_system.to_buffer();
-            format!(
-                "🔄 Renderer active: {} bytes of particle data ready for next frame",
-                particle_buffer.len()
-            )
-        } else {
-            "❌ No WebGPU renderer available".to_string()
-        }
-    }
-
-    #[wasm_bindgen]
-    pub fn debug_sample_particle_buffer(&self) -> String {
-        // Sample the first few particles from the buffer to see what data is actually being sent to GPU
-        let buffer = self.particle_system.to_buffer();
-        let mut debug_info = String::new();
-
-        debug_info.push_str("🔍 Raw buffer data for first 3 particles:\n");
-
-        for p in 0..3 {
-            let offset = p * 48; // 48 bytes per particle (16-byte aligned)
-            if offset + 47 < buffer.len() {
-                // Extract the raw bytes for is_active field (offset 36-39)
-                let is_active_bytes = &buffer[offset + 36..offset + 40];
-                let is_active = u32::from_le_bytes([
-                    is_active_bytes[0],
-                    is_active_bytes[1],
-                    is_active_bytes[2],
-                    is_active_bytes[3],
-                ]);
-
-                // Extract position (offset 0-7)
-                let pos_x_bytes = &buffer[offset..offset + 4];
-                let pos_y_bytes = &buffer[offset + 4..offset + 8];
-                let pos_x = f32::from_le_bytes([
-                    pos_x_bytes[0],
-                    pos_x_bytes[1],
-                    pos_x_bytes[2],
-                    pos_x_bytes[3],
-                ]);
-                let pos_y = f32::from_le_bytes([
-                    pos_y_bytes[0],
-                    pos_y_bytes[1],
-                    pos_y_bytes[2],
-                    pos_y_bytes[3],
-                ]);
-
-                debug_info.push_str(&format!(
-                    "P{}: pos=({:.1},{:.1}) is_active={}\n",
-                    p, pos_x, pos_y, is_active
-                ));
-            }
-        }
-
-        debug_info
-    }
-
-    // Inspect inactive particles specifically
-    #[wasm_bindgen]
-    pub fn debug_inactive_particles(&self) -> String {
-        // Check the last 10 particles which should be inactive when particle count < max
-        let max_particles = self.particle_system.get_max_particles() as usize;
-        let active_count = self.particle_system.get_active_count() as usize;
-        let buffer = self.particle_system.to_buffer();
-
-        let mut debug_info = String::new();
-        debug_info.push_str(&format!(
-            "🔍 Checking last 10 particles (should be inactive if active_count < max):\n"
-        ));
-        debug_info.push_str(&format!(
-            "Active: {}, Max: {}, Checking particles {} to {}:\n",
-            active_count,
-            max_particles,
-            max_particles.saturating_sub(10),
-            max_particles - 1
-        ));
-
-        for p in max_particles.saturating_sub(10)..max_particles {
-            let offset = p * 48; // 48 bytes per particle (16-byte aligned)
-            if offset + 47 < buffer.len() {
-                // Extract is_active field (offset 36-39)
-                let is_active_bytes = &buffer[offset + 36..offset + 40];
-                let is_active = u32::from_le_bytes([
-                    is_active_bytes[0],
-                    is_active_bytes[1],
-                    is_active_bytes[2],
-                    is_active_bytes[3],
-                ]);
-
-                // Extract position (offset 0-7)
-                let pos_x_bytes = &buffer[offset..offset + 4];
-                let pos_y_bytes = &buffer[offset + 4..offset + 8];
-                let pos_x = f32::from_le_bytes([
-                    pos_x_bytes[0],
-                    pos_x_bytes[1],
-                    pos_x_bytes[2],
-                    pos_x_bytes[3],
-                ]);
-                let pos_y = f32::from_le_bytes([
-                    pos_y_bytes[0],
-                    pos_y_bytes[1],
-                    pos_y_bytes[2],
-                    pos_y_bytes[3],
-                ]);
-
-                let expected_active = p < active_count;
-                let status = if is_active == 1 && expected_active {
-                    "✓"
-                } else if is_active == 0 && !expected_active {
-                    "✓"
-                } else {
-                    "✗"
-                };
-
-                debug_info.push_str(&format!(
-                    "P{}: pos=({:.1},{:.1}) is_active={} expected={} {}\n",
-                    p, pos_x, pos_y, is_active, expected_active as u32, status
-                ));
-            }
-        }
-
-        debug_info
     }
 }

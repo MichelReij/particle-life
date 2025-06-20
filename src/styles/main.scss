@@ -16,6 +16,16 @@ body {
     place-content: center center;
 }
 
+button,
+input[type="button"] {
+    font-family     : inherit; // Use the same font as the rest of the page
+    color           : var(--primary-color);
+    background-color: transparent; // Make buttons and sliders blend with the background
+    border-radius   : 0.5rem;
+    padding         : 0.5rem 1rem;
+    cursor          : pointer; // Change cursor to pointer for better UX
+}
+
 #Dashboard {
     display              : grid;
     grid-template-columns: max-content 1fr 1fr 1fr 1fr max-content;
