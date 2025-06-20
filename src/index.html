@@ -9,6 +9,7 @@
         <title>Origin of Life Simulation</title>
         <!-- JoyStick Library -->
         <script src="joy.js"></script>
+        . `
     </head>
     <body>
         <div id="Dashboard">
@@ -192,8 +193,8 @@
             <!-- Lenia Controls -->
             <div>
                 <label for="leniaEnabledCheckbox">Enable Lenia:</label>
-                <input type="checkbox" id="leniaEnabledCheckbox" />
-                <span id="leniaEnabledStatus">Off</span>
+                <input type="checkbox" id="leniaEnabledCheckbox" checked />
+                <span id="leniaEnabledStatus">On</span>
             </div>
             <div>
                 <label for="leniaGrowthMuSlider">Lenia Growth μ:</label>
@@ -214,7 +215,7 @@
                     id="leniaGrowthSigmaSlider"
                     min="0.005"
                     max="0.05"
-                    value="0.017"
+                    value="0.020"
                     step="0.001"
                 />
                 <span id="leniaGrowthSigmaValue">0.017</span>
@@ -231,7 +232,7 @@
                     value="50.0"
                     step="5.0"
                 />
-                <span id="leniaKernelRadiusValue">50.0</span>
+                <span id="leniaKernelRadiusValue">60.0</span>
             </div>
         </div>
     </body>

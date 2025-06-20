@@ -80,10 +80,10 @@ impl SimulationParams {
             background_color_r: 0.0,
             background_color_g: 0.0,
             background_color_b: 0.0,
-            lenia_enabled: false, // Disabled by default to test basic particle interactions
-            lenia_growth_mu: 0.18,
-            lenia_growth_sigma: 0.025,
-            lenia_kernel_radius: 75.0,
+            lenia_enabled: true, // Disabled by default to test basic particle interactions
+            lenia_growth_mu: 0.15,
+            lenia_growth_sigma: 0.02,
+            lenia_kernel_radius: 60.0,
             lightning_frequency: 0.7,
             lightning_intensity: 1.0,
             lightning_duration: 0.6,

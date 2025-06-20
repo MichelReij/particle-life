@@ -198,13 +198,16 @@ fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32) -> f32 {
 
         // Only consider particles within kernel radius
         if (distance < kernel_radius && distance > EPSILON) {
-            let kernel_weight = lenia_kernel(distance, kernel_radius * 0.3);
+            let kernel_sigma = kernel_radius * 0.15;
+            // More appropriate sigma
+            let kernel_weight = lenia_kernel(distance, kernel_sigma);
             density = density + kernel_weight;
         }
     }
-
-    // Normalize density by maximum possible (all particles at center)
-    return density / f32(sim_params.num_particles);
+    // Normalize by kernel area instead of particle count for better scaling
+    let kernel_area = PI * kernel_radius * kernel_radius;
+    return density / kernel_area * 1000.0;
+    // Scale to reasonable range (0-1)
 }
 
 // === Lightning Electromagnetic Force Functions ===
@@ -416,8 +419,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let density_gradient = vec2<f32>(gradient_x, gradient_y);
 
         // Apply growth-based movement (move toward favorable density if growth_force > 0)
-        let lenia_force = density_gradient * growth_force * 100.0;
-        // Scale factor for effect strength
+        let lenia_force = density_gradient * growth_force * 5000.0;
+        // Much stronger force
+
         total_force = total_force + lenia_force;
     }
 
@@ -532,32 +536,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         force_magnitude = force_magnitude * electromagnetic_boost;
 
         total_force = total_force + norm_diff * force_magnitude;
-    }
-
-    // Add Lenia-inspired forces if enabled
-    if (sim_params.lenia_enabled == 1u) {
-        // Calculate local density and gradient
-        let local_density = calculate_lenia_density(particle_p.pos, particle_p.ptype);
-
-        // Calculate density gradient for directional movement
-        let gradient_step = 5.0;
-        // Small step for gradient calculation
-        let density_right = calculate_lenia_density(particle_p.pos + vec2<f32>(gradient_step, 0.0), particle_p.ptype);
-        let density_left = calculate_lenia_density(particle_p.pos - vec2<f32>(gradient_step, 0.0), particle_p.ptype);
-        let density_up = calculate_lenia_density(particle_p.pos + vec2<f32>(0.0, gradient_step), particle_p.ptype);
-        let density_down = calculate_lenia_density(particle_p.pos - vec2<f32>(0.0, gradient_step), particle_p.ptype);
-
-        let gradient_x = (density_right - density_left) / (2.0 * gradient_step);
-        let gradient_y = (density_up - density_down) / (2.0 * gradient_step);
-
-        // Apply growth function to determine movement direction
-        let growth_force = lenia_growth_function(local_density, sim_params.lenia_growth_mu, sim_params.lenia_growth_sigma);
-
-        // Move towards optimal density regions
-        let lenia_force = vec2<f32>(gradient_x, gradient_y) * growth_force * 200.0;
-        // Scale factor for visibility
-
-        total_force = total_force + lenia_force;
     }
 
     // Add lightning electromagnetic forces
