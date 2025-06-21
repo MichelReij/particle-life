@@ -52,12 +52,12 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let dist_from_center = length(centered_uv);
 
     // Vignette parameters (based on canvas size)
-    let vignette_radius = 0.5;
-    // Relative to canvas size (50% of canvas)
-    let vignette_softness = 0.2;
-    // Softness of the vignette transition
-    let max_vignette_alpha = 0.3;
-    // Maximum vignette opacity (50% as set previously)
+    let vignette_radius = 0.7;
+    // Relative to canvas size (70% of canvas - starts later)
+    let vignette_softness = 0.4;
+    // Softness of the vignette transition (increased for gentler fade)
+    let max_vignette_alpha = 0.25;
+    // Maximum vignette opacity (reduced from 30% to 20%)
 
     // Calculate vignette alpha using smoothstep for smooth transition
     let vignette_alpha = smoothstep(vignette_radius - vignette_softness, vignette_radius, dist_from_center) * max_vignette_alpha;
