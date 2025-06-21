@@ -10,49 +10,44 @@ struct SimParams {
     canvas_render_height: f32,
     virtual_world_offset_x: f32,
     virtual_world_offset_y: f32,
-    viewport_width: f32,
-    viewport_height: f32,
     boundary_mode: u32,
     particle_render_size: f32,
     force_scale: f32,
     r_smooth: f32,
     flat_force: u32,
     drift_x_per_second: f32,
-    // New parameter
     inter_type_attraction_scale: f32,
-    // New parameter
     inter_type_radius_scale: f32,
-    // New parameter
     time: f32,
-    // Added time
     fisheye_strength: f32,
-    // Fisheye distortion strength
     background_color_r: f32,
-    // Background color red component
     background_color_g: f32,
-    // Background color green component
     background_color_b: f32,
-    // Background color blue component
 
     // Lenia-inspired parameters
     lenia_enabled: u32,
-    // Boolean as u32: enable Lenia-style interactions
     lenia_growth_mu: f32,
-    // Lenia growth function center (μ)
     lenia_growth_sigma: f32,
-    // Lenia growth function spread (σ)
     lenia_kernel_radius: f32,
-    // Lenia kernel radius in pixels
+
+    // Lightning parameters
     lightning_frequency: f32,
-    // Lightning strikes per second
     lightning_intensity: f32,
-    // Lightning brightness/strength (0-1)
     lightning_duration: f32,
-    // Duration of each lightning flash in seconds
-    _padding: f32,
-    // Padding to align to 16 bytes
-    _padding2: f32,
-    // Additional padding for 16-byte alignment (128 bytes total)
+
+    // Particle transition parameters for GPU-based size transitions
+    transition_active: u32,
+    transition_start_time: f32,
+    transition_duration: f32,
+    transition_start_count: u32,
+    transition_end_count: u32,
+    transition_is_grow: u32,
+
+    // Spatial grid optimization parameters
+    spatial_grid_enabled: u32,
+    spatial_grid_cell_size: f32,
+    spatial_grid_width: u32,
+    spatial_grid_height: u32,
 }
 
 @group(0) @binding(2)

@@ -38,9 +38,19 @@ struct SimParams {
     lightning_intensity: f32,
     lightning_duration: f32,
 
-    // Padding for 16-byte alignment (128 bytes total)
-    _padding: f32,
-    _padding2: f32,
+    // Particle transition parameters for GPU-based size transitions
+    transition_active: u32,
+    transition_start_time: f32,
+    transition_duration: f32,
+    transition_start_count: u32,
+    transition_end_count: u32,
+    transition_is_grow: u32,
+
+    // Spatial grid optimization parameters
+    spatial_grid_enabled: u32,
+    spatial_grid_cell_size: f32,
+    spatial_grid_width: u32,
+    spatial_grid_height: u32,
 }
 
 // Lightning segment data structure (must match compute shader)
@@ -118,8 +128,8 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     // UV coordinates are now passed directly from vertex shader (0.0 to 1.0)
     // No need to calculate or convert - pure UV system!
 
-    // Check if lightning is enabled
-    if (sim_params.lightning_frequency <= 0.0) {
+    // Early exit if lightning is disabled or no segments
+    if (sim_params.lightning_frequency <= 0.0 || lightning_bolt.num_segments == 0u) {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
 

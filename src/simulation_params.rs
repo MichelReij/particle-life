@@ -48,6 +48,12 @@ pub struct SimulationParams {
     pub transition_start_count: u32,
     pub transition_end_count: u32,
     pub transition_is_grow: bool, // true for grow, false for shrink
+
+    // Spatial grid optimization parameters
+    pub spatial_grid_enabled: bool,
+    pub spatial_grid_cell_size: f32,
+    pub spatial_grid_width: u32,
+    pub spatial_grid_height: u32,
 }
 
 impl SimulationParams {
@@ -93,6 +99,12 @@ impl SimulationParams {
             transition_start_count: 0,
             transition_end_count: 0,
             transition_is_grow: true,
+
+            // Spatial grid optimization - enabled by default with reasonable cell size
+            spatial_grid_enabled: true,
+            spatial_grid_cell_size: 120.0, // 120 units per cell (2400/120 = 20x20 grid)
+            spatial_grid_width: 20,        // 20 cells horizontally
+            spatial_grid_height: 20,       // 20 cells vertically
         }
     }
 
@@ -146,6 +158,12 @@ impl SimulationParams {
             "lightningFrequency" => self.lightning_frequency = value,
             "lightningIntensity" => self.lightning_intensity = value,
             "lightningDuration" => self.lightning_duration = value,
+            "spatialGridCellSize" => {
+                self.spatial_grid_cell_size = value;
+                // Recalculate grid dimensions when cell size changes
+                self.spatial_grid_width = (self.virtual_world_width / value).ceil() as u32;
+                self.spatial_grid_height = (self.virtual_world_height / value).ceil() as u32;
+            }
             _ => return false,
         }
         true
@@ -169,6 +187,7 @@ impl SimulationParams {
         match name {
             "flatForce" => self.flat_force = value,
             "leniaEnabled" => self.lenia_enabled = value,
+            "spatialGridEnabled" => self.spatial_grid_enabled = value,
             _ => return false,
         }
         true
@@ -181,7 +200,7 @@ impl SimulationParams {
 
     // Convert to buffer format for GPU upload with specific particle count
     pub fn to_buffer_with_particle_count(&self, actual_particle_count: u32) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(144); // 36 * 4 bytes = 144 bytes (added 6 transition fields)
+        let mut buffer = Vec::with_capacity(160); // 40 * 4 bytes = 160 bytes (added 4 spatial grid fields)
 
         // Debug log key parameters every 60 frames
         static mut DEBUG_FRAME_COUNT: u32 = 0;
@@ -243,10 +262,23 @@ impl SimulationParams {
         buffer
             .extend_from_slice(&(if self.transition_is_grow { 1u32 } else { 0u32 }).to_le_bytes()); // 35
 
+        // Spatial grid optimization parameters
+        buffer.extend_from_slice(
+            &(if self.spatial_grid_enabled {
+                1u32
+            } else {
+                0u32
+            })
+            .to_le_bytes(),
+        ); // 36
+        buffer.extend_from_slice(&self.spatial_grid_cell_size.to_le_bytes()); // 37
+        buffer.extend_from_slice(&self.spatial_grid_width.to_le_bytes()); // 38
+        buffer.extend_from_slice(&self.spatial_grid_height.to_le_bytes()); // 39
+
         buffer
     }
 
     pub fn get_buffer_size(&self) -> u32 {
-        144 // 36 * 4 bytes (added 6 transition fields)
+        160 // 40 * 4 bytes (added 4 spatial grid fields)
     }
 }

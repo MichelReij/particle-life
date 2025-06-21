@@ -19,7 +19,7 @@ struct SimParams {
     inter_type_attraction_scale: f32,
     inter_type_radius_scale: f32,
     time: f32,
-    fisheyeStrength: f32,
+    fisheye_strength: f32,
     background_color_r: f32,
     background_color_g: f32,
     background_color_b: f32,
@@ -35,9 +35,19 @@ struct SimParams {
     lightning_intensity: f32,
     lightning_duration: f32,
 
-    // Padding for 16-byte alignment (128 bytes total)
-    _padding: f32,
-    _padding2: f32,
+    // Particle transition parameters for GPU-based size transitions
+    transition_active: u32,
+    transition_start_time: f32,
+    transition_duration: f32,
+    transition_start_count: u32,
+    transition_end_count: u32,
+    transition_is_grow: u32,
+
+    // Spatial grid optimization parameters
+    spatial_grid_enabled: u32,
+    spatial_grid_cell_size: f32,
+    spatial_grid_width: u32,
+    spatial_grid_height: u32,
 }
 
 ;

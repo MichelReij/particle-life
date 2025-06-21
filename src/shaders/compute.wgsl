@@ -127,6 +127,16 @@ struct SimParams {
     // Target particle count
     transition_is_grow: u32,
     // Boolean: true for grow, false for shrink
+
+    // Spatial grid optimization parameters
+    spatial_grid_enabled: u32,
+    // Boolean: enable spatial grid optimization (0=disabled, 1=enabled)
+    spatial_grid_cell_size: f32,
+    // Size of each grid cell in world units
+    spatial_grid_width: u32,
+    // Number of grid cells horizontally
+    spatial_grid_height: u32,
+    // Number of grid cells vertically
 }
 
 // Particle data (input)
@@ -167,9 +177,13 @@ fn lenia_growth_function(density: f32, mu: f32, sigma: f32) -> f32 {
 }
 
 // Calculate local density around a particle using Lenia kernel
-fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32) -> f32 {
+fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32, p_idx: u32) -> f32 {
     var density = 0.0;
     let kernel_radius = sim_params.lenia_kernel_radius;
+
+    // Spatial grid optimization: only check particles in nearby cells
+    let p_cell = world_pos_to_grid_cell(particle_pos);
+    let cell_radius = i32(ceil(kernel_radius / sim_params.spatial_grid_cell_size)) + 1;
 
     for (var i: u32 = 0u; i < sim_params.num_particles; i = i + 1u) {
         let other_particle = particles_in[i];
@@ -177,6 +191,24 @@ fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32) -> f32 {
         // Skip inactive particles in density calculations
         if (other_particle.is_active == 0u) {
             continue;
+        }
+
+        // Spatial grid culling: skip particles in distant cells
+        if (sim_params.spatial_grid_enabled == 1u) {
+            let q_cell = world_pos_to_grid_cell(other_particle.pos);
+            let cell_dist_x = abs(p_cell.x - q_cell.x);
+            let cell_dist_y = abs(p_cell.y - q_cell.y);
+            let max_cell_dist = max(cell_dist_x, cell_dist_y);
+
+            // Skip particles beyond the kernel radius in cell space
+            if (max_cell_dist > cell_radius) {
+                continue;
+            }
+
+            // Apply probabilistic culling for better performance
+            if (!should_process_spatial_interaction(p_idx, i, p_cell, q_cell)) {
+                continue;
+            }
         }
 
         var diff = other_particle.pos - particle_pos;
@@ -217,8 +249,8 @@ fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32) -> f32 {
 
 // Calculate electromagnetic force from lightning on a particle (buffer-based)
 fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, particle_vel: vec2<f32>, time: f32, particle_type: u32) -> vec2<f32> {
-    // Check if lightning is enabled
-    if (sim_params.lightning_frequency <= 0.0) {
+    // Early exit if lightning is disabled or no active segments
+    if (sim_params.lightning_frequency <= 0.0 || lightning_bolt.num_segments == 0u) {
         return vec2<f32>(0.0, 0.0);
     }
 
@@ -226,11 +258,6 @@ fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, particle_vel:
 
     // Process the single lightning bolt
     let bolt = lightning_bolt;
-
-    // Skip inactive bolt
-    if (bolt.num_segments == 0u) {
-        return total_em_force;
-    }
 
     // Check if this bolt is currently active
     let bolt_age = time - bolt.start_time;
@@ -333,6 +360,68 @@ fn random_float(seed: u32) -> f32 {
     // Convert to [0, 1) float
 }
 
+// === Spatial Grid Optimization Functions ===
+
+// Convert world position to grid cell coordinates
+fn world_pos_to_grid_cell(pos: vec2<f32>) -> vec2<i32> {
+    let cell_x = i32(floor(pos.x / sim_params.spatial_grid_cell_size));
+    let cell_y = i32(floor(pos.y / sim_params.spatial_grid_cell_size));
+    return vec2<i32>(cell_x, cell_y);
+}
+
+// Check if grid cell coordinates are valid (within bounds)
+fn is_valid_grid_cell(cell: vec2<i32>) -> bool {
+    return cell.x >= 0 && cell.x < i32(sim_params.spatial_grid_width) && cell.y >= 0 && cell.y < i32(sim_params.spatial_grid_height);
+}
+
+// Hash function to map particle index and cell to a pseudo-random hash
+// This is used for spatial culling: we only check a fraction of particles in distant cells
+fn spatial_hash(particle_idx: u32, cell_x: i32, cell_y: i32) -> u32 {
+    // Simple hash combining particle index and cell coordinates
+    var hash = particle_idx;
+    hash = hash ^ (u32(cell_x) * 73856093u);
+    hash = hash ^ (u32(cell_y) * 19349663u);
+    hash = (hash ^ (hash >> 16u)) * 0x85ebca6bu;
+    hash = (hash ^ (hash >> 13u)) * 0xc2b2ae35u;
+    hash = hash ^ (hash >> 16u);
+    return hash;
+}
+
+// Check if we should process interaction between two particles based on spatial distance
+// This implements spatial culling: closer cells have higher interaction probability
+fn should_process_spatial_interaction(p_idx: u32, q_idx: u32, p_cell: vec2<i32>, q_cell: vec2<i32>) -> bool {
+    let cell_dist_x = abs(p_cell.x - q_cell.x);
+    let cell_dist_y = abs(p_cell.y - q_cell.y);
+    let max_cell_dist = max(cell_dist_x, cell_dist_y);
+
+    // Always process particles in the same cell or adjacent cells (3x3 neighborhood)
+    if (max_cell_dist <= 1) {
+        return true;
+    }
+
+    // For distant cells, use probabilistic culling based on distance
+    // Distant interactions have lower probability of being processed
+    let hash = spatial_hash(p_idx, q_cell.x, q_cell.y);
+    let probability_threshold = 256u;
+    // Process ~1/16 of distant interactions (256/4096)
+
+    if (max_cell_dist == 2) {
+        // 2-cell distance: process ~1/4 of interactions
+        return (hash & 1023u) < 256u;
+        // 256/1024 = 1/4
+    }
+    else if (max_cell_dist == 3) {
+        // 3-cell distance: process ~1/8 of interactions
+        return (hash & 2047u) < 256u;
+        // 256/2048 = 1/8
+    }
+    else {
+        // 4+ cell distance: process ~1/16 of interactions
+        return (hash & 4095u) < probability_threshold;
+        // 256/4096 = 1/16
+    }
+}
+
 @compute @workgroup_size(64) // Example workgroup size, can be tuned
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let p_idx = global_id.x;
@@ -361,7 +450,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Calculate Lenia forces if enabled
     if (sim_params.lenia_enabled == 1u) {
         // Calculate local density around this particle
-        let local_density = calculate_lenia_density(particle_p.pos, particle_p.ptype);
+        let local_density = calculate_lenia_density(particle_p.pos, particle_p.ptype, p_idx);
 
         // Apply Lenia growth function to determine growth/decay
         let growth_force = lenia_growth_function(local_density, sim_params.lenia_growth_mu, sim_params.lenia_growth_sigma);
@@ -369,10 +458,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // Calculate density gradient for directional force
         let sample_radius = 5.0;
         // Small radius for gradient calculation
-        let density_right = calculate_lenia_density(particle_p.pos + vec2<f32>(sample_radius, 0.0), particle_p.ptype);
-        let density_left = calculate_lenia_density(particle_p.pos - vec2<f32>(sample_radius, 0.0), particle_p.ptype);
-        let density_up = calculate_lenia_density(particle_p.pos + vec2<f32>(0.0, sample_radius), particle_p.ptype);
-        let density_down = calculate_lenia_density(particle_p.pos - vec2<f32>(0.0, sample_radius), particle_p.ptype);
+        let density_right = calculate_lenia_density(particle_p.pos + vec2<f32>(sample_radius, 0.0), particle_p.ptype, p_idx);
+        let density_left = calculate_lenia_density(particle_p.pos - vec2<f32>(sample_radius, 0.0), particle_p.ptype, p_idx);
+        let density_up = calculate_lenia_density(particle_p.pos + vec2<f32>(0.0, sample_radius), particle_p.ptype, p_idx);
+        let density_down = calculate_lenia_density(particle_p.pos - vec2<f32>(0.0, sample_radius), particle_p.ptype, p_idx);
 
         // Calculate gradient (direction of steepest density increase)
         let gradient_x = (density_right - density_left) / (2.0 * sample_radius);
@@ -386,6 +475,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         total_force = total_force + lenia_force;
     }
 
+    // Particle-particle interactions with spatial grid optimization
+    let p_cell = world_pos_to_grid_cell(particle_p.pos);
+
     for (var q_idx: u32 = 0u; q_idx < sim_params.num_particles; q_idx = q_idx + 1u) {
         if (p_idx == q_idx) {
             continue;
@@ -396,6 +488,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // Skip interactions with inactive particles
         if (particle_q.is_active == 0u) {
             continue;
+        }
+
+        // Spatial grid culling: skip distant particles for better performance
+        if (sim_params.spatial_grid_enabled == 1u) {
+            let q_cell = world_pos_to_grid_cell(particle_q.pos);
+
+            // Apply spatial culling based on interaction distance
+            if (!should_process_spatial_interaction(p_idx, q_idx, p_cell, q_cell)) {
+                continue;
+            }
         }
 
         var diff = particle_q.pos - particle_p.pos;
