@@ -268,14 +268,14 @@ impl WebGpuRenderer {
         let max_lightning_segments = 1024;
         let lightning_segments_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lightning Segments Buffer"),
-            size: (max_lightning_segments * 32) as u64, // 32 bytes per segment
+            size: (max_lightning_segments * 48) as u64, // 48 bytes per segment: 8+8+4+4+4+4+4+4+4+4 = 48 bytes (16-byte aligned)
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let lightning_bolt_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lightning Bolt Buffer"),
-            size: 24, // Single bolt: 24 bytes (6 u32/f32 fields: num_segments, flash_id, start_time, next_lightning_time, collision_checks_count, padding2)
+            size: 32, // Single bolt: 32 bytes (8 u32/f32 fields: num_segments, flash_id, start_time, next_lightning_time, collision_checks_count, _padding2, _padding3, _padding4) - properly aligned to 16-byte boundary
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });

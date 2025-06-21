@@ -38,16 +38,24 @@ struct LightningSegment {
     generation: u32,
     appear_time: f32,
     is_visible: u32,
-    _padding: f32,
-    // Ensure 16-byte alignment
+    _padding: u32,
+    // Padding for alignment
+    _padding2: u32,
+    // Additional padding to align to 16-byte boundary (48 bytes total)
+    _padding3: u32,
+    // Final padding to reach 48 bytes (16-byte aligned)
 }
 
 struct LightningBolt {
     num_segments: u32,
     flash_id: u32,
     start_time: f32,
-    _padding: f32,
-    // Ensure 16-byte alignment
+    next_lightning_time: f32,
+    collision_checks_count: u32,
+    _padding2: u32,
+    _padding3: u32,
+    _padding4: u32,
+    // Additional padding to align to 16-byte boundary (32 bytes total)
 }
 
 struct SimParams {

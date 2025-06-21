@@ -57,6 +57,10 @@ struct LightningSegment {
     // 1 if visible, 0 if not (boolean as u32)
     _padding: u32,
     // Padding for alignment
+    _padding2: u32,
+    // Additional padding to align to 16-byte boundary (48 bytes total)
+    _padding3: u32,
+    // Final padding to reach 48 bytes (16-byte aligned)
 }
 
 // Lightning bolt data structure
@@ -73,6 +77,10 @@ struct LightningBolt {
     // Counter for collision checks performed (for debugging)
     _padding2: u32,
     // Padding for alignment
+    _padding3: u32,
+    // Additional padding to align to 16-byte boundary (32 bytes total)
+    _padding4: u32,
+    // Additional padding to align to 16-byte boundary (32 bytes total)
 }
 
 @group(0) @binding(0)
@@ -352,6 +360,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // Far future - ensures segment starts invisible
             lightning_segments[clear_idx].is_visible = 0u;
             lightning_segments[clear_idx]._padding = 0u;
+            lightning_segments[clear_idx]._padding2 = 0u;
+            lightning_segments[clear_idx]._padding3 = 0u;
         }
 
         // Lightning starts within 0.2UV radius around center (0.5, 0.5) for round screen
@@ -392,6 +402,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             lightning_segments[lightning_bolt.num_segments].is_visible = 0u;
             // Start invisible - will be made visible by lifecycle logic
             lightning_segments[lightning_bolt.num_segments]._padding = 0u;
+            lightning_segments[lightning_bolt.num_segments]._padding2 = 0u;
+            lightning_segments[lightning_bolt.num_segments]._padding3 = 0u;
             lightning_bolt.num_segments = lightning_bolt.num_segments + 1u;
         }
 
@@ -655,6 +667,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 lightning_segments[segment_idx].is_visible = 0u;
                 // Start invisible - will be made visible by lifecycle logic
                 lightning_segments[segment_idx]._padding = 0u;
+                lightning_segments[segment_idx]._padding2 = 0u;
+                lightning_segments[segment_idx]._padding3 = 0u;
 
                 lightning_bolt.num_segments = lightning_bolt.num_segments + 1u;
 
@@ -682,16 +696,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // Increased durations for better study
             var segment_duration: f32;
             if (lightning_segments[i].generation == 0u) {
-                segment_duration = 1.0 + hash_to_float(hash32(i * 0x9E3779B9u)) * 0.5;
-                // 1.0-2.0s (main trunk)
+                segment_duration = 1.5 + hash_to_float(hash32(i * 0x9E3779B9u)) * 0.5;
+                // 1.5 - 2.0s (main trunk)
             }
             else if (lightning_segments[i].generation == 1u) {
-                segment_duration = 0.8 + hash_to_float(hash32(i * 0x85EBCA6Bu)) * 0.5;
-                // 1.0-2.0s (primary branches)
+                segment_duration = 1.3 + hash_to_float(hash32(i * 0x85EBCA6Bu)) * 0.5;
+                // 1.3 - 1.8s (primary branches)
             }
             else {
-                segment_duration = 0.6 + hash_to_float(hash32(i * 0x45d9f3bu)) * 0.5;
-                // 1.0-2.0s (secondary branches)
+                segment_duration = 1.1 + hash_to_float(hash32(i * 0x45d9f3bu)) * 0.5;
+                // 1.1 - 1.6s (secondary branches)
             }
 
             if (segment_age > 0.0 && segment_age < segment_duration) {

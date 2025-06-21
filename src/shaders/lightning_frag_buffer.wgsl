@@ -57,6 +57,10 @@ struct LightningSegment {
     // 1 if visible, 0 if not (boolean as u32)
     _padding: u32,
     // Padding for alignment
+    _padding2: u32,
+    // Additional padding to align to 16-byte boundary (48 bytes total)
+    _padding3: u32,
+    // Final padding to reach 48 bytes (16-byte aligned)
 }
 
 // Lightning bolt data structure (must match compute shader)
@@ -67,8 +71,16 @@ struct LightningBolt {
     // Unique flash ID for this bolt
     start_time: f32,
     // When this bolt started
-    _padding: u32,
+    next_lightning_time: f32,
+    // When the next lightning should occur
+    collision_checks_count: u32,
+    // Counter for collision checks performed (for debugging)
+    _padding2: u32,
     // Padding for alignment
+    _padding3: u32,
+    // Additional padding to align to 16-byte boundary (32 bytes total)
+    _padding4: u32,
+    // Additional padding to align to 16-byte boundary (32 bytes total)
 }
 
 @group(0) @binding(0)
@@ -140,12 +152,14 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         let maxDist = length(segment.end_pos - segment.start_pos) * 0.5 + segment.thickness;
         if (length(uv - segmentCenter) > maxDist) {
             continue;
-        }        // Now do the expensive segment calculation with color
+        }
+        // Now do the expensive segment calculation with color
         var segmentColor: vec3<f32>;
         if (segment.alpha < 0.0) {
             // Collision segment - RED
             segmentColor = vec3<f32>(1.0, 0.2, 0.2);
-        } else {
+        }
+        else {
             // Normal segment - bright blue-white
             segmentColor = vec3<f32>(0.8, 0.9, 1.0);
         }
@@ -154,7 +168,8 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
         // Debug: Force bright segments to be visible
         if (segmentResult.a > 0.0) {
-            finalColor = segmentColor; // Force the color instead of accumulating
+            finalColor = segmentColor;
+            // Force the color instead of accumulating
             finalAlpha = max(finalAlpha, segmentResult.a);
         }
     }
