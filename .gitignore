@@ -8,7 +8,7 @@ yarn.lock
 
 # TypeScript
 *.tsbuildinfo
-*.js
+#*.js
 *.js.map
 # (Keep .d.ts files if they are part of the source, otherwise add them too)
 # Exclude compiled JS files from src if your tsconfig outputs them there
