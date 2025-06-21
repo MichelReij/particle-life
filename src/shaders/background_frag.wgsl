@@ -34,6 +34,10 @@ struct SimParams {
     lightning_frequency: f32,
     lightning_intensity: f32,
     lightning_duration: f32,
+
+    // Padding for 16-byte alignment (128 bytes total)
+    _padding: f32,
+    _padding2: f32,
 }
 
 ;

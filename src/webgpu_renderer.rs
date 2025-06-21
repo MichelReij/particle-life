@@ -275,7 +275,7 @@ impl WebGpuRenderer {
 
         let lightning_bolt_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lightning Bolt Buffer"),
-            size: 32, // Single bolt: 32 bytes (8 u32/f32 fields: num_segments, flash_id, start_time, next_lightning_time, collision_checks_count, _padding2, _padding3, _padding4) - properly aligned to 16-byte boundary
+            size: 16, // Single bolt: 16 bytes (4 u32/f32 fields: num_segments, flash_id, start_time, next_lightning_time) - properly aligned to 16-byte boundary
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });

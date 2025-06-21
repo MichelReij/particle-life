@@ -51,6 +51,8 @@ struct SimParams {
     // Duration of each lightning flash in seconds
     _padding: f32,
     // Padding to align to 16 bytes
+    _padding2: f32,
+    // Additional padding for 16-byte alignment (128 bytes total)
 }
 
 @group(0) @binding(2)

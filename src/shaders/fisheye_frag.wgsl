@@ -34,6 +34,10 @@ struct SimParams {
     lightning_frequency: f32,
     lightning_intensity: f32,
     lightning_duration: f32,
+
+    // Padding for 16-byte alignment (128 bytes total)
+    _padding: f32,
+    _padding2: f32,
 }
 
 ;
@@ -67,16 +71,17 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     if (original_dist > 0.0) {
         // Apply the distortion and center back to [0,1] space
         distorted_uv = (centered_uv * distortion_factor) + 0.5;
-    } else {
-        distorted_uv = uv; // No distortion at the center
+    }
+    else {
+        distorted_uv = uv;
+        // No distortion at the center
     }
 
     // Sample the scene texture (2400x2400) using the distorted UV coordinates
     let scene_color = textureSample(scene_texture, scene_sampler, distorted_uv);
 
     // Create a boundary mask to handle areas outside [0,1]
-    let boundary_mask = step(0.0, distorted_uv.x) * step(distorted_uv.x, 1.0) *
-                        step(0.0, distorted_uv.y) * step(distorted_uv.y, 1.0);
+    let boundary_mask = step(0.0, distorted_uv.x) * step(distorted_uv.x, 1.0) * step(0.0, distorted_uv.y) * step(distorted_uv.y, 1.0);
 
     // Optional vignetting effect
     let vignette_strength = 0.15;

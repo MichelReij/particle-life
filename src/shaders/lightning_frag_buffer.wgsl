@@ -37,6 +37,10 @@ struct SimParams {
     lightning_frequency: f32,
     lightning_intensity: f32,
     lightning_duration: f32,
+
+    // Padding for 16-byte alignment (128 bytes total)
+    _padding: f32,
+    _padding2: f32,
 }
 
 // Lightning segment data structure (must match compute shader)
@@ -73,14 +77,6 @@ struct LightningBolt {
     // When this bolt started
     next_lightning_time: f32,
     // When the next lightning should occur
-    collision_checks_count: u32,
-    // Counter for collision checks performed (for debugging)
-    _padding2: u32,
-    // Padding for alignment
-    _padding3: u32,
-    // Additional padding to align to 16-byte boundary (32 bytes total)
-    _padding4: u32,
-    // Additional padding to align to 16-byte boundary (32 bytes total)
 }
 
 @group(0) @binding(0)
@@ -94,9 +90,6 @@ var<storage, read> lightning_bolt: LightningBolt;
 
 // Helper function to draw a single segment in UV coordinates
 fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thickness: f32, color: vec3<f32>) -> vec4<f32> {
-    // Handle collision debug mode: negative alpha means collision (RED)
-    let abs_alpha = abs(alpha);
-
     let segmentDir = end - start;
     let segmentLength = length(segmentDir);
 
@@ -113,7 +106,7 @@ fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thic
         let distToSegment = length(uv - closestPoint);
 
         // Thickness is in UV coordinates (0.0-1.0 range)
-        let segmentIntensity = (1.0 - smoothstep(0.0, thickness, distToSegment)) * abs_alpha;
+        let segmentIntensity = (1.0 - smoothstep(0.0, thickness, distToSegment)) * alpha;
         return vec4<f32>(color * segmentIntensity, segmentIntensity);
     }
 
@@ -143,7 +136,7 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         }
 
         // Early alpha check - skip completely transparent segments
-        if (abs(segment.alpha) <= 0.001) {
+        if (segment.alpha <= 0.001) {
             continue;
         }
 
@@ -153,25 +146,14 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         if (length(uv - segmentCenter) > maxDist) {
             continue;
         }
-        // Now do the expensive segment calculation with color
-        var segmentColor: vec3<f32>;
-        if (segment.alpha < 0.0) {
-            // Collision segment - RED
-            segmentColor = vec3<f32>(1.0, 0.2, 0.2);
-        }
-        else {
-            // Normal segment - bright blue-white
-            segmentColor = vec3<f32>(0.8, 0.9, 1.0);
-        }
 
-        let segmentResult = drawSegment(uv, segment.start_pos, segment.end_pos, abs(segment.alpha), segment.thickness, segmentColor);
+        // Simple white lightning - much cheaper than conditional color logic
+        let segmentColor = vec3<f32>(1.0, 1.0, 1.0);
+        let segmentResult = drawSegment(uv, segment.start_pos, segment.end_pos, segment.alpha, segment.thickness, segmentColor);
 
-        // Debug: Force bright segments to be visible
-        if (segmentResult.a > 0.0) {
-            finalColor = segmentColor;
-            // Force the color instead of accumulating
-            finalAlpha = max(finalAlpha, segmentResult.a);
-        }
+        // Accumulate lightning contributions
+        finalColor += segmentResult.rgb;
+        finalAlpha += segmentResult.a;
     }
 
     // Apply lightning intensity

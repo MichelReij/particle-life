@@ -37,6 +37,10 @@ struct SimParams {
     lightning_frequency: f32,
     lightning_intensity: f32,
     lightning_duration: f32,
+
+    // Padding for 16-byte alignment (128 bytes total)
+    _padding: f32,
+    _padding2: f32,
 }
 
 // Lightning segment data structure
@@ -56,11 +60,11 @@ struct LightningSegment {
     is_visible: u32,
     // 1 if visible, 0 if not (boolean as u32)
     _padding: u32,
-    // Padding for alignment
+    // Padding to reach 48 bytes (16-byte aligned)
     _padding2: u32,
-    // Additional padding to align to 16-byte boundary (48 bytes total)
+    // Additional padding for alignment
     _padding3: u32,
-    // Final padding to reach 48 bytes (16-byte aligned)
+    // Final padding to reach 48 bytes total
 }
 
 // Lightning bolt data structure
@@ -73,14 +77,6 @@ struct LightningBolt {
     // When this bolt started
     next_lightning_time: f32,
     // When the next lightning should occur
-    collision_checks_count: u32,
-    // Counter for collision checks performed (for debugging)
-    _padding2: u32,
-    // Padding for alignment
-    _padding3: u32,
-    // Additional padding to align to 16-byte boundary (32 bytes total)
-    _padding4: u32,
-    // Additional padding to align to 16-byte boundary (32 bytes total)
 }
 
 @group(0) @binding(0)
@@ -126,169 +122,7 @@ fn multi_random(seed: u32, count: u32) -> array<f32, 8> {
     return values;
 }
 
-// Calculate the shortest distance between a point and a line segment
-fn point_to_segment_distance(point: vec2<f32>, seg_start: vec2<f32>, seg_end: vec2<f32>) -> f32 {
-    let seg_vec = seg_end - seg_start;
-    let seg_length_sq = dot(seg_vec, seg_vec);
 
-    if (seg_length_sq < 0.000001) {
-        // Very short segment, treat as point
-        return length(point - seg_start);
-    }
-
-    let t = clamp(dot(point - seg_start, seg_vec) / seg_length_sq, 0.0, 1.0);
-    let projection = seg_start + t * seg_vec;
-    return length(point - projection);
-}
-
-// Calculate the shortest distance between two line segments
-// Special handling for segments that share endpoints (parent-child connections)
-fn segment_to_segment_distance(a_start: vec2<f32>, a_end: vec2<f32>, b_start: vec2<f32>, b_end: vec2<f32>) -> f32 {
-    let endpoint_threshold = 0.0001;
-    // Very small threshold for endpoint matching
-
-    // Check if segments share an endpoint (parent-child connection)
-    // In this case, return a small distance to allow connection but prevent crossing
-    if (length(a_start - b_start) < endpoint_threshold || length(a_start - b_end) < endpoint_threshold || length(a_end - b_start) < endpoint_threshold || length(a_end - b_end) < endpoint_threshold) {
-        return 0.0001;
-        // Small distance to allow connection
-    }
-
-    // Check distance from each endpoint to the other segment
-    let dist1 = point_to_segment_distance(a_start, b_start, b_end);
-    let dist2 = point_to_segment_distance(a_end, b_start, b_end);
-    let dist3 = point_to_segment_distance(b_start, a_start, a_end);
-    let dist4 = point_to_segment_distance(b_end, a_start, a_end);
-
-    return min(min(dist1, dist2), min(dist3, dist4));
-}
-
-// Check if two points are the same (within tolerance)
-fn points_equal(p1: vec2<f32>, p2: vec2<f32>) -> bool {
-    let tolerance = 0.001;
-    // Adjusted for UV coordinate scale
-    return (abs(p1.x - p2.x) < tolerance && abs(p1.y - p2.y) < tolerance);
-}
-
-// Orientation function for three ordered points (p, q, r)
-// Returns: 0 = collinear, 1 = clockwise, 2 = counterclockwise
-fn orientation(p: vec2<f32>, q: vec2<f32>, r: vec2<f32>) -> u32 {
-    let val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
-    if (abs(val) < 0.001) {
-        // Increased tolerance for UV coordinates
-        return 0u;
-        // collinear
-    }
-    return select(2u, 1u, val > 0.0);
-    // clockwise or counterclockwise
-}
-
-// Check if point q lies on line segment pr (assuming they are collinear)
-fn on_segment(p: vec2<f32>, q: vec2<f32>, r: vec2<f32>) -> bool {
-    return (q.x <= max(p.x, r.x) && q.x >= min(p.x, r.x) && q.y <= max(p.y, r.y) && q.y >= min(p.y, r.y));
-}
-
-// Check if two line segments intersect using orientation method
-// Segment 1: p1->q1, Segment 2: p2->q2
-// IMPORTANT: This excludes endpoint-only intersections (valid connections)
-fn segments_intersect(p1: vec2<f32>, q1: vec2<f32>, p2: vec2<f32>, q2: vec2<f32>) -> bool {
-    // Check if segments share endpoints (valid connections, not intersections)
-    if (points_equal(p1, p2) || points_equal(p1, q2) || points_equal(q1, p2) || points_equal(q1, q2)) {
-        return false;
-        // Endpoints touching is valid, not an intersection
-    }
-
-    let o1 = orientation(p1, q1, p2);
-    let o2 = orientation(p1, q1, q2);
-    let o3 = orientation(p2, q2, p1);
-    let o4 = orientation(p2, q2, q1);
-
-    // General case: segments intersect if orientations are different
-    if (o1 != o2 && o3 != o4) {
-        return true;
-    }
-
-    // Special cases: segments are collinear and overlap (but not just touching at endpoints)
-    // p1, q1 and p2 are collinear and p2 lies on segment p1q1
-    if (o1 == 0u && on_segment(p1, p2, q1) && !points_equal(p2, p1) && !points_equal(p2, q1)) {
-        return true;
-    }
-    // p1, q1 and q2 are collinear and q2 lies on segment p1q1
-    if (o2 == 0u && on_segment(p1, q2, q1) && !points_equal(q2, p1) && !points_equal(q2, q1)) {
-        return true;
-    }
-    // p2, q2 and p1 are collinear and p1 lies on segment p2q2
-    if (o3 == 0u && on_segment(p2, p1, q2) && !points_equal(p1, p2) && !points_equal(p1, q2)) {
-        return true;
-    }
-    // p2, q2 and q1 are collinear and q1 lies on segment p2q2
-    if (o4 == 0u && on_segment(p2, q1, q2) && !points_equal(q1, p2) && !points_equal(q1, q2)) {
-        return true;
-    }
-
-    return false;
-    // No intersection
-}
-
-// Check if a proposed segment would collide with existing segments
-// Check backwards from most recent segment down to just after parent
-fn check_segment_collision(new_start: vec2<f32>, new_end: vec2<f32>, min_distance: f32, current_segments: u32, parent_segment_idx: u32) -> bool {
-    // Check backwards from current_segments-1 down to parent_segment_idx+1
-    // This checks only recently created peer segments, not older generations
-    if (current_segments <= parent_segment_idx + 1u) {
-        return false;
-        // No segments to check
-    }
-
-    for (var i = current_segments - 1u; i > parent_segment_idx; i--) {
-        let existing_start = lightning_segments[i].start_pos;
-        let existing_end = lightning_segments[i].end_pos;
-
-        // Use proper line segment intersection algorithm
-        if (segments_intersect(new_start, new_end, existing_start, existing_end)) {
-            return true;
-            // Collision detected
-        }
-    }
-
-    return false;
-    // No collision
-}
-
-// [REMOVED] Comprehensive collision check function to reduce recursion count
-// Now using simplified collision detection with limited attempts
-
-// Find a valid position for a new segment with proper collision detection
-fn find_valid_segment_position(start_pos: vec2<f32>, preferred_angle: f32, length: f32, min_distance: f32, current_segments: u32, parent_segment_idx: u32, random_values: array<f32, 8>) -> vec3<f32> {
-    // Try the preferred angle first
-    var test_end = vec2<f32>(start_pos.x + cos(preferred_angle) * length, start_pos.y + sin(preferred_angle) * length);
-
-    if (!check_segment_collision(start_pos, test_end, min_distance, current_segments, parent_segment_idx)) {
-        return vec3<f32>(test_end.x, test_end.y, 0.0);
-        // No collision
-    }
-
-    // If preferred angle collides, try alternative angles
-    let max_attempts = 8u;
-    for (var attempt = 0u; attempt < max_attempts; attempt++) {
-        // Generate alternative angle based on random values
-        let angle_deviation = (random_values[attempt] - 0.5) * 1.57;
-        // ±90 degrees max deviation
-        let test_angle = preferred_angle + angle_deviation;
-
-        test_end = vec2<f32>(start_pos.x + cos(test_angle) * length, start_pos.y + sin(test_angle) * length);
-
-        if (!check_segment_collision(start_pos, test_end, min_distance, current_segments, parent_segment_idx)) {
-            return vec3<f32>(test_end.x, test_end.y, 0.0);
-            // Found collision-free position
-        }
-    }
-
-    // If all attempts failed, return the preferred position but mark as collision
-    test_end = vec2<f32>(start_pos.x + cos(preferred_angle) * length, start_pos.y + sin(preferred_angle) * length);
-    return vec3<f32>(test_end.x, test_end.y, 1.0);
-    // Collision detected (flag = 1.0)
-}
 
 @compute @workgroup_size(1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
@@ -312,31 +146,84 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Generate realistic lightning bolts based on time and electrical activity
     let time = sim_params.time;
 
-    // Calculate interval based on electrical activity
+    // Calculate interval based on electrical activity with much more variation
     // electricalActivity typically ranges from 0.0 to ~3.0 based on UI slider
-    // Map to intervals: 15s (min activity ~0.0) to 2s (max activity ~3.0) - much shorter for testing
+    // Map to intervals: 15s (min activity ~0.0) to 2s (max activity ~3.0)
     let normalized_activity = clamp(electricalActivity / 3.0, 0.0, 1.0);
-    // Normalize to 0.0-1.0
     let base_interval = 30.0 - (normalized_activity * 22.0);
-    // 15s to 2s range
 
     // Initialize next lightning time if not set (first time or after reset)
     if (lightning_bolt.next_lightning_time <= 0.0) {
         // For the first lightning, start much sooner to avoid long initial wait
         let init_seed = generate_segment_seed(time, 0u, 999u, electricalActivity);
-        let quick_delay = init_seed * 2.0;
-        // Only 0-2s initial delay
+        let quick_delay = init_seed * 3.0; // 0-3s initial delay
         lightning_bolt.next_lightning_time = time + quick_delay;
     }
 
     // Check if it's time for the next lightning bolt
     if (time >= lightning_bolt.next_lightning_time) {
 
-        // Generate next lightning interval with reduced random variation
-        let interval_seed = generate_segment_seed(time, lightning_bolt.flash_id, 1000u, electricalActivity);
-        let random_variation = interval_seed * 3.0;
-        // Reduced to 0-3s random variation
-        lightning_bolt.next_lightning_time = time + base_interval + random_variation;
+        // Generate next lightning interval with multiple sources of variation
+        let interval_seed1 = generate_segment_seed(time, lightning_bolt.flash_id, 1000u, electricalActivity);
+        let interval_seed2 = generate_segment_seed(time + 1.0, lightning_bolt.flash_id, 1001u, electricalActivity * 2.0);
+        let interval_seed3 = generate_segment_seed(time + 2.0, lightning_bolt.flash_id, 1002u, electricalActivity * 3.0);
+
+        // Use different distributions for more natural variation
+        // Exponential-like distribution for more realistic storm patterns
+        let random_factor1 = pow(interval_seed1, 2.0); // Quadratic for more short intervals
+        let random_factor2 = interval_seed2; // Linear
+        let random_factor3 = sqrt(interval_seed3); // Square root for more long intervals
+
+        // Combine multiple random factors for complex timing patterns
+        let combined_random = (random_factor1 * 0.5) + (random_factor2 * 0.3) + (random_factor3 * 0.2);
+
+        // Weather pattern simulation - create longer-term storm cycles
+        let weather_cycle = sin(time * 0.05) * 0.5 + 0.5; // ~2-minute cycles
+        let storm_intensity = sin(time * 0.02 + electricalActivity) * 0.3 + 0.7; // ~5-minute cycles
+        let atmospheric_pressure = cos(time * 0.08 + 1.57) * 0.2 + 0.8; // ~1.5-minute cycles
+
+        // Storm cell movement - simulate moving thunderstorm cells
+        let storm_cell_x = sin(time * 0.03) * 0.5 + 0.5;
+        let storm_cell_y = cos(time * 0.025) * 0.5 + 0.5;
+        let storm_cell_proximity = 1.0 - length(vec2<f32>(storm_cell_x - 0.5, storm_cell_y - 0.5)) * 2.0;
+        let storm_cell_factor = clamp(storm_cell_proximity, 0.2, 1.0);
+
+        // Cumulative charge buildup - longer gaps increase probability
+        let time_since_last = time - lightning_bolt.start_time;
+        let charge_buildup = clamp(time_since_last / 20.0, 0.0, 2.0); // Builds up over 20 seconds
+        let charge_factor = 1.0 + charge_buildup * 0.5; // Up to 50% increase in likelihood
+
+        // Create bursts and lulls: sometimes lightning comes in clusters
+        let burst_seed = generate_segment_seed(time, lightning_bolt.flash_id, 2000u, electricalActivity);
+
+        // Enhanced burst/lull logic with weather influence
+        let weather_burst_bias = weather_cycle * storm_intensity * atmospheric_pressure * storm_cell_factor;
+        let burst_threshold = 0.3 + (weather_burst_bias - 0.5) * 0.2; // Weather affects burst probability
+        let normal_threshold = 0.7 + (weather_burst_bias - 0.5) * 0.1; // Weather affects normal/lull balance
+
+        var final_variation: f32;
+
+        if (burst_seed < burst_threshold) {
+            // Burst mode - very short intervals, influenced by weather
+            let burst_intensity = weather_burst_bias * charge_factor;
+            final_variation = (0.3 + combined_random * 1.2) / burst_intensity;
+        } else if (burst_seed < normal_threshold) {
+            // Normal mode - medium intervals with weather variation
+            let normal_factor = (weather_burst_bias * 0.5 + 0.5) * charge_factor;
+            final_variation = (1.5 + combined_random * 5.0) / normal_factor;
+        } else {
+            // Lull mode - longer intervals, less affected by charge buildup
+            let lull_factor = weather_burst_bias * 0.7 + 0.3;
+            final_variation = (4.0 + combined_random * 12.0) / (lull_factor * sqrt(charge_factor));
+        }
+
+        // Apply complex environmental scaling
+        let environmental_factor = weather_cycle * storm_intensity * atmospheric_pressure * storm_cell_factor;
+        final_variation *= (1.0 - normalized_activity * 0.6); // Activity scaling
+        final_variation *= (1.0 - environmental_factor * 0.4); // Environmental scaling
+        final_variation = max(final_variation, 0.2); // Minimum 0.2s interval
+
+        lightning_bolt.next_lightning_time = time + base_interval + final_variation;
 
         // Time-based random seed generation for bolt creation
         let bolt_seed = fract(sin(time * 12.9898 + electricalActivity * 78.233 + f32(lightning_bolt.flash_id) * 91.2347) * 43758.5453);
@@ -346,10 +233,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         lightning_bolt.flash_id = lightning_bolt.flash_id + 1u;
         lightning_bolt.start_time = time;
         lightning_bolt.num_segments = 0u;
-        lightning_bolt.collision_checks_count = 0u;
-        // Reset collision counter for new bolt
 
-        // Clear all segment data to prevent collision detection artifacts
+        // Clear all segment data for clean initialization
         for (var clear_idx = 0u; clear_idx < 20u; clear_idx = clear_idx + 1u) {
             lightning_segments[clear_idx].start_pos = vec2<f32>(0.0, 0.0);
             lightning_segments[clear_idx].end_pos = vec2<f32>(0.0, 0.0);
@@ -398,12 +283,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             lightning_segments[lightning_bolt.num_segments].alpha = 0.9 + position_randoms[5] * 0.1;
             // 0.9-1.0 alpha
             lightning_segments[lightning_bolt.num_segments].generation = 0u;
-            lightning_segments[lightning_bolt.num_segments].appear_time = lightning_bolt.start_time;
-            lightning_segments[lightning_bolt.num_segments].is_visible = 0u;
-            // Start invisible - will be made visible by lifecycle logic
-            lightning_segments[lightning_bolt.num_segments]._padding = 0u;
-            lightning_segments[lightning_bolt.num_segments]._padding2 = 0u;
-            lightning_segments[lightning_bolt.num_segments]._padding3 = 0u;
+            lightning_segments[lightning_bolt.num_segments].appear_time = lightning_bolt.start_time;                lightning_segments[lightning_bolt.num_segments].is_visible = 0u;
+                // Start invisible - will be made visible by lifecycle logic
+                lightning_segments[lightning_bolt.num_segments]._padding = 0u;
+                lightning_segments[lightning_bolt.num_segments]._padding2 = 0u;
+                lightning_segments[lightning_bolt.num_segments]._padding3 = 0u;
             lightning_bolt.num_segments = lightning_bolt.num_segments + 1u;
         }
 
@@ -590,67 +474,36 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // Add slight length variation based on electrical activity
                 segment_length *= (0.9 + electricalActivity * 0.2);
 
-                // Calculate minimum collision distance based on generation
-                // REASONABLE distances for proper collision detection
-                var min_collision_distance: f32;
-                if (generation == 0u) {
-                    min_collision_distance = 0.001;
-                    // Small but detectable
-                }
-                else if (generation == 1u) {
-                    min_collision_distance = 0.0008;
-                    // Slightly smaller
-                }
-                else {
-                    min_collision_distance = 0.0005;
-                    // Smallest for fine branches
-                }
-
-                // Use collision detection to find position and check for collisions
-                // Returns vec3: (end_x, end_y, collision_flag)
-                let position_result = find_valid_segment_position(branch_pos, new_angle, segment_length, min_collision_distance, lightning_bolt.num_segments, parent_segment_idx, segment_randoms);
-                let new_end = vec2<f32>(position_result.x, position_result.y);
-                let collision_detected = position_result.z > 0.5;
-                // collision_flag
-
-                // Recalculate actual length after collision avoidance
-                let actual_length = length(new_end - branch_pos);
+                // Calculate segment end position directly from angle and length
+                let new_end = vec2<f32>(branch_pos.x + cos(new_angle) * segment_length, branch_pos.y + sin(new_angle) * segment_length);
 
                 // Much more realistic thickness scaling
                 var segment_thickness: f32;
                 if (generation == 0u) {
                     segment_thickness = 0.0005 + segment_randoms[3] * 0.0004;
-                    // 0.00150 - 0.00250
+                    // 0.0005 - 0.0009
                 }
                 else if (generation == 1u) {
                     segment_thickness = 0.0004 + segment_randoms[3] * 0.0003;
-                    // 0.00125 - 0.00175
+                    // 0.0004 - 0.0007
                 }
                 else if (generation == 2u) {
                     segment_thickness = 0.0003 + segment_randoms[3] * 0.0002;
-                    // 0.00125 - 0.00150
+                    // 0.0003 - 0.0005
                 }
                 else {
                     segment_thickness = 0.0002 + segment_randoms[3] * 0.0001;
-                    // Minimum thickness
+                    // 0.0002 - 0.0003
                 }
 
-                // Vary alpha based on generation and collision status
+                // Vary alpha based on generation for natural fading
                 let base_alpha = 1.0 - (f32(generation) * 0.15);
                 let alpha_variation = 0.8 + segment_randoms[4] * 0.2;
-                var segment_alpha = base_alpha * alpha_variation;
+                let segment_alpha = base_alpha * alpha_variation;
 
                 // Add segment with staggered timing for more natural appearance
                 let segment_idx = lightning_bolt.num_segments;
 
-                // PROPER COLLISION DETECTION: Use actual collision detection results
-                var final_collision_detected = collision_detected;
-
-                // COLLISION DEBUG: Use negative alpha to mark collision segments as RED
-                if (final_collision_detected) {
-                    segment_alpha = - segment_alpha;
-                    // Negative alpha = RED in shader
-                }
                 lightning_segments[segment_idx].start_pos = branch_pos;
                 lightning_segments[segment_idx].end_pos = new_end;
                 lightning_segments[segment_idx].thickness = segment_thickness;
@@ -717,33 +570,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 let fade_curve = fade_factor * fade_factor;
                 // Quadratic fade for more natural look
 
-                // Reduced flicker for easier study
-                let slow_pulse = sin(time * 8.0 + f32(i) * 0.5) * 0.05;
-                // Very gentle slow pulse
-                let random_variation = hash_to_float(hash32(u32(time * 10.0) + i)) * 0.05 - 0.025;
-                // Minimal random variation
 
-                let flicker_component = 0.95 + slow_pulse + random_variation;
-                let clamped_flicker = max(0.85, min(1.0, flicker_component));
-                // Much more stable, minimal flicker
-
-                // Base alpha varies per segment to avoid uniformity
-                let base_alpha_variation = 0.9 + hash_to_float(hash32(i * 0x1234567u)) * 0.1;
-                // 0.9-1.0 (more consistent)
-
-                // PRESERVE COLLISION FLAG: Check if this was a collision segment (negative alpha)
-                let was_collision = lightning_segments[i].alpha < 0.0;
-                let new_alpha = fade_curve * clamped_flicker * base_alpha_variation;
-
-                // Restore collision flag if it was originally a collision segment
-                if (was_collision) {
-                    lightning_segments[i].alpha = - new_alpha;
-                    // Keep collision flag (negative)
-                }
-                else {
-                    lightning_segments[i].alpha = new_alpha;
-                    // Normal segment (positive)
-                }
             }
             else {
                 lightning_segments[i].is_visible = 0u;

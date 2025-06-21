@@ -51,11 +51,6 @@ struct LightningBolt {
     flash_id: u32,
     start_time: f32,
     next_lightning_time: f32,
-    collision_checks_count: u32,
-    _padding2: u32,
-    _padding3: u32,
-    _padding4: u32,
-    // Additional padding to align to 16-byte boundary (32 bytes total)
 }
 
 struct SimParams {
@@ -220,25 +215,6 @@ fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32) -> f32 {
 
 // === Lightning Electromagnetic Force Functions ===
 
-// Hash function for lightning generation (matches fragment shader)
-fn hash(x: f32) -> f32 {
-    var p = x;
-    p = fract(p * 0.1031);
-    p *= p + 33.33;
-    p *= p + p;
-    return fract(p);
-}
-
-// Struct to represent a branch in the lightning system
-struct LightningBranch {
-    pos: vec2<f32>,
-    dir: vec2<f32>,
-    generation: u32,
-    appear_time: f32,
-}
-
-;
-
 // Calculate electromagnetic force from lightning on a particle (buffer-based)
 fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, particle_vel: vec2<f32>, time: f32, particle_type: u32) -> vec2<f32> {
     // Check if lightning is enabled
@@ -366,29 +342,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
 
     var particle_p = particles_in[p_idx];
-
-    // Debug: Detect and clamp giant particles early
-    if (particle_p.size > 100.0 || particle_p.target_size > 100.0) {
-        // Set giant particle to a conspicuous but reasonable size for debugging
-        particle_p.size = 25.0;
-        particle_p.target_size = 25.0;
-        // Make it red for visibility (type 2)
-        particle_p.ptype = 2u;
-    }
-
-    // Safety: Fix any corrupted target_size values (should be 5-50 range)
-    particle_p.target_size = clamp(particle_p.target_size, 5.0, 50.0);
-
-    // Safety: Fix any corrupted current size values
-    particle_p.size = clamp(particle_p.size, 0.1, 100.0);
-
-    // Safety: Fix any corrupted positions
-    particle_p.pos.x = clamp(particle_p.pos.x, 0.0, sim_params.virtual_world_width);
-    particle_p.pos.y = clamp(particle_p.pos.y, 0.0, sim_params.virtual_world_height);
-
-    // Safety: Fix any corrupted velocities
-    particle_p.vel.x = clamp(particle_p.vel.x, - 100.0, 100.0);
-    particle_p.vel.y = clamp(particle_p.vel.y, - 100.0, 100.0);
 
     // Skip inactive particles - they don't participate in physics
     if (particle_p.is_active == 0u) {
@@ -607,7 +560,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
 
-    // Handle per-particle transitions (much simpler than global transition logic!)
+    // Handle per-particle transitions
     if (particle_p.transition_start > 0.0) {
         let elapsed = sim_params.time - particle_p.transition_start;
         let progress = clamp(elapsed / sim_params.transition_duration, 0.0, 1.0);

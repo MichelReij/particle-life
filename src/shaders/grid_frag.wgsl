@@ -34,6 +34,10 @@ struct SimParams {
     lightning_frequency: f32,
     lightning_intensity: f32,
     lightning_duration: f32,
+
+    // Padding for 16-byte alignment (128 bytes total)
+    _padding: f32,
+    _padding2: f32,
 }
 
 ;
@@ -57,8 +61,10 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     // Jouw huidige waarde
 
     // Grid should always be centered at the center of the 2400x2400 virtual world
-    let center_x = 1200.0; // Fixed center of virtual world
-    let center_y = 1200.0; // Fixed center of virtual world
+    let center_x = 1200.0;
+    // Fixed center of virtual world
+    let center_y = 1200.0;
+    // Fixed center of virtual world
 
     // Calculate grid lines that are aligned with the virtual world center
     let offset_from_center_x = frag_coord.x - center_x;
