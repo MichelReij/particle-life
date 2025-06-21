@@ -663,9 +663,10 @@ async function initJoyStick(currentZoomLevel: number) {
                 );
 
                 // Calculate maximum movement range based on zoom factor
+                // Using consistent formula: f(x) ≈ 111.24·x - 122.29
                 const maxMovementRange = Math.max(
                     0,
-                    112 * actualCurrentZoomLevel - 150
+                    112 * actualCurrentZoomLevel - 120
                 );
 
                 // Convert joystick input (-100 to +100) to movement within the calculated range

@@ -107,7 +107,7 @@ fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thic
 
         // Thickness is in UV coordinates (0.0-1.0 range)
         let segmentIntensity = (1.0 - smoothstep(0.0, thickness, distToSegment)) * alpha;
-        return vec4<f32>(color * segmentIntensity, segmentIntensity);
+        return vec4<f32>(color, segmentIntensity);
     }
 
     return vec4<f32>(0.0, 0.0, 0.0, 0.0);
@@ -123,7 +123,7 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
 
-    var finalColor = vec3<f32>(0.0, 0.0, 0.0);
+    var finalColor = vec3<f32>(1.0, 1.0, 1.0);
     var finalAlpha = 0.0;
 
     // Draw all segments from the buffer - segments are now in UV coordinates
@@ -132,18 +132,6 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
         // Skip invisible segments
         if (segment.is_visible == 0u) {
-            continue;
-        }
-
-        // Early alpha check - skip completely transparent segments
-        if (segment.alpha <= 0.001) {
-            continue;
-        }
-
-        // Early bounds check - skip segments that are too far from this pixel
-        let segmentCenter = (segment.start_pos + segment.end_pos) * 0.5;
-        let maxDist = length(segment.end_pos - segment.start_pos) * 0.5 + segment.thickness;
-        if (length(uv - segmentCenter) > maxDist) {
             continue;
         }
 

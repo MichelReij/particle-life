@@ -380,8 +380,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let density_gradient = vec2<f32>(gradient_x, gradient_y);
 
         // Apply growth-based movement (move toward favorable density if growth_force > 0)
-        let lenia_force = density_gradient * growth_force * 5000.0;
-        // Much stronger force
+        let lenia_force = density_gradient * growth_force * 1000.0;
+        // Increased force multiplier for stronger Lenia influence
 
         total_force = total_force + lenia_force;
     }

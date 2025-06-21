@@ -150,7 +150,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // electricalActivity typically ranges from 0.0 to ~3.0 based on UI slider
     // Map to intervals: 15s (min activity ~0.0) to 2s (max activity ~3.0)
     let normalized_activity = clamp(electricalActivity / 3.0, 0.0, 1.0);
-    let base_interval = 30.0 - (normalized_activity * 22.0);
+    let base_interval = 16.0 - (normalized_activity * 15.0);
 
     // Initialize next lightning time if not set (first time or after reset)
     if (lightning_bolt.next_lightning_time <= 0.0) {
@@ -278,12 +278,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             lightning_segments[lightning_bolt.num_segments].start_pos = start_pos;
             lightning_segments[lightning_bolt.num_segments].end_pos = first_end;
             // Randomize main trunk thickness
-            lightning_segments[lightning_bolt.num_segments].thickness = 0.0015 + position_randoms[4] * 0.0005;
+            lightning_segments[lightning_bolt.num_segments].thickness = 0.0006 + position_randoms[4] * 0.0005;
             // 0.001-0.003 range
             lightning_segments[lightning_bolt.num_segments].alpha = 0.9 + position_randoms[5] * 0.1;
             // 0.9-1.0 alpha
             lightning_segments[lightning_bolt.num_segments].generation = 0u;
-            lightning_segments[lightning_bolt.num_segments].appear_time = lightning_bolt.start_time;                lightning_segments[lightning_bolt.num_segments].is_visible = 0u;
+            lightning_segments[lightning_bolt.num_segments].appear_time = lightning_bolt.start_time + 0.01; // Small delay to match staggered timing
+            lightning_segments[lightning_bolt.num_segments].is_visible = 0u;
                 // Start invisible - will be made visible by lifecycle logic
                 lightning_segments[lightning_bolt.num_segments]._padding = 0u;
                 lightning_segments[lightning_bolt.num_segments]._padding2 = 0u;
@@ -539,11 +540,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     else {
         // More sophisticated segment lifecycle management
         let lightning_age = time - lightning_bolt.start_time;
-        var any_segments_visible = false;
 
-        // Update visibility with more natural fading and flickering
-        for (var i = 0u; i < lightning_bolt.num_segments; i = i + 1u) {
-            let segment_age = time - lightning_segments[i].appear_time;
+        // Don't update lifecycle in the same frame as creation to avoid race conditions
+        if (lightning_age > 0.016) { // Skip first frame (16ms at 60fps)
+            var any_segments_visible = false;
+
+            // Update visibility with more natural fading and flickering
+            for (var i = 0u; i < lightning_bolt.num_segments; i = i + 1u) {
+                let segment_age = time - lightning_segments[i].appear_time;
 
             // Variable duration based on generation (main trunk lasts longer)
             // Increased durations for better study
@@ -565,12 +569,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 lightning_segments[i].is_visible = 1u;
                 any_segments_visible = true;
 
-                // More sophisticated fading with multiple components
+                // Simple fade: just apply fade factor to existing alpha, don't recalculate base
                 let fade_factor = 1.0 - (segment_age / segment_duration);
                 let fade_curve = fade_factor * fade_factor;
-                // Quadratic fade for more natural look
 
-
+                // For new segments (first 0.1s), keep original alpha intact
+                // For older segments, apply fade to a known bright base
+                if (segment_age < 0.1) {
+                    // Keep original alpha (already set correctly during creation)
+                    // Do nothing - alpha is already correct
+                } else {
+                    // Apply fade, but use a bright base alpha similar to creation
+                    let bright_base = 0.95; // Bright base like during creation
+                    lightning_segments[i].alpha = bright_base * fade_curve;
+                }
             }
             else {
                 lightning_segments[i].is_visible = 0u;
@@ -578,9 +590,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
 
-        // Clear bolt when all segments are gone
-        if (!any_segments_visible) {
-            lightning_bolt.num_segments = 0u;
-        }
+            // Clear bolt when all segments are gone
+            if (!any_segments_visible) {
+                lightning_bolt.num_segments = 0u;
+            }
+        } // End of lifecycle management guard
     }
 }
