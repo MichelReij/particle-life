@@ -1,0 +1,17 @@
+        // Create surface from canvas - WGPU 25.0.2 correct web approach
+        // Use SurfaceTarget::Canvas for web canvas elements
+        let surface = instance
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
+            .map_err(|e| JsValue::from_str(&format!("Failed to create surface: {:?}", e)))?;
+
+        // Request adapter
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to request adapter: {:?}", e)))?;
+
+        console_log!("✅ WebGPU adapter found: {:?}", adapter.get_info());
