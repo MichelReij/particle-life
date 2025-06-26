@@ -1,6 +1,33 @@
 use crate::{console_log, InteractionRules, ParticleSystem, SimulationParams};
+use rand::Rng;
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 use wgpu::util::DeviceExt;
+
+// Conditional error type: JsValue for WASM, Box<dyn std::error::Error> for native
+#[cfg(target_arch = "wasm32")]
+pub type RendererError = wasm_bindgen::JsValue;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub type RendererError = Box<dyn std::error::Error + Send + Sync>;
+
+// Helper function to create renderer errors with proper formatting
+pub fn renderer_error(message: &str, source: impl std::fmt::Debug) -> RendererError {
+    let formatted_message = format!("{}: {:?}", message, source);
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        wasm_bindgen::JsValue::from_str(&formatted_message)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            formatted_message,
+        ))
+    }
+}
 
 /// WebGPU renderer that handles all GPU operations using pure wgpu
 pub struct WebGpuRenderer {
@@ -57,26 +84,72 @@ pub struct WebGpuRenderer {
 }
 
 impl WebGpuRenderer {
-    /// Initialize WebGPU renderer with the given canvas
-    pub async fn new(canvas: &web_sys::HtmlCanvasElement) -> Result<WebGpuRenderer, JsValue> {
+    /// Initialize WebGPU renderer - WASM version with canvas
+    #[cfg(target_arch = "wasm32")]
+    pub async fn new(canvas: &web_sys::HtmlCanvasElement) -> Result<WebGpuRenderer, RendererError> {
         console_log!("🎨 Initializing wgpu WebGPU renderer");
 
         // Get canvas dimensions
         let canvas_width = canvas.width();
         let canvas_height = canvas.height();
 
-        // Create wgpu instance
+        // Create wgpu instance with WebGPU preference
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            #[cfg(target_arch = "wasm32")]
+            backends: wgpu::Backends::BROWSER_WEBGPU, // Only WebGPU on web, no WebGL fallback
+            #[cfg(not(target_arch = "wasm32"))]
+            backends: wgpu::Backends::all(), // All native backends (Vulkan, Metal, DX12, etc.)
             ..Default::default()
         });
+
+        #[cfg(target_arch = "wasm32")]
+        console_log!("🚀 Using WebGPU backend (no WebGL fallback)");
+        #[cfg(not(target_arch = "wasm32"))]
+        console_log!("🚀 Using native GPU backends");
 
         // Create surface from canvas - WGPU 25.0.2 correct web approach
         // Use SurfaceTarget::Canvas for web canvas elements
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
-            .map_err(|e| JsValue::from_str(&format!("Failed to create surface: {:?}", e)))?;
+            .map_err(|e| renderer_error("Failed to create surface", e))?;
 
+        Self::initialize_common(instance, surface, canvas_width, canvas_height).await
+    }
+
+    /// Initialize WebGPU renderer - Native version with window
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn new(
+        window: std::sync::Arc<winit::window::Window>,
+    ) -> Result<WebGpuRenderer, RendererError> {
+        console_log!("🎨 Initializing wgpu native renderer");
+
+        // Create wgpu instance with native backends
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            #[cfg(target_arch = "wasm32")]
+            backends: wgpu::Backends::BROWSER_WEBGPU, // Only WebGPU on web, no WebGL fallback
+            #[cfg(not(target_arch = "wasm32"))]
+            backends: wgpu::Backends::all(), // All native backends (Vulkan, Metal, DX12, etc.)
+            ..Default::default()
+        });
+
+        console_log!("🚀 Using native GPU backends");
+
+        // Create surface from window
+        let surface = instance
+            .create_surface(window.clone())
+            .map_err(|e| renderer_error("Failed to create surface", e))?;
+
+        // Use fixed 800x800 logical size regardless of window size
+        Self::initialize_common(instance, surface, 800, 800).await
+    }
+
+    /// Common initialization for both platforms
+    async fn initialize_common(
+        instance: wgpu::Instance,
+        surface: wgpu::Surface<'static>,
+        width: u32,
+        height: u32,
+    ) -> Result<WebGpuRenderer, RendererError> {
         // Request adapter
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -85,7 +158,7 @@ impl WebGpuRenderer {
                 force_fallback_adapter: false,
             })
             .await
-            .map_err(|e| JsValue::from_str(&format!("Failed to request adapter: {:?}", e)))?;
+            .map_err(|e| renderer_error("Failed to request adapter", e))?;
 
         console_log!("✅ WebGPU adapter found: {:?}", adapter.get_info());
 
@@ -94,12 +167,16 @@ impl WebGpuRenderer {
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Particle Life Device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+                // Use WebGPU limits for both platforms - no WebGL fallback
+                #[cfg(target_arch = "wasm32")]
+                required_limits: wgpu::Limits::default(), // WebGPU limits for browser
+                #[cfg(not(target_arch = "wasm32"))]
+                required_limits: wgpu::Limits::default(), // Native GPU limits
                 memory_hints: wgpu::MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
             })
             .await
-            .map_err(|e| JsValue::from_str(&format!("Failed to create device: {:?}", e)))?;
+            .map_err(|e| renderer_error("Failed to create device", e))?;
 
         // Configure surface
         let surface_caps = surface.get_capabilities(&adapter);
@@ -113,8 +190,8 @@ impl WebGpuRenderer {
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
-            width: canvas_width,
-            height: canvas_height,
+            width: width,
+            height: height,
             present_mode: surface_caps.present_modes[0],
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
@@ -165,36 +242,38 @@ impl WebGpuRenderer {
         // Create initial particle data buffer
         let mut initial_particle_data = Vec::with_capacity((max_particles * 48) as usize);
 
+        let mut rng = rand::thread_rng();
+
         for i in 0..max_particles {
             let particle_type = (i % num_types) as u32;
 
             // Position (vec2f) - ALL particles get random positions
-            let pos_x = js_sys::Math::random() as f32 * virtual_world_width;
-            let pos_y = js_sys::Math::random() as f32 * virtual_world_height;
+            let pos_x = rng.gen::<f32>() * virtual_world_width;
+            let pos_y = rng.gen::<f32>() * virtual_world_height;
 
             // Velocity (vec2f) - ALL particles get random velocities
-            let vel_x = (js_sys::Math::random() as f32 - 0.5) * 4.0;
-            let vel_y = (js_sys::Math::random() as f32 - 0.5) * 4.0;
+            let vel_x = (rng.gen::<f32>() - 0.5) * 4.0;
+            let vel_y = (rng.gen::<f32>() - 0.5) * 4.0;
 
             // Size based on particle type
             let base_multiplier = match particle_type {
-                0 => 1.5, // Blue - large
-                1 => 1.2, // Orange - medium-large
-                2 => 0.7, // Red - small
-                3 => 0.9, // Purple - medium-small
-                4 => 1.0, // Green - balanced
-                _ => 1.0,
+                0 => 1.5f32, // Blue - large
+                1 => 1.2f32, // Orange - medium-large
+                2 => 0.7f32, // Red - small
+                3 => 0.9f32, // Purple - medium-small
+                4 => 1.0f32, // Green - balanced
+                _ => 1.0f32,
             };
-            let size_randomization = (js_sys::Math::random() as f32 - 0.5) * 0.4; // ±20%
-            let size_multiplier = base_multiplier * (1.0 + size_randomization);
+            let size_randomization = (rng.gen::<f32>() - 0.5) * 0.4; // ±20%
+            let size_multiplier = base_multiplier * (1.0f32 + size_randomization);
             let target_size = particle_render_size * size_multiplier;
 
             // Debug: Log suspicious large target_size values
             if target_size > 30.0 {
-                web_sys::console::log_1(&format!(
+                console_log!(
                     "⚠️ Large target_size detected: particle {}, type {}, base_multiplier {}, size_multiplier {}, target_size {}",
                     i, particle_type, base_multiplier, size_multiplier, target_size
-                ).into());
+                );
             }
 
             // ALL particles get proper size and target_size (inactive particles just won't be rendered)
@@ -1388,8 +1467,8 @@ impl WebGpuRenderer {
             vignette_render_bind_group,
             zoom_render_bind_group,
             zoom_uniforms_buffer,
-            canvas_width,
-            canvas_height,
+            canvas_width: width,
+            canvas_height: height,
         })
     }
 
@@ -1401,7 +1480,7 @@ impl WebGpuRenderer {
         interaction_rules: &InteractionRules,
         lightning_segments_data: &[u8],
         lightning_bolts_data: &[u8],
-    ) -> Result<(), JsValue> {
+    ) -> Result<(), RendererError> {
         // Only update simulation parameters buffer (contains time and deltaTime which change every frame)
         let actual_particle_count = particle_system.get_active_count();
         let sim_params_data =
@@ -1442,7 +1521,7 @@ impl WebGpuRenderer {
         let output = self
             .surface
             .get_current_texture()
-            .map_err(|e| JsValue::from_str(&format!("Failed to get surface texture: {:?}", e)))?;
+            .map_err(|e| renderer_error("Failed to get surface texture", e))?;
 
         let view = output
             .texture

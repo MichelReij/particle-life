@@ -5,24 +5,37 @@ edition = "2021"
 build = "build.rs"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]  # cdylib for WASM, rlib for native
 
+# Features for conditional compilation (only for truly optional features)
+[features]
+default = []
+# Optional: Add specific features if needed for debugging or optional functionality
+debug-logging = ["env_logger"]
+
+# Dependencies that work for both WASM and native
 [dependencies]
+serde = { version = "1.0", features = ["derive"] }
+bytemuck = { version = "1.0", features = ["derive"] }
+futures = "0.3"
+hsluv = "0.3.1"
+rand = { version = "0.8", features = ["small_rng"] }
+raw-window-handle = "0.6"
+
+# Optional dependencies
+env_logger = { version = "0.11", optional = true }
+
+# Platform-specific dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+wgpu = { version = "25.0.2", features = ["webgpu", "webgl"] }
 wasm-bindgen = "0.2.100"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.6"
-getrandom = { version = "0.2", features = ["js"] }
-rand = { version = "0.8", features = ["small_rng"] }
 console_error_panic_hook = "0.1"
-bytemuck = { version = "1.0", features = ["derive"] }
-wgpu = { version = "25.0.2", features = ["webgpu", "webgl"] }
-raw-window-handle = "0.6"
-futures = "0.3"
-hsluv = "0.3.1"
 
-[dependencies.web-sys]
+[target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
 version = "0.3.77"
 features = [
   "console",
@@ -74,6 +87,19 @@ features = [
   "GpuDeviceDescriptor",
   "GpuCanvasConfiguration",
 ]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = { version = "0.2" }
+wgpu = { version = "25.0.2", features = ["metal", "vulkan", "dx12"] }
+winit = "0.30"
+pollster = "0.3"
+env_logger = "0.11"
+
+# Binary targets for native builds
+# Minimal native binary demonstrating shared codebase principle
+[[bin]]
+name = "native_minimal"
+path = "src/bin/native_minimal.rs"
 
 [profile.release]
 # Enable maximum optimizations for performance

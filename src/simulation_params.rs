@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
+#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 // Import console_log macro
 use crate::console_log;
 
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationParams {
@@ -31,6 +33,58 @@ pub struct SimulationParams {
     pub time: f32,
     pub fisheye_strength: f32,
     // Note: Arrays can't be directly used with wasm-bindgen, so we'll use getters/setters
+    pub background_color_r: f32,
+    pub background_color_g: f32,
+    pub background_color_b: f32,
+    pub lenia_enabled: bool,
+    pub lenia_growth_mu: f32,
+    pub lenia_growth_sigma: f32,
+    pub lenia_kernel_radius: f32,
+    pub lightning_frequency: f32,
+    pub lightning_intensity: f32,
+    pub lightning_duration: f32,
+    // Particle transition parameters for GPU-based size transitions
+    pub transition_active: bool,
+    pub transition_start_time: f32,
+    pub transition_duration: f32,
+    pub transition_start_count: u32,
+    pub transition_end_count: u32,
+    pub transition_is_grow: bool, // true for grow, false for shrink
+
+    // Spatial grid optimization parameters
+    pub spatial_grid_enabled: bool,
+    pub spatial_grid_cell_size: f32,
+    pub spatial_grid_width: u32,
+    pub spatial_grid_height: u32,
+}
+
+// Native version (same fields, no wasm_bindgen annotations)
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimulationParams {
+    pub delta_time: f32,
+    pub friction: f32,
+    pub num_particles: u32,
+    pub num_types: u32,
+    pub virtual_world_width: f32,
+    pub virtual_world_height: f32,
+    pub canvas_render_width: f32,
+    pub canvas_render_height: f32,
+    pub virtual_world_offset_x: f32,
+    pub virtual_world_offset_y: f32,
+    // Viewport size for zoom (the area of virtual world being viewed)
+    pub viewport_width: f32,
+    pub viewport_height: f32,
+    pub boundary_mode: u32,
+    pub particle_render_size: f32,
+    pub force_scale: f32,
+    pub r_smooth: f32,
+    pub flat_force: bool,
+    pub drift_x_per_second: f32,
+    pub inter_type_attraction_scale: f32,
+    pub inter_type_radius_scale: f32,
+    pub time: f32,
+    pub fisheye_strength: f32,
     pub background_color_r: f32,
     pub background_color_g: f32,
     pub background_color_b: f32,
@@ -280,5 +334,157 @@ impl SimulationParams {
 
     pub fn get_buffer_size(&self) -> u32 {
         160 // 40 * 4 bytes (added 4 spatial grid fields)
+    }
+
+    // === CENTRAL CONVERSION FUNCTIONS ===
+    // These functions handle the complex mappings from user-friendly parameters
+    // to internal simulation parameters, used by both WASM and native
+
+    // Set temperature and update all temperature-related simulation parameters
+    pub fn apply_temperature(&mut self, temp: f32) {
+        // Clamp temperature to valid range (3°C to 40°C)
+        let clamped_temp = temp.max(3.0).min(40.0);
+
+        // 1. Update drift speed: temp [3, 40] → drift [0, -80]
+        let drift = -((clamped_temp - 3.0) * 80.0) / 37.0;
+        self.drift_x_per_second = drift;
+
+        // 2. Update friction: exponential mapping temp [3, 40] → friction [0.98, 0.05]
+        let normalized_temp = (clamped_temp - 3.0) / 37.0;
+        let friction = 0.98 * (-3.0 * normalized_temp).exp();
+        self.friction = friction;
+
+        // 3. Update background color using HSLuv: temp [3, 40] → hue [215°, 15°]
+        let (r, g, b) = Self::temperature_to_background_color(clamped_temp);
+        self.background_color_r = r;
+        self.background_color_g = g;
+        self.background_color_b = b;
+    }
+
+    // Set pressure and update all pressure-related simulation parameters
+    pub fn apply_pressure(&mut self, pressure: f32) {
+        // Clamp pressure to valid range (0 to 350)
+        let clamped_pressure = pressure.max(0.0).min(350.0);
+
+        // 1. Update force scale: pressure [0, 350] → force_scale [100, 800]
+        let force_scale = 100.0 + (clamped_pressure * 700.0) / 350.0;
+        self.force_scale = force_scale;
+
+        // 2. Update rSmooth: exponential mapping pressure [0, 350] → rSmooth [20, 0.1]
+        let normalized_pressure = clamped_pressure / 350.0;
+        let r_smooth = 20.0 * (-5.3 * normalized_pressure).exp();
+        self.r_smooth = r_smooth;
+    }
+
+    // Set UV light and update all UV-related simulation parameters
+    pub fn apply_uv_light(&mut self, uv: f32) {
+        // Clamp UV to valid range (0 to 50)
+        let clamped_uv = uv.max(0.0).min(50.0);
+
+        // Update inter-type radius scale: UV [0, 50] → interTypeRadiusScale [0.1, 2.0]
+        let inter_type_radius_scale = 0.1 + (clamped_uv / 50.0) * (2.0 - 0.1);
+        self.inter_type_radius_scale = inter_type_radius_scale;
+    }
+
+    // Set electrical activity and update all electrical-related simulation parameters
+    pub fn apply_electrical_activity(&mut self, electrical_activity: f32) {
+        // Clamp electrical activity to valid range (0 to 3)
+        let clamped_electrical = electrical_activity.max(0.0).min(3.0);
+
+        // Update inter-type attraction scale: cubic mapping [0, 3] → interTypeAttractionScale [0, 3]
+        let normalized_electrical = clamped_electrical / 3.0;
+        let cubic_value = normalized_electrical * normalized_electrical * normalized_electrical;
+        let inter_type_attraction_scale = cubic_value * 3.0;
+        self.inter_type_attraction_scale = inter_type_attraction_scale;
+
+        // Update lightning parameters based on electrical activity
+        // Lightning frequency: 0 at min activity, 1.0 at max activity
+        self.lightning_frequency = normalized_electrical;
+
+        // Lightning intensity: 0.5 at min activity, 2.0 at max activity
+        self.lightning_intensity = 0.5 + (normalized_electrical * 1.5);
+
+        // Lightning duration: 0.3 at min activity, 0.8 at max activity
+        self.lightning_duration = 0.3 + (normalized_electrical * 0.5);
+    }
+
+    // Set zoom level and update viewport parameters
+    pub fn apply_zoom(&mut self, zoom_level: f32, center_x: Option<f32>, center_y: Option<f32>) {
+        // Clamp zoom level to valid range (1.45 to 6.0)
+        let clamped_zoom = zoom_level.max(1.45).min(6.0);
+
+        // Calculate viewport size: at zoom 1.0 = full world (2400x2400), at zoom 2.0 = half world (1200x1200), etc.
+        let viewport_width = 2400.0 / clamped_zoom;
+        let viewport_height = 2400.0 / clamped_zoom;
+
+        // Center the viewport around (1200, 1200) by default
+        let center_x = center_x.unwrap_or(1200.0);
+        let center_y = center_y.unwrap_or(1200.0);
+
+        // Calculate offset to center the viewport
+        let offset_x = center_x - (viewport_width / 2.0);
+        let offset_y = center_y - (viewport_height / 2.0);
+
+        // Clamp offsets to ensure viewport stays within virtual world bounds [0, 2400]
+        let max_offset_x = 2400.0 - viewport_width;
+        let max_offset_y = 2400.0 - viewport_height;
+
+        let clamped_offset_x = offset_x.max(0.0).min(max_offset_x);
+        let clamped_offset_y = offset_y.max(0.0).min(max_offset_y);
+
+        // Update viewport offset AND size
+        self.virtual_world_offset_x = clamped_offset_x;
+        self.virtual_world_offset_y = clamped_offset_y;
+        self.viewport_width = viewport_width;
+        self.viewport_height = viewport_height;
+    }
+
+    // Temperature-based background color mapping using HSLuv (static helper)
+    fn temperature_to_background_color(temp: f32) -> (f32, f32, f32) {
+        // Temperature mapping: 3°C to 40°C → Hue 215° to 15°
+        // Clamp temperature to valid range
+        let clamped_temp = temp.max(3.0).min(40.0);
+
+        // Normalize temperature: 0.0 at 3°C, 1.0 at 40°C
+        let normalized_temp = (clamped_temp - 3.0) / (40.0 - 3.0);
+
+        // Map to hue range: 215° (cold/blue) to 15° (hot/red)
+        let hue = 215.0 - normalized_temp * 200.0; // 215° to 15°
+
+        // Platform-specific saturation and lightness values for consistent appearance
+        #[cfg(target_arch = "wasm32")]
+        let (saturation, lightness) = (33.0, 66.0); // WASM: vivid colors, darker background
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let (saturation, lightness) = (44.0, 33.0); // Native: same saturation, darker lightness to match browser
+
+        // Convert HSLuv to RGB
+        let (r, g, b) = hsluv::hsluv_to_rgb(hue as f64, saturation as f64, lightness as f64);
+
+        // Debug info for color mapping consistency
+        #[cfg(debug_assertions)]
+        crate::console_log!(
+            "🎨 Temperature {:.1}°C → HSLuv({:.1}°, {:.1}%, {:.1}%) → RGB({:.3}, {:.3}, {:.3}) [{}]",
+            temp, hue, saturation, lightness, r, g, b,
+            if cfg!(target_arch = "wasm32") { "WASM" } else { "Native" }
+        );
+
+        (r as f32, g as f32, b as f32)
+    }
+
+    // Pressure-based particle count mapping
+    pub fn pressure_to_particle_count(
+        &self,
+        pressure: f32,
+        max_particles: u32,
+        min_particles: u32,
+    ) -> u32 {
+        let clamped_pressure = pressure.max(0.0).min(350.0);
+        let normalized = clamped_pressure / 350.0;
+        let range = (max_particles - min_particles) as f32;
+        let target = min_particles as f32 + normalized * range;
+
+        // Round to nearest multiple of 64 for optimal GPU workgroup dispatch
+        ((target / 64.0).round() * 64.0) as u32
     }
 }
