@@ -7,6 +7,9 @@ build = "build.rs"
 [lib]
 crate-type = ["cdylib", "rlib"]  # cdylib for WASM, rlib for native
 
+# Only build the native_minimal binary, prevent automatic binary discovery
+autobins = false
+
 # Features for conditional compilation (only for truly optional features)
 [features]
 default = []

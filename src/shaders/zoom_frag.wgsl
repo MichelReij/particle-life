@@ -7,8 +7,8 @@ struct ZoomUniforms {
     zoom_level: f32,
     center_x: f32,
     center_y: f32,
-    padding: f32,
-    // Padding to align to 16 bytes
+    native_gamma_correction: f32,
+    // 1.0 for native gamma correction, 0.0 for browser (no extra correction)
 }
 
 ;
@@ -65,5 +65,14 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     // Apply vignette (darken towards edges)
     let final_rgb = scene_color.rgb * (1.0 - vignette_alpha);
 
-    return vec4<f32>(final_rgb, 1.0);
+    // Platform-specific gamma correction for color matching
+    // Native gets extra gamma correction to match browser appearance
+    if (zoom_uniforms.native_gamma_correction > 0.5) {
+        // Apply gamma correction using the uniform value
+        let gamma_corrected = pow(final_rgb, vec3<f32>(zoom_uniforms.native_gamma_correction));
+        return vec4<f32>(gamma_corrected, 1.0);
+    }
+    else {
+        return vec4<f32>(final_rgb, 1.0);
+    }
 }

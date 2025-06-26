@@ -44,9 +44,12 @@ impl Default for MinimalNativeApp {
             simulation_params.viewport_height
         );
         console_log!(
-            "  🌡️ Temperature: 20.0°C → friction: {:.3}, drift: {:.1}",
+            "  🌡️ Temperature: 20.0°C → friction: {:.3}, drift: {:.1}, bg_color: ({:.3}, {:.3}, {:.3})",
             simulation_params.friction,
-            simulation_params.drift_x_per_second
+            simulation_params.drift_x_per_second,
+            simulation_params.background_color_r,
+            simulation_params.background_color_g,
+            simulation_params.background_color_b
         );
         console_log!(
             "  🔧 Pressure: 200.0 → force_scale: {:.1}, r_smooth: {:.3}",

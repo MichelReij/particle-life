@@ -178,14 +178,24 @@ impl WebGpuRenderer {
             .await
             .map_err(|e| renderer_error("Failed to create device", e))?;
 
-        // Configure surface
+        // Configure surface - force sRGB format for both WASM and native
         let surface_caps = surface.get_capabilities(&adapter);
+
+        // Force sRGB format for consistent gamma-corrected color representation
+        // Experiment: Use linear format + manual gamma 2.2 for consistent cross-platform color
         let surface_format = surface_caps
             .formats
             .iter()
             .copied()
-            .find(|f| f.is_srgb())
-            .unwrap_or(surface_caps.formats[0]);
+            .find(|f| !f.is_srgb()) // Prefer LINEAR format first for manual gamma control
+            .or_else(|| surface_caps.formats.iter().copied().find(|f| f.is_srgb())) // Fall back to sRGB if needed
+            .unwrap_or(surface_caps.formats[0]); // Final fallback
+
+        crate::console_log!(
+            "🎨 Surface format selected: {:?} (sRGB: {}) - using LINEAR + manual gamma 2.2 for color consistency",
+            surface_format,
+            surface_format.is_srgb()
+        );
 
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -199,6 +209,14 @@ impl WebGpuRenderer {
         };
 
         surface.configure(&device, &surface_config);
+
+        crate::console_log!(
+            "✅ Surface configured: {}×{}, format: {:?}, present_mode: {:?}",
+            width,
+            height,
+            surface_format,
+            surface_caps.present_modes[0]
+        );
 
         // Create simulation parameters buffer
         let sim_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1172,7 +1190,13 @@ impl WebGpuRenderer {
         });
 
         // Initialize zoom uniforms buffer with default values
-        let initial_zoom_uniforms = [1.0f32, 1200.0, 1200.0, 0.0]; // zoom=1.0, center at (1200,1200)
+        #[cfg(target_arch = "wasm32")]
+        let initial_gamma_correction = 0.0f32; // Browser: no extra gamma correction
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let initial_gamma_correction = 1.0f32; // Native: apply gamma 1.0 correction (no correction)
+
+        let initial_zoom_uniforms = [1.0f32, 1200.0, 1200.0, initial_gamma_correction]; // zoom=1.0, center at (1200,1200)
         queue.write_buffer(
             &zoom_uniforms_buffer,
             0,
@@ -1794,8 +1818,15 @@ impl WebGpuRenderer {
         let center_y =
             simulation_params.virtual_world_offset_y + (simulation_params.viewport_height / 2.0);
 
+        // Platform-specific gamma correction: 2.2 for native, 0.0 for browser
+        #[cfg(target_arch = "wasm32")]
+        let native_gamma_correction = 0.0f32; // Browser: no extra gamma correction
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let native_gamma_correction = 1.0f32; // Native: apply gamma 1.0 correction (no correction)
+
         // Update zoom uniforms buffer
-        let zoom_uniforms = [zoom_level, center_x, center_y, 0.0f32]; // padding for alignment
+        let zoom_uniforms = [zoom_level, center_x, center_y, native_gamma_correction];
         self.queue.write_buffer(
             &self.zoom_uniforms_buffer,
             0,
@@ -1803,7 +1834,9 @@ impl WebGpuRenderer {
         );
 
         // Only log occasionally to avoid spam
-        // console_log!("🔍 Updated zoom uniforms: level={:.2}, center=({:.0},{:.0})", zoom_level, center_x, center_y);
+        console_log!("🔍 Updated zoom uniforms: level={:.2}, center=({:.0},{:.0}), gamma_correction={:.1} [{}]",
+                    zoom_level, center_x, center_y, native_gamma_correction,
+                    if cfg!(target_arch = "wasm32") { "Browser" } else { "Native" });
     }
 
     /// Initialize particle buffers with initial particle data

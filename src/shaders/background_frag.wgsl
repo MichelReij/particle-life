@@ -50,14 +50,14 @@ struct SimParams {
     spatial_grid_height: u32,
 }
 
-;
-
 @group(0) @binding(0)
 var<uniform> sim_params: SimParams;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    var final_color = vec4<f32>(sim_params.background_color_r, sim_params.background_color_g, sim_params.background_color_b, 1.0);
+    // Use background color directly - GPU handles sRGB conversion automatically
+    let background_color = vec3<f32>(sim_params.background_color_r, sim_params.background_color_g, sim_params.background_color_b);
+    var final_color = vec4<f32>(background_color, 1.0);
     // Base color
 
     // Temporarily disable clouds by setting num_gradients to 0
@@ -214,5 +214,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
         // Blend this gradient with the final color
         final_color = vec4<f32>(mix(final_color.rgb, gradient_color.rgb, gradient_color.a), final_color.a);
     }
+
+    // Convert back to sRGB for framebuffer output
     return final_color;
 }

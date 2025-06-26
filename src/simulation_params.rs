@@ -451,12 +451,8 @@ impl SimulationParams {
         // Map to hue range: 215° (cold/blue) to 15° (hot/red)
         let hue = 215.0 - normalized_temp * 200.0; // 215° to 15°
 
-        // Platform-specific saturation and lightness values for consistent appearance
-        #[cfg(target_arch = "wasm32")]
-        let (saturation, lightness) = (33.0, 66.0); // WASM: vivid colors, darker background
-
-        #[cfg(not(target_arch = "wasm32"))]
-        let (saturation, lightness) = (44.0, 33.0); // Native: same saturation, darker lightness to match browser
+        // Uniform saturation and lightness values for both platforms
+        let (saturation, lightness) = (33.0, 66.0);
 
         // Convert HSLuv to RGB
         let (r, g, b) = hsluv::hsluv_to_rgb(hue as f64, saturation as f64, lightness as f64);
