@@ -1,8 +1,10 @@
-use rand::rngs::SmallRng;
-use rand::{Rng, SeedableRng};
-
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+use rand::rngs::SmallRng;
+#[cfg(target_arch = "wasm32")]
+use rand::{Rng, SeedableRng};
 
 mod buffer_utils;
 mod interaction_rules;
@@ -53,7 +55,6 @@ pub struct ParticleLifeEngine {
     interaction_rules: InteractionRules,
     rng: SmallRng,
     current_time: f32,
-    last_frame_time: f32,
     frame_count: u32,
     renderer: Option<WebGpuRenderer>,
 }
@@ -101,7 +102,6 @@ impl ParticleLifeEngine {
             interaction_rules,
             rng,
             current_time: 0.0,
-            last_frame_time: 0.0,
             frame_count: 0,
             renderer: None,
         }
@@ -389,18 +389,6 @@ impl ParticleLifeEngine {
                 //     i,
                 //     self.current_time
                 // );
-            }
-        }
-    }
-
-    // Clear transition fields for particles not in transition
-    fn clear_transition_fields_for_particles(&mut self, start_index: u32, end_index: u32) {
-        for i in start_index..end_index {
-            if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
-                // Clear transition fields (no transition)
-                particle.transition_start = 0.0;
-                particle.transition_type = 0;
-                // Keep is_active as is (don't change active state for existing particles)
             }
         }
     }

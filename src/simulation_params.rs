@@ -2,9 +2,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-// Import console_log macro
-use crate::console_log;
-
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,7 +124,7 @@ impl SimulationParams {
             // Default viewport is the entire virtual world (zoom level 1.0)
             viewport_width: 2400.0,
             viewport_height: 2400.0,
-            boundary_mode: 1,           // Wrap mode
+            boundary_mode: 1, // Hybrid mode: horizontal wrap + vertical bounce (0=wrap, 1=hybrid, 2=disappear)
             particle_render_size: 12.0, // Increased from 12.0 to account for 3x scaling down (2400->800)
             force_scale: 400.0,
             r_smooth: 10.0, // Increased from 5.0 to make repulsion forces more visible

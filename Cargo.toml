@@ -8,13 +8,10 @@ build = "build.rs"
 crate-type = ["cdylib", "rlib"]  # cdylib for WASM, rlib for native
 
 # Only build the native_minimal binary, prevent automatic binary discovery
-autobins = false
 
-# Features for conditional compilation (only for truly optional features)
+# Features for conditional compilation
 [features]
 default = []
-# Optional: Add specific features if needed for debugging or optional functionality
-debug-logging = ["env_logger"]
 
 # Dependencies that work for both WASM and native
 [dependencies]
@@ -24,9 +21,6 @@ futures = "0.3"
 hsluv = "0.3.1"
 rand = { version = "0.8", features = ["small_rng"] }
 raw-window-handle = "0.6"
-
-# Optional dependencies
-env_logger = { version = "0.11", optional = true }
 
 # Platform-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -98,11 +92,12 @@ winit = "0.30"
 pollster = "0.3"
 env_logger = "0.11"
 
-# Binary targets for native builds
-# Minimal native binary demonstrating shared codebase principle
+# Native binary target - only built for non-WASM targets
 [[bin]]
 name = "native_minimal"
 path = "src/bin/native_minimal.rs"
+
+
 
 [profile.release]
 # Enable maximum optimizations for performance

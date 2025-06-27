@@ -214,7 +214,7 @@ fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32, p_idx: u32) -
         var diff = other_particle.pos - particle_pos;
 
         // Apply world wrapping for density calculation
-        if (sim_params.boundary_mode == 1u) {
+        if (sim_params.boundary_mode == 0u) {
             if (diff.x > sim_params.virtual_world_width * 0.5) {
                 diff.x = diff.x - sim_params.virtual_world_width;
             }
@@ -326,7 +326,7 @@ fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: v
     let distance_uv = length(force_vec_uv);
 
     // Only affect particles within 0.06 UV units (3% of screen) from segment
-    let influence_radius_uv = 0.03;
+    let influence_radius_uv = 0.04;
 
     if (distance_uv >= influence_radius_uv) {
         // || distance_uv < 0.001) {
@@ -338,7 +338,7 @@ fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: v
     let distance_factor = (influence_radius_uv - distance_uv) / influence_radius_uv;
 
     // Repulsion strength based on electrical activity and segment generation
-    let repulsion_strength = 150000.0 * sim_params.inter_type_attraction_scale * (1.0 + f32(generation) * 0.5);
+    let repulsion_strength = 200000.0 * sim_params.inter_type_attraction_scale * (1.0 + f32(generation) * 0.5);
     let repulsion_force_uv = repulsion_direction * distance_factor * repulsion_strength;
 
     // Convert force back to world coordinates
@@ -503,8 +503,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var diff = particle_q.pos - particle_p.pos;
 
         // World wrapping for delta calculation (uses virtual world dimensions)
-        if (sim_params.boundary_mode == 1u) {
-            // 1u is wrap
+        if (sim_params.boundary_mode == 2u) {
+            // 2u is wrap
             if (diff.x > sim_params.virtual_world_width * 0.5) {
                 diff.x = diff.x - sim_params.virtual_world_width;
             }
@@ -518,7 +518,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 diff.y = diff.y + sim_params.virtual_world_height;
             }
         }
-        // No special delta calculation for disappear mode, direct distance is fine.
+        // No special delta calculation for bounce mode or disappear mode, direct distance is fine.
 
         let dist_sq = dot(diff, diff);
         let rule_idx = particle_p.ptype * sim_params.num_types + particle_q.ptype;
@@ -618,7 +618,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     particle_p.pos.x = particle_p.pos.x + sim_params.drift_x_per_second * sim_params.delta_time;
 
     // Boundary conditions
-    if (sim_params.boundary_mode == 1u) {
+    if (sim_params.boundary_mode == 0u) {
         // Wrap around virtual world
         if (particle_p.pos.x < 0.0) {
             particle_p.pos.x = particle_p.pos.x + sim_params.virtual_world_width;
@@ -633,77 +633,108 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             particle_p.pos.y = particle_p.pos.y - sim_params.virtual_world_height;
         }
     }
-    else if (sim_params.boundary_mode == 0u) {
-        // Disappear and respawn
-        let is_out_of_bounds = particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width || particle_p.pos.y < 0.0 || particle_p.pos.y >= sim_params.virtual_world_height;
+    else if (sim_params.boundary_mode == 1u) {
+        // Hybrid mode: Horizontal wrap + Vertical bounce
+        let bounce_damping = 0.8;
+        let bounce_margin = 0.0005;
+        // Much smaller margin: ~1.2px in virtual world, ~0.4px in canvas
 
-        if (is_out_of_bounds) {
-            // Reset velocity
-            particle_p.vel = vec2<f32>(0.0, 0.0);
+        // Horizontal: Wrap around (like wrap mode)
+        if (particle_p.pos.x < 0.0) {
+            particle_p.pos.x = particle_p.pos.x + sim_params.virtual_world_width;
+        }
+        if (particle_p.pos.x >= sim_params.virtual_world_width) {
+            particle_p.pos.x = particle_p.pos.x - sim_params.virtual_world_width;
+        }
 
-            // Randomize Y position for respawn
-            particle_p.pos.y = random_float(global_id.x + particle_p.ptype) * sim_params.virtual_world_height;
-
-            // Determine X respawn position based on drift direction
-            if (sim_params.drift_x_per_second > EPSILON) {
-                // Drifting significantly right, respawn left
-                particle_p.pos.x = EPSILON;
+        // Vertical: Bounce with small margin to prevent sticking
+        // Top boundary (y = 0)
+        if (particle_p.pos.y < bounce_margin) {
+            particle_p.pos.y = bounce_margin;
+            if (particle_p.vel.y < 0.0) {
+                particle_p.vel.y = - particle_p.vel.y * bounce_damping;
             }
-            else if (sim_params.drift_x_per_second < - EPSILON) {
-                // Drifting significantly left, respawn right
-                particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
+        }
+        // Bottom boundary (y = height)
+        if (particle_p.pos.y >= sim_params.virtual_world_height - bounce_margin) {
+            particle_p.pos.y = sim_params.virtual_world_height - bounce_margin;
+            if (particle_p.vel.y > 0.0) {
+                particle_p.vel.y = - particle_p.vel.y * bounce_damping;
             }
-            else {
-                // No significant drift or drift is very close to zero, respawn on the right (consistent default)
-                particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
-            }
-
-            // particle_p.ptype = u32(random_float(global_id.x + u32(particle_p.pos.y)) * f32(sim_params.num_types)); // Optionally randomize type
         }
     }
 
-    // Handle per-particle transitions
-    if (particle_p.transition_start > 0.0) {
-        let elapsed = sim_params.time - particle_p.transition_start;
-        let progress = clamp(elapsed / sim_params.transition_duration, 0.0, 1.0);
+    else if (sim_params.boundary_mode == 2u) {
+    // Disappear and respawn
+    let is_out_of_bounds = particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width || particle_p.pos.y < 0.0 || particle_p.pos.y >= sim_params.virtual_world_height;
 
-        if (progress < 1.0) {
-            // Transition in progress
-            if (particle_p.transition_type == 0u) {
-                // Grow transition: activate immediately and interpolate size
-                particle_p.is_active = 1u;
-                // Activate at start of grow transition
-                let min_visible_size = 3.0;
-                particle_p.size = min_visible_size + (particle_p.target_size - min_visible_size) * progress;
-            }
-            else {
-                // Shrink transition: stay active but interpolate size down
-                // Don't deactivate until transition completes
-                let min_visible_size = 0.1;
-                particle_p.size = particle_p.target_size * (1.0 - progress) + min_visible_size * progress;
-            }
+    if (is_out_of_bounds) {
+        // Reset velocity
+        particle_p.vel = vec2<f32>(0.0, 0.0);
+
+        // Randomize Y position for respawn
+        particle_p.pos.y = random_float(global_id.x + particle_p.ptype) * sim_params.virtual_world_height;
+
+        // Determine X respawn position based on drift direction
+        if (sim_params.drift_x_per_second > EPSILON) {
+            // Drifting significantly right, respawn left
+            particle_p.pos.x = EPSILON;
+        }
+        else if (sim_params.drift_x_per_second < - EPSILON) {
+            // Drifting significantly left, respawn right
+            particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
         }
         else {
-            // Transition complete
-            if (particle_p.transition_type == 0u) {
-                // Grow complete: set to target size and clear transition
-                particle_p.size = particle_p.target_size;
-                particle_p.transition_start = 0.0;
-                // is_active already set to 1u above
-            }
-            else {
-                // Shrink complete: deactivate particle and clear transition
-                particle_p.is_active = 0u;
-                // Deactivate at END of shrink transition
-                particle_p.size = 0.1;
-                particle_p.transition_start = 0.0;
-            }
+            // No significant drift or drift is very close to zero, respawn on the right (consistent default)
+            particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
+        }
+
+        // particle_p.ptype = u32(random_float(global_id.x + u32(particle_p.pos.y)) * f32(sim_params.num_types)); // Optionally randomize type
+    }
+}
+
+// Handle per-particle transitions
+if (particle_p.transition_start > 0.0) {
+    let elapsed = sim_params.time - particle_p.transition_start;
+    let progress = clamp(elapsed / sim_params.transition_duration, 0.0, 1.0);
+
+    if (progress < 1.0) {
+        // Transition in progress
+        if (particle_p.transition_type == 0u) {
+            // Grow transition: activate immediately and interpolate size
+            particle_p.is_active = 1u;
+            // Activate at start of grow transition
+            let min_visible_size = 3.0;
+            particle_p.size = min_visible_size + (particle_p.target_size - min_visible_size) * progress;
+        }
+        else {
+            // Shrink transition: stay active but interpolate size down
+            // Don't deactivate until transition completes
+            let min_visible_size = 0.1;
+            particle_p.size = particle_p.target_size * (1.0 - progress) + min_visible_size * progress;
         }
     }
+    else {
+        // Transition complete
+        if (particle_p.transition_type == 0u) {
+            // Grow complete: set to target size and clear transition
+            particle_p.size = particle_p.target_size;
+            particle_p.transition_start = 0.0;
+            // is_active already set to 1u above
+        }
+        else {
+            // Shrink complete: deactivate particle and clear transition
+            particle_p.is_active = 0u;
+            // Deactivate at END of shrink transition
+            particle_p.size = 0.1;
+            particle_p.transition_start = 0.0;
+        }
+    }
+}
 
-    // Final safety clamps to prevent visual issues
-    particle_p.target_size = clamp(particle_p.target_size, 5.0, 22.0);
-    particle_p.size = clamp(particle_p.size, 1.0, particle_p.target_size);
+// Final safety clamps to prevent visual issues
+particle_p.target_size = clamp(particle_p.target_size, 5.0, 22.0);
+particle_p.size = clamp(particle_p.size, 1.0, particle_p.target_size);
 
-    particles_out[p_idx] = particle_p;
+particles_out[p_idx] = particle_p;
 }

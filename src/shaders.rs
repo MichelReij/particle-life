@@ -14,7 +14,6 @@ pub const GRID_FRAGMENT_SHADER: &str = include_str!("shaders/grid_frag.wgsl");
 // Visual effects shaders
 pub const FISHEYE_FRAGMENT_SHADER: &str = include_str!("shaders/fisheye_frag.wgsl");
 pub const ZOOM_FRAGMENT_SHADER: &str = include_str!("shaders/zoom_frag.wgsl");
-pub const VIGNETTE_FRAGMENT_SHADER: &str = include_str!("shaders/vignette_frag.wgsl");
 
 // Lightning system shaders
 pub const LIGHTNING_VERTEX_SHADER: &str = include_str!("shaders/lightning_vert.wgsl");
@@ -38,7 +37,6 @@ pub enum ShaderType {
     // Post-processing effects
     FisheyeFragment,
     ZoomFragment,
-    VignetteFragment,
 
     // Lightning system
     LightningVertex,
@@ -61,7 +59,6 @@ impl ShaderType {
 
             ShaderType::FisheyeFragment => FISHEYE_FRAGMENT_SHADER,
             ShaderType::ZoomFragment => ZOOM_FRAGMENT_SHADER,
-            ShaderType::VignetteFragment => VIGNETTE_FRAGMENT_SHADER,
 
             ShaderType::LightningVertex => LIGHTNING_VERTEX_SHADER,
             ShaderType::LightningFragment => LIGHTNING_FRAGMENT_SHADER,
@@ -83,7 +80,6 @@ impl ShaderType {
 
             ShaderType::FisheyeFragment => "Fisheye Fragment Shader",
             ShaderType::ZoomFragment => "Zoom Fragment Shader",
-            ShaderType::VignetteFragment => "Vignette Fragment Shader",
 
             ShaderType::LightningVertex => "Lightning Vertex Shader",
             ShaderType::LightningFragment => "Lightning Fragment Shader",

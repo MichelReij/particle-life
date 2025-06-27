@@ -1,7 +1,5 @@
-use crate::{console_log, InteractionRules, ParticleSystem, SimulationParams};
+use crate::{InteractionRules, ParticleSystem, SimulationParams};
 use rand::Rng;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
 use wgpu::util::DeviceExt;
 
 // Conditional error type: JsValue for WASM, Box<dyn std::error::Error> for native
@@ -34,7 +32,6 @@ pub struct WebGpuRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     surface: wgpu::Surface<'static>,
-    surface_config: wgpu::SurfaceConfiguration,
 
     // Simulation buffers
     sim_params_buffer: wgpu::Buffer,
@@ -47,10 +44,9 @@ pub struct WebGpuRenderer {
     quad_vertex_buffer: wgpu::Buffer,     // Add quad vertex buffer for instanced rendering
 
     // Textures for post-processing pipeline
-    scene_texture: wgpu::Texture,
     scene_texture_view: wgpu::TextureView,
-    intermediate_texture: wgpu::Texture,
     intermediate_texture_view: wgpu::TextureView,
+    #[allow(dead_code)] // Used in bind group creation
     scene_sampler: wgpu::Sampler,
 
     // Rendering pipelines
@@ -61,7 +57,6 @@ pub struct WebGpuRenderer {
     lightning_compute_pipeline: wgpu::ComputePipeline,
     lightning_render_pipeline: wgpu::RenderPipeline,
     fisheye_render_pipeline: wgpu::RenderPipeline,
-    vignette_render_pipeline: wgpu::RenderPipeline,
     zoom_render_pipeline: wgpu::RenderPipeline,
 
     // Bind groups
@@ -72,15 +67,10 @@ pub struct WebGpuRenderer {
     background_render_bind_group: wgpu::BindGroup,
     grid_render_bind_group: wgpu::BindGroup,
     fisheye_render_bind_group: wgpu::BindGroup,
-    vignette_render_bind_group: wgpu::BindGroup,
     zoom_render_bind_group: wgpu::BindGroup,
 
     // Zoom uniforms buffer
     zoom_uniforms_buffer: wgpu::Buffer,
-
-    // Canvas dimensions
-    canvas_width: u32,
-    canvas_height: u32,
 }
 
 impl WebGpuRenderer {
@@ -989,11 +979,6 @@ impl WebGpuRenderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/fisheye_frag.wgsl").into()),
         });
 
-        let vignette_fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Vignette Fragment Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/vignette_frag.wgsl").into()),
-        });
-
         let zoom_fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Zoom Fragment Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/zoom_frag.wgsl").into()),
@@ -1125,25 +1110,6 @@ impl WebGpuRenderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(&scene_texture_view),
-                },
-            ],
-        });
-
-        let vignette_render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Vignette Render Bind Group"),
-            layout: &post_processing_texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: sim_params_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&scene_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&intermediate_texture_view),
                 },
             ],
         });
@@ -1319,52 +1285,6 @@ impl WebGpuRenderer {
                 cache: None,
             });
 
-        let vignette_render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Vignette Render Pipeline Layout"),
-                bind_group_layouts: &[&post_processing_texture_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
-        let vignette_render_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Vignette Render Pipeline"),
-                layout: Some(&vignette_render_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &background_vertex_shader, // Reuse same vertex shader
-                    entry_point: Some("main"),
-                    buffers: &[],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &vignette_fragment_shader,
-                    entry_point: Some("main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: surface_format,
-                        blend: None, // Replace
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            });
-
         // Create zoom render pipeline
         let zoom_render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1415,7 +1335,6 @@ impl WebGpuRenderer {
             device,
             queue,
             surface,
-            surface_config,
             sim_params_buffer,
             particle_buffers,
             current_buffer_index: 0,
@@ -1424,9 +1343,7 @@ impl WebGpuRenderer {
             lightning_bolt_buffer,
             particle_colors_buffer,
             quad_vertex_buffer,
-            scene_texture,
             scene_texture_view,
-            intermediate_texture,
             intermediate_texture_view,
             scene_sampler,
             background_render_pipeline,
@@ -1436,7 +1353,6 @@ impl WebGpuRenderer {
             lightning_compute_pipeline,
             lightning_render_pipeline,
             fisheye_render_pipeline,
-            vignette_render_pipeline,
             zoom_render_pipeline,
             compute_bind_groups,
             render_bind_groups,
@@ -1445,11 +1361,8 @@ impl WebGpuRenderer {
             background_render_bind_group,
             grid_render_bind_group,
             fisheye_render_bind_group,
-            vignette_render_bind_group,
             zoom_render_bind_group,
             zoom_uniforms_buffer,
-            canvas_width: width,
-            canvas_height: height,
         })
     }
 
@@ -1558,7 +1471,7 @@ impl WebGpuRenderer {
         // 3. Lightning -> scene_texture (additive)
         // 4. Grid -> scene_texture (additive)
         // 5. Fisheye (if enabled) -> intermediate_texture
-        // 6. Vignette -> final output
+        // 6. Zoom -> final output
 
         // Pass 1: Background render to scene texture
         {
@@ -1729,7 +1642,7 @@ impl WebGpuRenderer {
         let native_gamma_correction = 1.0f32; // Native: apply gamma 1.0 correction (no correction)
 
         #[cfg(all(not(target_arch = "wasm32"), target_os = "linux"))]
-        let native_gamma_correction = 2.2f32; // Native: apply gamma 1.0 correction (no correction)
+        let native_gamma_correction = 1.5f32; // Native linux: apply gamma 1.5 correction (no correction)
 
         // Update zoom uniforms buffer
         let zoom_uniforms = [zoom_level, center_x, center_y, native_gamma_correction];
