@@ -256,25 +256,6 @@ impl SimulationParams {
     pub fn to_buffer_with_particle_count(&self, actual_particle_count: u32) -> Vec<u8> {
         let mut buffer = Vec::with_capacity(160); // 40 * 4 bytes = 160 bytes (added 4 spatial grid fields)
 
-        // Debug log key parameters every 60 frames
-        static mut DEBUG_FRAME_COUNT: u32 = 0;
-        unsafe {
-            DEBUG_FRAME_COUNT += 1;
-            if DEBUG_FRAME_COUNT % 60 == 0 {
-                console_log!(
-                    "🎛️  GPU Buffer: particles={} (actual={}), force_scale={}, r_smooth={}, drift={}, bg_color=({:.2},{:.2},{:.2})",
-                    actual_particle_count,
-                    self.num_particles,
-                    self.force_scale,
-                    self.r_smooth,
-                    self.drift_x_per_second,
-                    self.background_color_r,
-                    self.background_color_g,
-                    self.background_color_b
-                );
-            }
-        }
-
         // Match the exact layout from WGSL SimParams struct
         buffer.extend_from_slice(&self.delta_time.to_le_bytes()); // 0
         buffer.extend_from_slice(&self.friction.to_le_bytes()); // 1

@@ -87,8 +87,6 @@ impl WebGpuRenderer {
     /// Initialize WebGPU renderer - WASM version with canvas
     #[cfg(target_arch = "wasm32")]
     pub async fn new(canvas: &web_sys::HtmlCanvasElement) -> Result<WebGpuRenderer, RendererError> {
-        console_log!("🎨 Initializing wgpu WebGPU renderer");
-
         // Get canvas dimensions
         let canvas_width = canvas.width();
         let canvas_height = canvas.height();
@@ -101,11 +99,6 @@ impl WebGpuRenderer {
             backends: wgpu::Backends::all(), // All native backends (Vulkan, Metal, DX12, etc.)
             ..Default::default()
         });
-
-        #[cfg(target_arch = "wasm32")]
-        console_log!("🚀 Using WebGPU backend (no WebGL fallback)");
-        #[cfg(not(target_arch = "wasm32"))]
-        console_log!("🚀 Using native GPU backends");
 
         // Create surface from canvas - WGPU 25.0.2 correct web approach
         // Use SurfaceTarget::Canvas for web canvas elements
@@ -121,8 +114,6 @@ impl WebGpuRenderer {
     pub async fn new(
         window: std::sync::Arc<winit::window::Window>,
     ) -> Result<WebGpuRenderer, RendererError> {
-        console_log!("🎨 Initializing wgpu native renderer");
-
         // Create wgpu instance with native backends
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             #[cfg(target_arch = "wasm32")]
@@ -131,8 +122,6 @@ impl WebGpuRenderer {
             backends: wgpu::Backends::all(), // All native backends (Vulkan, Metal, DX12, etc.)
             ..Default::default()
         });
-
-        console_log!("🚀 Using native GPU backends");
 
         // Create surface from window
         let surface = instance
@@ -159,8 +148,6 @@ impl WebGpuRenderer {
             })
             .await
             .map_err(|e| renderer_error("Failed to request adapter", e))?;
-
-        console_log!("✅ WebGPU adapter found: {:?}", adapter.get_info());
 
         // Request device and queue
         let (device, queue) = adapter
@@ -191,12 +178,6 @@ impl WebGpuRenderer {
             .or_else(|| surface_caps.formats.iter().copied().find(|f| f.is_srgb())) // Fall back to sRGB if needed
             .unwrap_or(surface_caps.formats[0]); // Final fallback
 
-        crate::console_log!(
-            "🎨 Surface format selected: {:?} (sRGB: {}) - using LINEAR + manual gamma 2.2 for color consistency",
-            surface_format,
-            surface_format.is_srgb()
-        );
-
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -209,14 +190,6 @@ impl WebGpuRenderer {
         };
 
         surface.configure(&device, &surface_config);
-
-        crate::console_log!(
-            "✅ Surface configured: {}×{}, format: {:?}, present_mode: {:?}",
-            width,
-            height,
-            surface_format,
-            surface_caps.present_modes[0]
-        );
 
         // Create simulation parameters buffer
         let sim_params_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -286,14 +259,6 @@ impl WebGpuRenderer {
             let size_multiplier = base_multiplier * (1.0f32 + size_randomization);
             let target_size = particle_render_size * size_multiplier;
 
-            // Debug: Log suspicious large target_size values
-            if target_size > 30.0 {
-                console_log!(
-                    "⚠️ Large target_size detected: particle {}, type {}, base_multiplier {}, size_multiplier {}, target_size {}",
-                    i, particle_type, base_multiplier, size_multiplier, target_size
-                );
-            }
-
             // ALL particles get proper size and target_size (inactive particles just won't be rendered)
             let particle_size = target_size;
 
@@ -345,12 +310,6 @@ impl WebGpuRenderer {
         // Initialize both buffers with the initial particle data
         queue.write_buffer(&particle_buffers[0], 0, &initial_particle_data);
         queue.write_buffer(&particle_buffers[1], 0, &initial_particle_data);
-
-        console_log!(
-            "🎯 Initialized particle buffers with {} active particles out of {} total",
-            active_particles,
-            max_particles
-        );
 
         // Create interaction rules buffer
         let max_types = 16;
@@ -1452,8 +1411,6 @@ impl WebGpuRenderer {
             cache: None,
         });
 
-        console_log!("✅ WebGPU renderer initialized successfully");
-
         Ok(WebGpuRenderer {
             device,
             queue,
@@ -1569,46 +1526,6 @@ impl WebGpuRenderer {
             lightning_compute_pass.set_pipeline(&self.lightning_compute_pipeline);
             lightning_compute_pass.set_bind_group(0, &self.lightning_compute_bind_group, &[]);
             lightning_compute_pass.dispatch_workgroups(1, 1, 1); // Single workgroup for lightning generation
-
-            // Debug lightning parameters much less frequently to avoid spam and duplicates
-            // Only log when time is exactly divisible to prevent multiple logs per second
-            let time_seconds = simulation_params.time as u32;
-            let time_fraction = simulation_params.time - time_seconds as f32;
-            if time_seconds > 0
-                && time_seconds % 10 == 0
-                && time_fraction >= 0.0
-                && time_fraction < 0.02
-            {
-                console_log!(
-                    "⚡ Lightning compute: freq={:.3}, intensity={:.3}, duration={:.3}, time={}s, elec_activity={:.3}",
-                    simulation_params.lightning_frequency,
-                    simulation_params.lightning_intensity,
-                    simulation_params.lightning_duration,
-                    time_seconds,
-                    simulation_params.inter_type_attraction_scale
-                );
-
-                // Add logging about expected segment generation
-                console_log!(
-                    "🔧 Lightning compute dispatched - segments should be generated if conditions are met (electrical_activity > 0 and time >= next_flash_time)"
-                );
-            }
-        }
-
-        // Add segment count logging after lightning compute completes
-        // Note: We can't easily read back GPU buffer data, but we can log completion
-        if simulation_params.lightning_frequency > 0.0
-            && simulation_params.inter_type_attraction_scale > 0.0
-        {
-            let time_seconds = simulation_params.time as u32;
-            let time_fraction = simulation_params.time - time_seconds as f32;
-            if time_seconds > 0
-                && time_seconds % 10 == 0
-                && time_fraction >= 0.0
-                && time_fraction < 0.02
-            {
-                console_log!("📊 Lightning compute completed - segments should now be available for rendering (if generated)");
-            }
         }
 
         // Physics Compute Pass - runs after lightning data is generated (matches TypeScript order)
@@ -1628,20 +1545,6 @@ impl WebGpuRenderer {
             let particle_count = particle_system.get_active_count();
             let workgroup_size = 64;
             let dispatch_size = (particle_count + workgroup_size - 1) / workgroup_size;
-
-            // Debug every 60 frames to see if compute is running
-            static mut FRAME_COUNT: u32 = 0;
-            unsafe {
-                FRAME_COUNT += 1;
-                // Reduced compute logging frequency
-                if FRAME_COUNT % 300 == 0 {
-                    console_log!(
-                        "🧮 Compute: {} particles, {} workgroups",
-                        particle_count,
-                        dispatch_size
-                    );
-                }
-            }
 
             compute_pass.dispatch_workgroups(dispatch_size, 1, 1);
         }
@@ -1822,8 +1725,11 @@ impl WebGpuRenderer {
         #[cfg(target_arch = "wasm32")]
         let native_gamma_correction = 0.0f32; // Browser: no extra gamma correction
 
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
         let native_gamma_correction = 1.0f32; // Native: apply gamma 1.0 correction (no correction)
+
+        #[cfg(all(not(target_arch = "wasm32"), target_os = "linux"))]
+        let native_gamma_correction = 2.2f32; // Native: apply gamma 1.0 correction (no correction)
 
         // Update zoom uniforms buffer
         let zoom_uniforms = [zoom_level, center_x, center_y, native_gamma_correction];
@@ -1832,11 +1738,6 @@ impl WebGpuRenderer {
             0,
             bytemuck::cast_slice(&zoom_uniforms),
         );
-
-        // Only log occasionally to avoid spam
-        console_log!("🔍 Updated zoom uniforms: level={:.2}, center=({:.0},{:.0}), gamma_correction={:.1} [{}]",
-                    zoom_level, center_x, center_y, native_gamma_correction,
-                    if cfg!(target_arch = "wasm32") { "Browser" } else { "Native" });
     }
 
     /// Initialize particle buffers with initial particle data
@@ -1849,11 +1750,6 @@ impl WebGpuRenderer {
             .write_buffer(&self.particle_buffers[0], 0, &particle_data);
         self.queue
             .write_buffer(&self.particle_buffers[1], 0, &particle_data);
-
-        console_log!(
-            "🎯 Initialized both particle buffers with {} particles",
-            particle_system.get_active_count()
-        );
     }
 
     /// Update particle data during simulation (only updates input buffer to preserve physics)
@@ -1875,12 +1771,6 @@ impl WebGpuRenderer {
                 &is_active.to_le_bytes(),
             );
         }
-
-        console_log!(
-            "🔄 Updated only is_active flags in input buffer {} for {} particles (preserving physics data)",
-            self.current_buffer_index,
-            particle_system.get_active_count()
-        );
     }
 
     /// Update only transition fields for particles to avoid overwriting live GPU physics data
@@ -1922,7 +1812,9 @@ impl WebGpuRenderer {
                 &data,
             );
         }
+    }
 
-        console_log!("🔄 Updated transition fields for particles with active transitions");
+    pub fn get_device(&self) -> &wgpu::Device {
+        &self.device
     }
 }

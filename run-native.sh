@@ -12,7 +12,7 @@ rm -rf target/release/native_minimal 2>/dev/null || true
 
 # Clean Rust cache for native target (optional, for fresh build)
 echo "🗑️ Cleaning Rust native cache..."
-cargo clean --bin native_minimal
+cargo clean
 
 # Build native binary in debug mode for faster compilation
 echo "🦀 Building native binary (debug mode)..."
