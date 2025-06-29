@@ -1,3 +1,4 @@
+use crate::config::*;
 use crate::{InteractionRules, ParticleSystem, SimulationParams};
 use rand::Rng;
 use wgpu::util::DeviceExt;
@@ -118,8 +119,8 @@ impl WebGpuRenderer {
             .create_surface(window.clone())
             .map_err(|e| renderer_error("Failed to create surface", e))?;
 
-        // Use fixed 800x800 logical size regardless of window size
-        Self::initialize_common(instance, surface, 800, 800).await
+        // Use fixed canvas size regardless of window size
+        Self::initialize_common(instance, surface, CANVAS_WIDTH_U32, CANVAS_HEIGHT_U32).await
     }
 
     /// Common initialization for both platforms
@@ -216,9 +217,9 @@ impl WebGpuRenderer {
         let max_particles = 6400; // Reduced from 32768 - supports up to 8K particles efficiently
         let active_particles = 6400; // Initialize all particles that the engine uses
         let num_types = 5;
-        let virtual_world_width = 2400.0;
-        let virtual_world_height = 2400.0;
-        let particle_render_size = 12.0;
+        let virtual_world_width = VIRTUAL_WORLD_WIDTH;
+        let virtual_world_height = VIRTUAL_WORLD_HEIGHT;
+        let particle_render_size = PARTICLE_SIZE;
 
         // Create initial particle data buffer
         let mut initial_particle_data = Vec::with_capacity((max_particles * 48) as usize);
@@ -329,23 +330,23 @@ impl WebGpuRenderer {
         // Create zoom uniforms buffer
         let zoom_uniforms_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Zoom Uniforms Buffer"),
-            size: 16, // zoom_level(f32), center_x(f32), center_y(f32), padding(f32)
+            size: 32, // zoom_level(f32), center_x(f32), center_y(f32), native_gamma_correction(f32), virtual_world_width(f32), virtual_world_height(f32), canvas_width(f32), canvas_height(f32)
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         // Create post-processing textures
-        // Scene texture should be 2400x2400 to render the full virtual world
+        // Scene texture should match virtual world size to render the full virtual world
         let scene_texture_size = wgpu::Extent3d {
-            width: 2400,
-            height: 2400,
+            width: VIRTUAL_WORLD_WIDTH_U32,
+            height: VIRTUAL_WORLD_HEIGHT_U32,
             depth_or_array_layers: 1,
         };
 
-        // Intermediate texture should also be 2400x2400 to match scene texture
+        // Intermediate texture should also match virtual world size to match scene texture
         let intermediate_texture_size = wgpu::Extent3d {
-            width: 2400,
-            height: 2400,
+            width: VIRTUAL_WORLD_WIDTH_U32,
+            height: VIRTUAL_WORLD_HEIGHT_U32,
             depth_or_array_layers: 1,
         };
 
@@ -1121,7 +1122,12 @@ impl WebGpuRenderer {
         #[cfg(not(target_arch = "wasm32"))]
         let initial_gamma_correction = 1.0f32; // Native: apply gamma 1.0 correction (no correction)
 
-        let initial_zoom_uniforms = [1.0f32, 1200.0, 1200.0, initial_gamma_correction]; // zoom=1.0, center at (1200,1200)
+        let initial_zoom_uniforms = [
+            1.0f32,
+            VIRTUAL_WORLD_CENTER_X,
+            VIRTUAL_WORLD_CENTER_Y,
+            initial_gamma_correction,
+        ]; // zoom=1.0, center at (center_x, center_y)
         queue.write_buffer(
             &zoom_uniforms_buffer,
             0,
@@ -1626,7 +1632,7 @@ impl WebGpuRenderer {
     /// Update zoom uniforms buffer with current zoom parameters
     pub fn update_zoom_uniforms(&mut self, simulation_params: &SimulationParams) {
         // Calculate zoom level from viewport size
-        let zoom_level = 2400.0 / simulation_params.viewport_width;
+        let zoom_level = simulation_params.virtual_world_width / simulation_params.viewport_width;
 
         // Calculate center of the current viewport in virtual world coordinates
         let center_x =
@@ -1645,7 +1651,16 @@ impl WebGpuRenderer {
         let native_gamma_correction = 1.5f32; // Native linux: apply gamma 1.5 correction (no correction)
 
         // Update zoom uniforms buffer
-        let zoom_uniforms = [zoom_level, center_x, center_y, native_gamma_correction];
+        let zoom_uniforms = [
+            zoom_level,
+            center_x,
+            center_y,
+            native_gamma_correction,
+            simulation_params.virtual_world_width,
+            simulation_params.virtual_world_height,
+            simulation_params.canvas_render_width,
+            simulation_params.canvas_render_height,
+        ];
         self.queue.write_buffer(
             &self.zoom_uniforms_buffer,
             0,

@@ -1,6 +1,7 @@
 // Minimal native binary that uses shared core components
 // This demonstrates the correct approach: shared codebase with minimal platform differences
 
+use particle_life_wasm::config::*;
 use particle_life_wasm::*;
 use rand::prelude::*;
 use rand::rngs::SmallRng;
@@ -93,7 +94,10 @@ impl ApplicationHandler for MinimalNativeApp {
         // Only platform-specific part: window creation
         let window_attributes = Window::default_attributes()
             .with_title("Particle Life - Shared Components")
-            .with_inner_size(winit::dpi::LogicalSize::new(800, 800))
+            .with_inner_size(winit::dpi::LogicalSize::new(
+                CANVAS_WIDTH_U32,
+                CANVAS_HEIGHT_U32,
+            ))
             .with_resizable(false);
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());

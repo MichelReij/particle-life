@@ -7,15 +7,19 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
 mod buffer_utils;
+pub mod config;
 mod interaction_rules;
 mod particle_system;
+mod shader_constants;
 mod simulation_params;
 mod spatial_grid;
 mod webgpu_renderer;
 
 pub use buffer_utils::*;
+pub use config::*;
 pub use interaction_rules::*;
 pub use particle_system::*;
+pub use shader_constants::*;
 pub use simulation_params::*;
 pub use spatial_grid::*;
 pub use webgpu_renderer::*;
@@ -534,7 +538,7 @@ impl ParticleLifeEngine {
         context.set_fill_style_str(&bg_color);
         context.fill_rect(0.0, 0.0, canvas_width as f64, canvas_height as f64);
 
-        // Calculate the center view window (800x800px) in the 2400x2400px world
+        // Calculate the center view window (canvas size) in the virtual world
         let world_width = self.simulation_params.virtual_world_width;
         let world_height = self.simulation_params.virtual_world_height;
 
@@ -995,7 +999,8 @@ impl ParticleLifeEngine {
 
     #[wasm_bindgen]
     pub fn set_particle_render_size(&mut self, value: f32) {
-        self.simulation_params.particle_render_size = value.max(1.0).min(50.0);
+        self.simulation_params.particle_render_size =
+            value.max(PARTICLE_SIZE_MIN).min(PARTICLE_SIZE_MAX);
         console_log!(
             "🔧 Individual parameter: particle_render_size = {:.1}",
             self.simulation_params.particle_render_size

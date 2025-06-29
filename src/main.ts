@@ -4,6 +4,13 @@ console.log("🚀 main.ts loading with proper WASM integration...");
 import init, { ParticleLifeEngine } from "./pkg/particle_life_wasm.js";
 import { setParameterUpdateCallbacks, initializeUI } from "./ui";
 import { SimulationParams } from "./particle-life-types";
+import {
+    CANVAS_WIDTH,
+    CANVAS_HEIGHT,
+    VIRTUAL_WORLD_WIDTH,
+    VIRTUAL_WORLD_HEIGHT,
+    PARTICLE_SIZE,
+} from "./config";
 
 class App {
     private engine: ParticleLifeEngine | null = null;
@@ -32,8 +39,12 @@ class App {
                 return;
             }
 
+            // Set canvas size from config
+            this.canvas.width = CANVAS_WIDTH;
+            this.canvas.height = CANVAS_HEIGHT;
+
             console.log(
-                "🎨 Canvas found:",
+                "🎨 Canvas configured:",
                 this.canvas.width,
                 "x",
                 this.canvas.height
@@ -295,14 +306,14 @@ class App {
             friction: 0.8,
             numParticles: 1000,
             numTypes: 4,
-            virtualWorldWidth: 2400,
-            virtualWorldHeight: 2400,
-            canvasRenderWidth: 800,
-            canvasRenderHeight: 600,
+            virtualWorldWidth: VIRTUAL_WORLD_WIDTH,
+            virtualWorldHeight: VIRTUAL_WORLD_HEIGHT,
+            canvasRenderWidth: CANVAS_WIDTH,
+            canvasRenderHeight: CANVAS_HEIGHT,
             virtualWorldOffsetX: 0,
             virtualWorldOffsetY: 0,
             boundaryMode: 1,
-            particleRenderSize: 2.0,
+            particleRenderSize: PARTICLE_SIZE,
             forceScale: 1.0,
             rSmooth: 0.5,
             flatForce: false,

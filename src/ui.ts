@@ -2,6 +2,14 @@
 // This module handles all HTML/DOM interactions, slider controls, and localStorage
 
 import { SimulationParams, BoundaryMode } from "./particle-life-types";
+// import { Joy } from "./lib/joy";
+declare var Joy: any; // Temporary fix for Joy library
+import {
+    VIRTUAL_WORLD_CENTER_X,
+    VIRTUAL_WORLD_CENTER_Y,
+    CANVAS_WIDTH_U32,
+    CANVAS_HEIGHT_U32,
+} from "./config";
 
 // Environmental parameters for the UI controls
 let temperature = 20; // Default temperature
@@ -10,8 +18,8 @@ let uvLight = 25; // Default UV light
 let pressure = 1; // Default pressure
 
 // Zoom center variables for joystick navigation
-let zoomCenterX = 1200.0; // Center X coordinate in 2400x2400 world (default: center)
-let zoomCenterY = 1200.0; // Center Y coordinate in 2400x2400 world (default: center)
+let zoomCenterX = VIRTUAL_WORLD_CENTER_X; // Center X coordinate in virtual world (default: center)
+let zoomCenterY = VIRTUAL_WORLD_CENTER_Y; // Center Y coordinate in virtual world (default: center)
 
 // JoyStick variables
 let joystick: any;
@@ -579,12 +587,12 @@ function constrainZoomCenter(currentZoomLevel: number): {
 
     // Clamp zoom center to stay within allowed range
     const clampedX = Math.max(
-        1200 - maxMovementRange,
-        Math.min(1200 + maxMovementRange, zoomCenterX)
+        VIRTUAL_WORLD_CENTER_X - maxMovementRange,
+        Math.min(VIRTUAL_WORLD_CENTER_X + maxMovementRange, zoomCenterX)
     );
     const clampedY = Math.max(
-        1200 - maxMovementRange,
-        Math.min(1200 + maxMovementRange, zoomCenterY)
+        VIRTUAL_WORLD_CENTER_Y - maxMovementRange,
+        Math.min(VIRTUAL_WORLD_CENTER_Y + maxMovementRange, zoomCenterY)
     );
 
     zoomCenterX = clampedX;
@@ -674,8 +682,8 @@ async function initJoyStick(currentZoomLevel: number) {
                 const moveY = -(stickData.y / 100.0) * maxMovementRange; // Inverted Y-axis
 
                 // Calculate new zoom center positions
-                zoomCenterX = 1200.0 + moveX;
-                zoomCenterY = 1200.0 + moveY;
+                zoomCenterX = VIRTUAL_WORLD_CENTER_X + moveX;
+                zoomCenterY = VIRTUAL_WORLD_CENTER_Y + moveY;
 
                 // Update zoom uniforms via callback with the actual current zoom level
                 parameterUpdateCallbacks.updateZoom(
@@ -1370,10 +1378,10 @@ export function setupCanvas(): HTMLCanvasElement {
         console.warn("canvasContainer not found, adding canvas to body");
     }
 
-    canvas.width = 800;
-    canvas.height = 800;
-    canvas.style.width = "800px";
-    canvas.style.height = "800px";
+    canvas.width = CANVAS_WIDTH_U32;
+    canvas.height = CANVAS_HEIGHT_U32;
+    canvas.style.width = `${CANVAS_WIDTH_U32}px`;
+    canvas.style.height = `${CANVAS_HEIGHT_U32}px`;
 
     return canvas;
 }

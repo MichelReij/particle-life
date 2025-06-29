@@ -131,13 +131,13 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
     let particle_radius_pixels = clamp(particle_attrs.particle_size, 1.0, 30.0);
     // Safety clamp in vertex shader too!
 
-    // Particle position is in virtual world coordinates (0-2400 range)
-    // Convert directly to clip space (-1 to 1) based on the fixed 2400x2400 virtual world
-    let normalized_particle_pos = vec2<f32>((particle_attrs.particle_pos.x / 2400.0) * 2.0 - 1.0, (1.0 - (particle_attrs.particle_pos.y / 2400.0)) * 2.0 - 1.0);
+    // Particle position is in virtual world coordinates (0-virtual_world_width/height range)
+    // Convert directly to clip space (-1 to 1) based on the virtual world dimensions from sim_params
+    let normalized_particle_pos = vec2<f32>((particle_attrs.particle_pos.x / sim_params.virtual_world_width) * 2.0 - 1.0, (1.0 - (particle_attrs.particle_pos.y / sim_params.virtual_world_height)) * 2.0 - 1.0);
 
     // Scale quad vertex by particle size and convert to clip space dimensions
-    // Fixed scaling for 2400x2400 virtual world
-    let scaled_quad_pos = vec2<f32>(vertex_attrs.quad_pos.x * (particle_radius_pixels / 2400.0), vertex_attrs.quad_pos.y * (particle_radius_pixels / 2400.0));
+    // Dynamic scaling based on virtual world dimensions from sim_params
+    let scaled_quad_pos = vec2<f32>(vertex_attrs.quad_pos.x * (particle_radius_pixels / sim_params.virtual_world_width), vertex_attrs.quad_pos.y * (particle_radius_pixels / sim_params.virtual_world_height));
 
     out.position = vec4<f32>(normalized_particle_pos + scaled_quad_pos, 0.0, 1.0);
     out.particle_color = debug_color;

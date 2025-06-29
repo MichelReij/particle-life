@@ -70,11 +70,11 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let line_alpha: f32 = 0.1;
     // Jouw huidige waarde
 
-    // Grid should always be centered at the center of the 2400x2400 virtual world
-    let center_x = 1200.0;
-    // Fixed center of virtual world
-    let center_y = 1200.0;
-    // Fixed center of virtual world
+    // Grid should always be centered at the center of the virtual world
+    let center_x = sim_params.virtual_world_width / 2.0;
+    // Center of virtual world
+    let center_y = sim_params.virtual_world_height / 2.0;
+    // Center of virtual world
 
     // Calculate grid lines that are aligned with the virtual world center
     let offset_from_center_x = frag_coord.x - center_x;

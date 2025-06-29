@@ -1,3 +1,4 @@
+use crate::config::*;
 use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -114,18 +115,18 @@ impl SimulationParams {
             friction: 0.1,
             num_particles: 6400, // Initialize with all particles active to prevent GPU buffer hiccups
             num_types: 5,
-            virtual_world_width: 2400.0,
-            virtual_world_height: 2400.0,
-            canvas_render_width: 800.0,
-            canvas_render_height: 800.0,
+            virtual_world_width: VIRTUAL_WORLD_WIDTH,
+            virtual_world_height: VIRTUAL_WORLD_HEIGHT,
+            canvas_render_width: CANVAS_WIDTH,
+            canvas_render_height: CANVAS_HEIGHT,
             // Start at top-left corner initially (where particles are visible)
             virtual_world_offset_x: 0.0,
             virtual_world_offset_y: 0.0,
             // Default viewport is the entire virtual world (zoom level 1.0)
-            viewport_width: 2400.0,
-            viewport_height: 2400.0,
+            viewport_width: VIRTUAL_WORLD_WIDTH,
+            viewport_height: VIRTUAL_WORLD_HEIGHT,
             boundary_mode: 1, // Hybrid mode: horizontal wrap + vertical bounce (0=wrap, 1=hybrid, 2=disappear)
-            particle_render_size: 12.0, // Increased from 12.0 to account for 3x scaling down (2400->800)
+            particle_render_size: PARTICLE_SIZE, // Use centralized particle size configuration
             force_scale: 400.0,
             r_smooth: 10.0, // Increased from 5.0 to make repulsion forces more visible
             flat_force: false,
@@ -153,9 +154,9 @@ impl SimulationParams {
 
             // Spatial grid optimization - enabled by default with reasonable cell size
             spatial_grid_enabled: true,
-            spatial_grid_cell_size: 120.0, // 120 units per cell (2400/120 = 20x20 grid)
-            spatial_grid_width: 20,        // 20 cells horizontally
-            spatial_grid_height: 20,       // 20 cells vertically
+            spatial_grid_cell_size: 120.0, // 120 units per cell (VIRTUAL_WORLD_WIDTH/120 = 20x20 grid)
+            spatial_grid_width: (VIRTUAL_WORLD_WIDTH / 120.0) as u32, // 20 cells horizontally
+            spatial_grid_height: (VIRTUAL_WORLD_HEIGHT / 120.0) as u32, // 20 cells vertically
         }
     }
 
@@ -391,21 +392,21 @@ impl SimulationParams {
         // Clamp zoom level to valid range (1.45 to 6.0)
         let clamped_zoom = zoom_level.max(1.45).min(6.0);
 
-        // Calculate viewport size: at zoom 1.0 = full world (2400x2400), at zoom 2.0 = half world (1200x1200), etc.
-        let viewport_width = 2400.0 / clamped_zoom;
-        let viewport_height = 2400.0 / clamped_zoom;
+        // Calculate viewport size: at zoom 1.0 = full world, at zoom 2.0 = half world, etc.
+        let viewport_width = VIRTUAL_WORLD_WIDTH / clamped_zoom;
+        let viewport_height = VIRTUAL_WORLD_HEIGHT / clamped_zoom;
 
-        // Center the viewport around (1200, 1200) by default
-        let center_x = center_x.unwrap_or(1200.0);
-        let center_y = center_y.unwrap_or(1200.0);
+        // Center the viewport around world center by default
+        let center_x = center_x.unwrap_or(VIRTUAL_WORLD_CENTER_X);
+        let center_y = center_y.unwrap_or(VIRTUAL_WORLD_CENTER_Y);
 
         // Calculate offset to center the viewport
         let offset_x = center_x - (viewport_width / 2.0);
         let offset_y = center_y - (viewport_height / 2.0);
 
-        // Clamp offsets to ensure viewport stays within virtual world bounds [0, 2400]
-        let max_offset_x = 2400.0 - viewport_width;
-        let max_offset_y = 2400.0 - viewport_height;
+        // Clamp offsets to ensure viewport stays within virtual world bounds
+        let max_offset_x = VIRTUAL_WORLD_WIDTH - viewport_width;
+        let max_offset_y = VIRTUAL_WORLD_HEIGHT - viewport_height;
 
         let clamped_offset_x = offset_x.max(0.0).min(max_offset_x);
         let clamped_offset_y = offset_y.max(0.0).min(max_offset_y);

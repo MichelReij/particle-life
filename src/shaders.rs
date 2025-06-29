@@ -1,5 +1,6 @@
 /// All WGSL shaders embedded as strings for the particle life simulation
 /// This allows for a clean architecture where Rust handles ALL rendering logic
+use crate::shader_constants::*;
 
 // Core particle simulation shaders
 pub const VERTEX_SHADER: &str = include_str!("shaders/vert.wgsl");

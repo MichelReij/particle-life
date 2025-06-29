@@ -1,3 +1,4 @@
+use crate::config::*;
 use crate::{InteractionRules, SimulationParams, SpatialGrid};
 use rand::prelude::*;
 use rand::rngs::SmallRng;
@@ -139,8 +140,8 @@ impl ParticleSystem {
 
             if let Some(particle) = self.particles.get_mut(i as usize) {
                 particle.position = [
-                    rng.gen_range(0.0..2400.0), // Use default world size
-                    rng.gen_range(0.0..2400.0),
+                    rng.gen_range(0.0..VIRTUAL_WORLD_WIDTH), // Use config world size
+                    rng.gen_range(0.0..VIRTUAL_WORLD_HEIGHT),
                 ];
                 particle.velocity = [rng.gen_range(-2.0..2.0), rng.gen_range(-2.0..2.0)];
                 particle.particle_type = particle_type;

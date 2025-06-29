@@ -176,8 +176,10 @@ input[type="button"] {
 
 
         canvas {
-            width        : 800px;
-            height       : 800px;
+            width        : 100%;
+            height       : 100%;
+            max-width    : 1080px;
+            max-height   : 1080px;
             display      : block;
             border-radius: 50%;
             border       : 5px solid #e3c463;
