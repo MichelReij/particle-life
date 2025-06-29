@@ -51,6 +51,14 @@ struct LightningBolt {
     flash_id: u32,
     start_time: f32,
     next_lightning_time: f32,
+    is_super_lightning: u32,
+    // 1 if this is a super lightning, 0 if normal
+    needs_rules_reset: u32,
+    // 1 if interaction rules should be randomized, 0 otherwise
+    _padding1: u32,
+    // Padding for 16-byte alignment
+    _padding2: u32,
+    // Additional padding for alignment
 }
 
 struct SimParams {
@@ -144,7 +152,7 @@ struct SimParams {
 var<storage, read> particles_in: array<Particle>;
 // Interaction rules: flat array, access via typeA * num_types + typeB
 @group(0) @binding(1)
-var<storage, read> rules: array<InteractionRule>;
+var<storage, read_write> rules: array<InteractionRule>;
 // Simulation parameters
 @group(0) @binding(2)
 var<uniform> sim_params: SimParams;
@@ -156,11 +164,76 @@ var<storage, read_write> particles_out: array<Particle>;
 var<storage, read> lightning_segments: array<LightningSegment>;
 // Lightning bolt buffer (shared with rendering) - single bolt structure
 @group(0) @binding(5)
-var<storage, read> lightning_bolt: LightningBolt;
+var<storage, read_write> lightning_bolt: LightningBolt;
 
 const PI: f32 = 3.141592653589793;
 const EPSILON: f32 = 0.001;
 // To avoid division by zero or sqrt(0)
+
+// === Spatial Grid Utility Functions ===
+
+// Convert world position to grid cell coordinates
+fn world_pos_to_grid_cell(pos: vec2<f32>) -> vec2<i32> {
+    if (sim_params.spatial_grid_enabled == 0u) {
+        return vec2<i32>(0, 0);
+        // Return dummy value if grid is disabled
+    }
+
+    let cell_x = i32(floor(pos.x / sim_params.spatial_grid_cell_size));
+    let cell_y = i32(floor(pos.y / sim_params.spatial_grid_cell_size));
+    return vec2<i32>(cell_x, cell_y);
+}
+
+// Probabilistic culling for spatial grid optimization
+fn should_process_spatial_interaction(p_idx: u32, q_idx: u32, p_cell: vec2<i32>, q_cell: vec2<i32>) -> bool {
+    // Always process nearby particles
+    let cell_dist_x = abs(p_cell.x - q_cell.x);
+    let cell_dist_y = abs(p_cell.y - q_cell.y);
+    let max_cell_dist = max(cell_dist_x, cell_dist_y);
+
+    if (max_cell_dist <= 1) {
+        return true;
+        // Always process immediate neighbors
+    }
+
+    // For distant particles, use probabilistic sampling to reduce computation
+    // This creates a deterministic but pseudo-random pattern based on particle indices
+    let hash_input = (p_idx * 73u + q_idx * 101u) % 997u;
+    // Large prime for better distribution
+    let probability_threshold = 0.3;
+    // Process 30% of distant interactions
+    let random_value = f32(hash_input) / 997.0;
+
+    return random_value < probability_threshold;
+}
+
+// Calculate edge damping factor for particles near world boundaries
+fn calculate_edge_damping_factor(pos: vec2<f32>) -> f32 {
+    // Define the damping zone near world edges
+    let damping_zone = 50.0;
+    // Distance from edge where damping starts
+    let world_width = sim_params.virtual_world_width;
+    let world_height = sim_params.virtual_world_height;
+
+    // Calculate distance from each edge
+    let dist_left = pos.x;
+    let dist_right = world_width - pos.x;
+    let dist_top = pos.y;
+    let dist_bottom = world_height - pos.y;
+
+    // Find minimum distance to any edge
+    let min_edge_dist = min(min(dist_left, dist_right), min(dist_top, dist_bottom));
+
+    // Calculate damping factor (1.0 = no damping, 0.0 = full damping)
+    if (min_edge_dist >= damping_zone) {
+        return 1.0;
+        // No damping in the center
+    }
+    else {
+        return min_edge_dist / damping_zone;
+        // Linear damping near edges
+    }
+}
 
 // === Lenia Functions ===
 
@@ -325,8 +398,8 @@ fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: v
     let force_vec_uv = particle_uv - closest_point;
     let distance_uv = length(force_vec_uv);
 
-    // Only affect particles within 0.06 UV units (3% of screen) from segment
-    let influence_radius_uv = 0.04;
+    // Only affect particles within smaller radius for more localized effect
+    let influence_radius_uv = 0.03;
 
     if (distance_uv >= influence_radius_uv) {
         // || distance_uv < 0.001) {
@@ -337,8 +410,8 @@ fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: v
     let repulsion_direction = normalize(force_vec_uv);
     let distance_factor = (influence_radius_uv - distance_uv) / influence_radius_uv;
 
-    // Repulsion strength based on electrical activity and segment generation
-    let repulsion_strength = 200000.0 * sim_params.inter_type_attraction_scale * (1.0 + f32(generation) * 0.5);
+    // Much weaker repulsion strength for gentle pushing effect instead of teleporting
+    let repulsion_strength = 500.0 * sim_params.inter_type_attraction_scale * (1.0 + f32(generation) * 0.3);
     let repulsion_force_uv = repulsion_direction * distance_factor * repulsion_strength;
 
     // Convert force back to world coordinates
@@ -347,84 +420,78 @@ fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: v
     return repulsion_force_world;
 }
 
-// Simple pseudo-random number generator based on seed (e.g., particle index)
-// Not cryptographically secure, but good enough for visual randomness.
+// === Random Number Generation ===
+
+// Simple hash function for pseudo-random numbers
+fn hash(seed: u32) -> u32 {
+    var x = seed;
+    x = x ^ (x >> 16u);
+    x = x * 0x45d9f3bu;
+    x = x ^ (x >> 16u);
+    x = x * 0x45d9f3bu;
+    x = x ^ (x >> 16u);
+    return x;
+}
+
+// Generate random float in range [0, 1)
 fn random_float(seed: u32) -> f32 {
-    var s = seed;
-    s = (s ^ 61u) ^ (s >> 16u);
-    s = s + (s << 3u);
-    s = s ^ (s >> 4u);
-    s = s * 0x27d4eb2du;
-    s = s ^ (s >> 15u);
-    return f32(s) / 4294967295.0;
-    // Convert to [0, 1) float
+    return f32(hash(seed)) / f32(0xFFFFFFFFu);
 }
 
-// === Spatial Grid Optimization Functions ===
-
-// Convert world position to grid cell coordinates
-fn world_pos_to_grid_cell(pos: vec2<f32>) -> vec2<i32> {
-    let cell_x = i32(floor(pos.x / sim_params.spatial_grid_cell_size));
-    let cell_y = i32(floor(pos.y / sim_params.spatial_grid_cell_size));
-    return vec2<i32>(cell_x, cell_y);
+// Generate random float in range [min, max)
+fn random_range(seed: u32, min_val: f32, max_val: f32) -> f32 {
+    return min_val + random_float(seed) * (max_val - min_val);
 }
 
-// Check if grid cell coordinates are valid (within bounds)
-fn is_valid_grid_cell(cell: vec2<i32>) -> bool {
-    return cell.x >= 0 && cell.x < i32(sim_params.spatial_grid_width) && cell.y >= 0 && cell.y < i32(sim_params.spatial_grid_height);
-}
+// === Super Lightning Interaction Rules Randomization ===
 
-// Hash function to map particle index and cell to a pseudo-random hash
-// This is used for spatial culling: we only check a fraction of particles in distant cells
-fn spatial_hash(particle_idx: u32, cell_x: i32, cell_y: i32) -> u32 {
-    // Simple hash combining particle index and cell coordinates
-    var hash = particle_idx;
-    hash = hash ^ (u32(cell_x) * 73856093u);
-    hash = hash ^ (u32(cell_y) * 19349663u);
-    hash = (hash ^ (hash >> 16u)) * 0x85ebca6bu;
-    hash = (hash ^ (hash >> 13u)) * 0xc2b2ae35u;
-    hash = hash ^ (hash >> 16u);
-    return hash;
-}
+// Check if super lightning is active and randomize interaction rules
+fn check_and_randomize_rules() {
+    // Check if there's a super lightning bolt that needs rules reset
+    if (lightning_bolt.needs_rules_reset == 1u) {
+        // Use lightning flash_id as base seed for randomization
+        let base_seed = lightning_bolt.flash_id;
 
-// Check if we should process interaction between two particles based on spatial distance
-// This implements spatial culling: closer cells have higher interaction probability
-fn should_process_spatial_interaction(p_idx: u32, q_idx: u32, p_cell: vec2<i32>, q_cell: vec2<i32>) -> bool {
-    let cell_dist_x = abs(p_cell.x - q_cell.x);
-    let cell_dist_y = abs(p_cell.y - q_cell.y);
-    let max_cell_dist = max(cell_dist_x, cell_dist_y);
+        // Randomize all interaction rules
+        for (var type_a = 0u; type_a < sim_params.num_types; type_a++) {
+            for (var type_b = 0u; type_b < sim_params.num_types; type_b++) {
+                let rule_idx = type_a * sim_params.num_types + type_b;
+                let seed = base_seed + rule_idx * 71u;
+                // 71 is a prime for better distribution
 
-    // Always process particles in the same cell or adjacent cells (3x3 neighborhood)
-    if (max_cell_dist <= 1) {
-        return true;
-    }
+                // Generate new random interaction rule
+                // Force: random between -1.0 and 1.0
+                let new_force = random_range(seed, - 1.0, 1.0);
 
-    // For distant cells, use probabilistic culling based on distance
-    // Distant interactions have lower probability of being processed
-    let hash = spatial_hash(p_idx, q_cell.x, q_cell.y);
-    let probability_threshold = 256u;
-    // Process ~1/16 of distant interactions (256/4096)
+                // MinRadius: random between 5.0 and 15.0
+                let new_min_radius = random_range(seed + 1u, 5.0, 15.0);
 
-    if (max_cell_dist == 2) {
-        // 2-cell distance: process ~1/4 of interactions
-        return (hash & 1023u) < 256u;
-        // 256/1024 = 1/4
-    }
-    else if (max_cell_dist == 3) {
-        // 3-cell distance: process ~1/8 of interactions
-        return (hash & 2047u) < 256u;
-        // 256/2048 = 1/8
-    }
-    else {
-        // 4+ cell distance: process ~1/16 of interactions
-        return (hash & 4095u) < probability_threshold;
-        // 256/4096 = 1/16
+                // MaxRadius: random between 20.0 and 80.0
+                let new_max_radius = random_range(seed + 2u, 20.0, 80.0);
+
+                // Update the rule
+                rules[rule_idx].attraction = new_force;
+                rules[rule_idx].min_radius = new_min_radius;
+                rules[rule_idx].max_radius = new_max_radius;
+            }
+        }
+
+        // Reset the flag to prevent re-randomization on subsequent frames
+        lightning_bolt.needs_rules_reset = 0u;
     }
 }
 
 @compute @workgroup_size(64) // Example workgroup size, can be tuned
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let p_idx = global_id.x;
+
+    // Only thread 0 checks for super lightning and randomizes rules (avoid race conditions)
+    if (p_idx == 0u) {
+        check_and_randomize_rules();
+    }
+
+    // Synchronize workgroup to ensure rule changes are visible to all threads
+    workgroupBarrier();
 
     if (p_idx >= sim_params.num_particles) {
         return;
@@ -606,6 +673,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     total_force = total_force + lightning_em_force;
 
+    // Apply edge damping to reduce forces near boundaries (prevents clustering)
+    // Drift is preserved, only attraction/repulsion forces are dampened
+    let edge_damping = calculate_edge_damping_factor(particle_p.pos);
+    total_force = total_force * edge_damping;
+
     // Update velocity
     particle_p.vel = particle_p.vel + total_force * sim_params.force_scale * sim_params.delta_time;
     // Apply friction
@@ -663,78 +735,77 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
     }
-
     else if (sim_params.boundary_mode == 2u) {
-    // Disappear and respawn
-    let is_out_of_bounds = particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width || particle_p.pos.y < 0.0 || particle_p.pos.y >= sim_params.virtual_world_height;
+        // Disappear and respawn
+        let is_out_of_bounds = particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width || particle_p.pos.y < 0.0 || particle_p.pos.y >= sim_params.virtual_world_height;
 
-    if (is_out_of_bounds) {
-        // Reset velocity
-        particle_p.vel = vec2<f32>(0.0, 0.0);
+        if (is_out_of_bounds) {
+            // Give particle initial velocity in drift direction to prevent sticking
+            particle_p.vel = vec2<f32>(sim_params.drift_x_per_second * 1.8, 0.0);
 
-        // Randomize Y position for respawn
-        particle_p.pos.y = random_float(global_id.x + particle_p.ptype) * sim_params.virtual_world_height;
+            // Randomize Y position for respawn
+            particle_p.pos.y = random_float(global_id.x + particle_p.ptype) * sim_params.virtual_world_height;
 
-        // Determine X respawn position based on drift direction
-        if (sim_params.drift_x_per_second > EPSILON) {
-            // Drifting significantly right, respawn left
-            particle_p.pos.x = EPSILON;
-        }
-        else if (sim_params.drift_x_per_second < - EPSILON) {
-            // Drifting significantly left, respawn right
-            particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
-        }
-        else {
-            // No significant drift or drift is very close to zero, respawn on the right (consistent default)
-            particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
-        }
+            // Determine X respawn position based on drift direction
+            if (sim_params.drift_x_per_second > EPSILON) {
+                // Drifting significantly right, respawn left
+                particle_p.pos.x = EPSILON;
+            }
+            else if (sim_params.drift_x_per_second < - EPSILON) {
+                // Drifting significantly left, respawn right
+                particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
+            }
+            else {
+                // No significant drift, respawn on the right (consistent default)
+                particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
+            }
 
-        // particle_p.ptype = u32(random_float(global_id.x + u32(particle_p.pos.y)) * f32(sim_params.num_types)); // Optionally randomize type
-    }
-}
-
-// Handle per-particle transitions
-if (particle_p.transition_start > 0.0) {
-    let elapsed = sim_params.time - particle_p.transition_start;
-    let progress = clamp(elapsed / sim_params.transition_duration, 0.0, 1.0);
-
-    if (progress < 1.0) {
-        // Transition in progress
-        if (particle_p.transition_type == 0u) {
-            // Grow transition: activate immediately and interpolate size
-            particle_p.is_active = 1u;
-            // Activate at start of grow transition
-            let min_visible_size = 3.0;
-            particle_p.size = min_visible_size + (particle_p.target_size - min_visible_size) * progress;
-        }
-        else {
-            // Shrink transition: stay active but interpolate size down
-            // Don't deactivate until transition completes
-            let min_visible_size = 0.1;
-            particle_p.size = particle_p.target_size * (1.0 - progress) + min_visible_size * progress;
+            // particle_p.ptype = u32(random_float(global_id.x + u32(particle_p.pos.y)) * f32(sim_params.num_types)); // Optionally randomize type
         }
     }
-    else {
-        // Transition complete
-        if (particle_p.transition_type == 0u) {
-            // Grow complete: set to target size and clear transition
-            particle_p.size = particle_p.target_size;
-            particle_p.transition_start = 0.0;
-            // is_active already set to 1u above
+
+    // Handle per-particle transitions
+    if (particle_p.transition_start > 0.0) {
+        let elapsed = sim_params.time - particle_p.transition_start;
+        let progress = clamp(elapsed / sim_params.transition_duration, 0.0, 1.0);
+
+        if (progress < 1.0) {
+            // Transition in progress
+            if (particle_p.transition_type == 0u) {
+                // Grow transition: activate immediately and interpolate size
+                particle_p.is_active = 1u;
+                // Activate at start of grow transition
+                let min_visible_size = 3.0;
+                particle_p.size = min_visible_size + (particle_p.target_size - min_visible_size) * progress;
+            }
+            else {
+                // Shrink transition: stay active but interpolate size down
+                // Don't deactivate until transition completes
+                let min_visible_size = 0.1;
+                particle_p.size = particle_p.target_size * (1.0 - progress) + min_visible_size * progress;
+            }
         }
         else {
-            // Shrink complete: deactivate particle and clear transition
-            particle_p.is_active = 0u;
-            // Deactivate at END of shrink transition
-            particle_p.size = 0.1;
-            particle_p.transition_start = 0.0;
+            // Transition complete
+            if (particle_p.transition_type == 0u) {
+                // Grow complete: set to target size and clear transition
+                particle_p.size = particle_p.target_size;
+                particle_p.transition_start = 0.0;
+                // is_active already set to 1u above
+            }
+            else {
+                // Shrink complete: deactivate particle and clear transition
+                particle_p.is_active = 0u;
+                // Deactivate at END of shrink transition
+                particle_p.size = 0.1;
+                particle_p.transition_start = 0.0;
+            }
         }
     }
-}
 
-// Final safety clamps to prevent visual issues
-particle_p.target_size = clamp(particle_p.target_size, 5.0, 22.0);
-particle_p.size = clamp(particle_p.size, 1.0, particle_p.target_size);
+    // Final safety clamps to prevent visual issues
+    particle_p.target_size = clamp(particle_p.target_size, 5.0, 22.0);
+    particle_p.size = clamp(particle_p.size, 1.0, particle_p.target_size);
 
-particles_out[p_idx] = particle_p;
+    particles_out[p_idx] = particle_p;
 }

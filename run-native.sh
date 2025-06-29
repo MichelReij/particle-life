@@ -29,7 +29,7 @@ echo "✅ Native binary built successfully"
 # Display custom defaults that will be applied
 echo ""
 echo "🎯 Native will start with these custom defaults:"
-echo "  🔍 Zoom: 1.45x"
+echo "  🔍 Zoom: 1.0x"
 echo "  🌡️ Temperature: 20.0°C"
 echo "  🔧 Pressure: 200.0"
 echo "  ☀️ UV Light: 40.0"

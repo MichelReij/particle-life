@@ -332,7 +332,7 @@ class App {
             lightningDuration: 0.1,
         };
 
-        const defaultZoomLevel = 1.45;
+        const defaultZoomLevel = 1.0;
         console.log("🎯 Initializing UI with default parameters...");
         initializeUI(defaultSimParams, defaultZoomLevel);
 

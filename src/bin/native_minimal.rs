@@ -23,9 +23,10 @@ struct MinimalNativeApp {
     // Native-specific
     last_frame: std::time::Instant,
     current_time: f32,
-    // Simple FPS logging
-    stats_last_log: std::time::Instant,
-    stats_frame_count: u32,
+    // FPS tracking for display
+    fps_last_update: std::time::Instant,
+    fps_frame_count: u32,
+    current_fps: f32,
 }
 
 impl Default for MinimalNativeApp {
@@ -35,7 +36,7 @@ impl Default for MinimalNativeApp {
         let mut simulation_params = SimulationParams::new();
 
         // Apply custom native defaults using central conversion functions
-        simulation_params.apply_zoom(1.45, None, None); // zoom = 1.45
+        simulation_params.apply_zoom(1.0, None, None); // zoom = 1.0
         simulation_params.apply_temperature(20.0); // temperature = 20.0°C
         simulation_params.apply_pressure(200.0); // pressure = 200.0
         simulation_params.apply_uv_light(40.0); // uv_light = 40.0
@@ -43,7 +44,7 @@ impl Default for MinimalNativeApp {
 
         console_log!("🎯 Applied native defaults via central conversion functions:");
         console_log!(
-            "  🔍 Zoom: 1.45x (viewport: {:.0}×{:.0})",
+            "  🔍 Zoom: 1.0x (viewport: {:.0}×{:.0})",
             simulation_params.viewport_width,
             simulation_params.viewport_height
         );
@@ -81,8 +82,9 @@ impl Default for MinimalNativeApp {
             renderer: None,
             last_frame: std::time::Instant::now(),
             current_time: 0.0,
-            stats_last_log: std::time::Instant::now(),
-            stats_frame_count: 0,
+            fps_last_update: std::time::Instant::now(),
+            fps_frame_count: 0,
+            current_fps: 0.0,
         }
     }
 }
@@ -154,26 +156,57 @@ impl ApplicationHandler for MinimalNativeApp {
                     }
                 }
 
-                // Simple FPS logging every 5 seconds
-                self.stats_frame_count += 1;
-                let stats_now = std::time::Instant::now();
-                let elapsed = (stats_now - self.stats_last_log).as_secs_f32();
-                if elapsed >= 5.0 {
-                    let avg_fps = self.stats_frame_count as f32 / elapsed;
+                // Update FPS display - more frequent on-screen update, less frequent console
+                self.fps_frame_count += 1;
+                let fps_now = std::time::Instant::now();
+                let fps_elapsed = (fps_now - self.fps_last_update).as_secs_f32();
+
+                // Update FPS data every 0.5 seconds for responsive on-screen display
+                if fps_elapsed >= 0.5 {
+                    self.current_fps = self.fps_frame_count as f32 / fps_elapsed;
+
+                    // Update FPS data in renderer for on-screen display
+                    if let Some(renderer) = &mut self.renderer {
+                        let active_particles = self.particle_system.get_active_count();
+                        renderer.update_fps_data(
+                            self.current_fps,
+                            0, // frame_count reset
+                            active_particles,
+                            self.current_time,
+                        );
+                    }
+
+                    self.fps_last_update = fps_now;
+                    self.fps_frame_count = 0;
+                }
+
+                // Console output every 3 seconds now that on-screen overlay is active
+                if fps_elapsed >= 3.0 {
+                    // Clear console and show FPS prominently
+                    print!("\x1B[2J\x1B[1;1H"); // Clear screen and move to top
                     let active_particles = self.particle_system.get_active_count();
-                    console_log!(
-                        "📊 FPS: {:.1} | Particles: {} | Time: {:.1}s",
-                        avg_fps,
-                        active_particles,
-                        self.current_time
-                    );
-                    self.stats_last_log = stats_now;
-                    self.stats_frame_count = 0;
+
+                    println!("╔══════════════════════════════════════╗");
+                    println!("║          PARTICLE LIFE NATIVE       ║");
+                    println!("╠══════════════════════════════════════╣");
+                    println!("║  FPS: {:<27.1} ║", self.current_fps);
+                    println!("║  Particles: {:<22} ║", active_particles);
+                    println!("║  Time: {:<25.1} ║", self.current_time);
+                    println!("╚══════════════════════════════════════╝");
+                    println!();
+                    println!("✨ On-screen FPS overlay is now active!");
+                    println!("   Check bottom-center of the round screen.");
+                    println!("   (Console output less frequent now)");
                 }
 
                 if let Some(window) = &self.window {
                     window.request_redraw();
                 }
+
+                // Target 60 FPS by requesting next frame
+                event_loop.set_control_flow(ControlFlow::WaitUntil(
+                    std::time::Instant::now() + std::time::Duration::from_millis(16), // ~60 FPS
+                ));
             }
             _ => {}
         }
@@ -185,7 +218,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     console_log!("🎯 Starting native app with shared core components");
 
     let event_loop = EventLoop::new()?;
-    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.set_control_flow(ControlFlow::Wait); // Wait for events instead of polling continuously
 
     let mut app = MinimalNativeApp::default();
     event_loop.run_app(&mut app)?;

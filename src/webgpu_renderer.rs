@@ -72,6 +72,14 @@ pub struct WebGpuRenderer {
 
     // Zoom uniforms buffer
     zoom_uniforms_buffer: wgpu::Buffer,
+
+    // Text overlay components (native only)
+    #[cfg(not(target_arch = "wasm32"))]
+    text_overlay_pipeline: Option<wgpu::RenderPipeline>,
+    #[cfg(not(target_arch = "wasm32"))]
+    text_overlay_bind_group: Option<wgpu::BindGroup>,
+    #[cfg(not(target_arch = "wasm32"))]
+    fps_data_buffer: Option<wgpu::Buffer>,
 }
 
 impl WebGpuRenderer {
@@ -322,7 +330,7 @@ impl WebGpuRenderer {
 
         let lightning_bolt_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lightning Bolt Buffer"),
-            size: 16, // Single bolt: 16 bytes (4 u32/f32 fields: num_segments, flash_id, start_time, next_lightning_time) - properly aligned to 16-byte boundary
+            size: 32, // Single bolt: 32 bytes (8 u32/f32 fields: num_segments, flash_id, start_time, next_lightning_time, is_super_lightning, _padding1, _padding2, _padding3) - properly aligned to 16-byte boundary
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -409,7 +417,7 @@ impl WebGpuRenderer {
                         binding: 1,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -453,7 +461,7 @@ impl WebGpuRenderer {
                         binding: 5,
                         visibility: wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
@@ -985,6 +993,19 @@ impl WebGpuRenderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/zoom_frag.wgsl").into()),
         });
 
+        // Text overlay shaders (native only)
+        #[cfg(not(target_arch = "wasm32"))]
+        let text_vertex_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Text Vertex Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/text_vert.wgsl").into()),
+        });
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let text_fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Text Fragment Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/text_overlay.wgsl").into()),
+        });
+
         // Create post-processing bind group layouts
         let post_processing_uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1337,6 +1358,120 @@ impl WebGpuRenderer {
             cache: None,
         });
 
+        // Create text overlay components (native only)
+        #[cfg(not(target_arch = "wasm32"))]
+        let fps_data_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("FPS Data Buffer"),
+            size: 16, // fps: f32, frame_count: u32, particle_count: u32, time: f32
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let text_overlay_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Text Overlay Bind Group Layout"),
+                entries: &[
+                    // Simulation parameters
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    // FPS data
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let text_overlay_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Text Overlay Bind Group"),
+            layout: &text_overlay_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: sim_params_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: fps_data_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let text_overlay_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Text Overlay Pipeline Layout"),
+                bind_group_layouts: &[&text_overlay_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let text_overlay_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Text Overlay Pipeline"),
+                layout: Some(&text_overlay_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &text_vertex_shader,
+                    entry_point: Some("main"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &text_fragment_shader,
+                    entry_point: Some("main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: Some(wgpu::BlendState {
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::SrcAlpha,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
+
         Ok(WebGpuRenderer {
             device,
             queue,
@@ -1369,6 +1504,15 @@ impl WebGpuRenderer {
             fisheye_render_bind_group,
             zoom_render_bind_group,
             zoom_uniforms_buffer,
+
+            // Text overlay components (native only)
+            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(target_arch = "wasm32"))]
+            text_overlay_pipeline: Some(text_overlay_pipeline),
+            #[cfg(not(target_arch = "wasm32"))]
+            text_overlay_bind_group: Some(text_overlay_bind_group),
+            #[cfg(not(target_arch = "wasm32"))]
+            fps_data_buffer: Some(fps_data_buffer),
         })
     }
 
@@ -1619,6 +1763,31 @@ impl WebGpuRenderer {
             zoom_pass.draw(0..6, 0..1); // Fullscreen quad
         }
 
+        // Pass 7: Text overlay (native only, after zoom)
+        #[cfg(not(target_arch = "wasm32"))]
+        if let (Some(pipeline), Some(bind_group)) =
+            (&self.text_overlay_pipeline, &self.text_overlay_bind_group)
+        {
+            let mut text_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Text Overlay Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // Keep existing content
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            text_pass.set_pipeline(pipeline);
+            text_pass.set_bind_group(0, bind_group, &[]);
+            text_pass.draw(0..3, 0..1); // Full-screen triangle
+        }
+
         // Submit commands
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
@@ -1744,5 +1913,27 @@ impl WebGpuRenderer {
 
     pub fn get_device(&self) -> &wgpu::Device {
         &self.device
+    }
+
+    /// Update FPS data for text overlay (native only)
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn update_fps_data(&mut self, fps: f32, frame_count: u32, particle_count: u32, time: f32) {
+        if let Some(fps_buffer) = &self.fps_data_buffer {
+            let fps_data = [fps, frame_count as f32, particle_count as f32, time];
+            self.queue
+                .write_buffer(fps_buffer, 0, bytemuck::cast_slice(&fps_data));
+        }
+    }
+
+    /// Update FPS data stub for WASM (no-op)
+    #[cfg(target_arch = "wasm32")]
+    pub fn update_fps_data(
+        &mut self,
+        _fps: f32,
+        _frame_count: u32,
+        _particle_count: u32,
+        _time: f32,
+    ) {
+        // No-op for WASM - text overlay not supported
     }
 }

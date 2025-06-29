@@ -7,6 +7,8 @@ declare var Joy: any; // Temporary fix for Joy library
 import {
     VIRTUAL_WORLD_CENTER_X,
     VIRTUAL_WORLD_CENTER_Y,
+    VIRTUAL_WORLD_WIDTH,
+    VIRTUAL_WORLD_HEIGHT,
     CANVAS_WIDTH_U32,
     CANVAS_HEIGHT_U32,
 } from "./config";
@@ -581,19 +583,24 @@ function constrainZoomCenter(currentZoomLevel: number): {
     x: number;
     y: number;
 } {
-    // Calculate maximum movement range based on zoom factor
-    // f(x) ≈ 111.24·x - 122.29, where x = zoom factor
-    const maxMovementRange = Math.max(0, 111.24 * currentZoomLevel - 122.29);
+    // Calculate the size of the viewport (visible area) in virtual world units
+    const viewportWidth = VIRTUAL_WORLD_WIDTH / currentZoomLevel;
+    const viewportHeight = VIRTUAL_WORLD_HEIGHT / currentZoomLevel;
 
-    // Clamp zoom center to stay within allowed range
-    const clampedX = Math.max(
-        VIRTUAL_WORLD_CENTER_X - maxMovementRange,
-        Math.min(VIRTUAL_WORLD_CENTER_X + maxMovementRange, zoomCenterX)
-    );
-    const clampedY = Math.max(
-        VIRTUAL_WORLD_CENTER_Y - maxMovementRange,
-        Math.min(VIRTUAL_WORLD_CENTER_Y + maxMovementRange, zoomCenterY)
-    );
+    // Calculate the half-width and half-height of the viewport
+    const halfViewportWidth = viewportWidth / 2.0;
+    const halfViewportHeight = viewportHeight / 2.0;
+
+    // Calculate the minimum and maximum allowed zoom center positions
+    // The center can be positioned such that the viewport edge touches the world edge
+    const minCenterX = halfViewportWidth; // Left edge of viewport at world left edge (x=0)
+    const maxCenterX = VIRTUAL_WORLD_WIDTH - halfViewportWidth; // Right edge at world right edge
+    const minCenterY = halfViewportHeight; // Top edge of viewport at world top edge (y=0)
+    const maxCenterY = VIRTUAL_WORLD_HEIGHT - halfViewportHeight; // Bottom edge at world bottom edge
+
+    // Clamp the zoom center to ensure viewport never goes outside world bounds
+    const clampedX = Math.max(minCenterX, Math.min(maxCenterX, zoomCenterX));
+    const clampedY = Math.max(minCenterY, Math.min(maxCenterY, zoomCenterY));
 
     zoomCenterX = clampedX;
     zoomCenterY = clampedY;
@@ -670,20 +677,28 @@ async function initJoyStick(currentZoomLevel: number) {
                     `🕹️ Joystick event: captured=${currentZoomLevel}, actual=${actualCurrentZoomLevel}, stick=(${stickData.x}, ${stickData.y})`
                 );
 
-                // Calculate maximum movement range based on zoom factor
-                // Using consistent formula: f(x) ≈ 111.24·x - 122.29
-                const maxMovementRange = Math.max(
-                    0,
-                    112 * actualCurrentZoomLevel - 120
-                );
+                // Calculate the size of the viewport (visible area) in virtual world units
+                const viewportWidth =
+                    VIRTUAL_WORLD_WIDTH / actualCurrentZoomLevel;
+                const viewportHeight =
+                    VIRTUAL_WORLD_HEIGHT / actualCurrentZoomLevel;
+
+                // Calculate the maximum movement range (half the remaining space)
+                const maxMoveX = (VIRTUAL_WORLD_WIDTH - viewportWidth) / 2.0;
+                const maxMoveY = (VIRTUAL_WORLD_HEIGHT - viewportHeight) / 2.0;
 
                 // Convert joystick input (-100 to +100) to movement within the calculated range
-                const moveX = (stickData.x / 100.0) * maxMovementRange;
-                const moveY = -(stickData.y / 100.0) * maxMovementRange; // Inverted Y-axis
+                const moveX = (stickData.x / 100.0) * maxMoveX;
+                const moveY = -(stickData.y / 100.0) * maxMoveY; // Inverted Y-axis
 
-                // Calculate new zoom center positions
+                // Calculate new zoom center positions relative to world center
                 zoomCenterX = VIRTUAL_WORLD_CENTER_X + moveX;
                 zoomCenterY = VIRTUAL_WORLD_CENTER_Y + moveY;
+
+                // Apply constraints to ensure viewport stays within world bounds
+                const constrained = constrainZoomCenter(actualCurrentZoomLevel);
+                zoomCenterX = constrained.x;
+                zoomCenterY = constrained.y;
 
                 // Update zoom uniforms via callback with the actual current zoom level
                 parameterUpdateCallbacks.updateZoom(
@@ -700,7 +715,9 @@ async function initJoyStick(currentZoomLevel: number) {
                         0
                     )}, ${zoomCenterY.toFixed(
                         0
-                    )})<br>Range: ${maxMovementRange.toFixed(0)}`;
+                    )})<br>Viewport: ${viewportWidth.toFixed(
+                        0
+                    )}×${viewportHeight.toFixed(0)}`;
                 }
             }
         );
@@ -1029,8 +1046,8 @@ function initializeZoomSlider(currentZoomLevel: number): void {
     const zoomValueDisplay = document.getElementById("zoomValue");
 
     if (zoomSlider && zoomValueDisplay) {
-        // Always start at the minimum zoom level (1.45), ignore localStorage
-        const initialZoom = Math.max(1.45, currentZoomLevel);
+        // Always start at the minimum zoom level (1.0), ignore localStorage
+        const initialZoom = Math.max(1.0, currentZoomLevel);
         console.log(
             `Initializing zoom slider: engine=${currentZoomLevel}, initial=${initialZoom}, HTML default=${zoomSlider.value}`
         );

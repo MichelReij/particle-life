@@ -780,7 +780,7 @@ impl ParticleLifeEngine {
             .apply_zoom(zoom_level, center_x, center_y);
         console_log!(
             "🔍 Zoom set to {:.2}x → applied to viewport parameters",
-            zoom_level.max(1.45).min(6.0)
+            zoom_level.max(1.0).min(6.0)
         );
     }
 

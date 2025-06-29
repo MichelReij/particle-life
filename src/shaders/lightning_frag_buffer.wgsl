@@ -87,6 +87,14 @@ struct LightningBolt {
     // When this bolt started
     next_lightning_time: f32,
     // When the next lightning should occur
+    is_super_lightning: u32,
+    // 1 if this is a super lightning, 0 if normal
+    needs_rules_reset: u32,
+    // 1 if interaction rules should be reset, 0 if not
+    _padding1: u32,
+    // Padding for 16-byte alignment
+    _padding2: u32,
+    // Additional padding
 }
 
 @group(0) @binding(0)
@@ -98,7 +106,7 @@ var<storage, read> lightning_segments: array<LightningSegment>;
 @group(0) @binding(10)
 var<storage, read> lightning_bolt: LightningBolt;
 
-// Helper function to draw a single segment in UV coordinates
+// Helper function to draw a single segment in UV coordinates with improved anti-aliasing
 fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thickness: f32, color: vec3<f32>) -> vec4<f32> {
     let segmentDir = end - start;
     let segmentLength = length(segmentDir);
@@ -115,8 +123,20 @@ fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thic
         let closestPoint = start + normalizedDir * projLength;
         let distToSegment = length(uv - closestPoint);
 
-        // Thickness is in UV coordinates (0.0-1.0 range)
-        let segmentIntensity = (1.0 - smoothstep(0.0, thickness, distToSegment)) * alpha;
+        // Improved anti-aliasing with soft falloff
+        let halfThickness = thickness * 0.5;
+        let antiAliasWidth = thickness * 0.3;
+        // 30% of thickness for smooth falloff
+
+        // Core intensity (full brightness within half thickness)
+        let coreIntensity = 1.0 - smoothstep(0.0, halfThickness, distToSegment);
+
+        // Soft edge falloff for anti-aliasing
+        let edgeIntensity = 1.0 - smoothstep(halfThickness, halfThickness + antiAliasWidth, distToSegment);
+
+        // Combine core and edge with different intensities
+        let segmentIntensity = max(coreIntensity, edgeIntensity * 0.4) * alpha;
+
         return vec4<f32>(color, segmentIntensity);
     }
 

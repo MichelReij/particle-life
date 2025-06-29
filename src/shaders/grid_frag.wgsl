@@ -59,12 +59,16 @@ var<uniform> sim_params: SimParams;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    let regular_line_thickness: f32 = 2.0;
-    // Voorheen line_thickness
-    let center_line_thickness: f32 = 4.0;
-    // Nieuwe dikte voor centrale lijnen
-    let spacing: f32 = 80.0;
-    // Jouw huidige waarde
+    let regular_line_thickness: f32 = 3.0;
+    // Iets dikker voor betere zichtbaarheid bij alle zoom niveaus
+    let center_line_thickness: f32 = 5.0;
+    // Aangepast om proportie te behouden
+
+    // Dynamic spacing: always show exactly 21 lines (10 + center + 10)
+    // This means 20 intervals, so spacing = world_size / 20
+    let spacing_x: f32 = sim_params.virtual_world_width / 20.0;
+    let spacing_y: f32 = sim_params.virtual_world_height / 20.0;
+
     let line_color_rgb = vec3<f32>(1.0, 1.0, 1.0);
     // Jouw huidige waarde (wit)
     let line_alpha: f32 = 0.1;
@@ -80,37 +84,33 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let offset_from_center_x = frag_coord.x - center_x;
     let offset_from_center_y = frag_coord.y - center_y;
 
-    // Calculate distance to nearest grid line relative to center
-    let mod_x = offset_from_center_x - spacing * floor(offset_from_center_x / spacing);
-    let dist_to_regular_vertical_line = min(abs(mod_x), spacing - abs(mod_x));
+    // Calculate distance to nearest grid line relative to center using dynamic spacing
+    let mod_x = offset_from_center_x - spacing_x * floor(offset_from_center_x / spacing_x);
+    let dist_to_regular_vertical_line = min(abs(mod_x), spacing_x - abs(mod_x));
 
-    let mod_y = offset_from_center_y - spacing * floor(offset_from_center_y / spacing);
-    let dist_to_regular_horizontal_line = min(abs(mod_y), spacing - abs(mod_y));
+    let mod_y = offset_from_center_y - spacing_y * floor(offset_from_center_y / spacing_y);
+    let dist_to_regular_horizontal_line = min(abs(mod_y), spacing_y - abs(mod_y));
 
     var final_alpha: f32 = 0.0;
 
-    // Controleer op dikke centrale verticale lijn
-    let on_thick_center_vertical = abs(frag_coord.x - center_x) < center_line_thickness * 0.5;
-    // Controleer op dikke centrale horizontale lijn
-    let on_thick_center_horizontal = abs(frag_coord.y - center_y) < center_line_thickness * 0.5;
+    // Use smoothstep for consistent anti-aliased lines at all zoom levels
+    let falloff = 0.5;
+    // Kleinere falloff voor scherpere lijnen met anti-aliasing
 
-    // Controleer op reguliere (dunne) verticale rasterlijn
-    let on_regular_vertical_grid = dist_to_regular_vertical_line < regular_line_thickness * 0.5;
-    // Controleer op reguliere (dunne) horizontale rasterlijn
-    let on_regular_horizontal_grid = dist_to_regular_horizontal_line < regular_line_thickness * 0.5;
+    // Calculate intensities using smoothstep for anti-aliasing
+    let vertical_intensity = 1.0 - smoothstep(regular_line_thickness * 0.5 - falloff, regular_line_thickness * 0.5 + falloff, dist_to_regular_vertical_line);
+    let horizontal_intensity = 1.0 - smoothstep(regular_line_thickness * 0.5 - falloff, regular_line_thickness * 0.5 + falloff, dist_to_regular_horizontal_line);
 
-    if (on_thick_center_vertical || on_thick_center_horizontal || on_regular_vertical_grid || on_regular_horizontal_grid) {
-        final_alpha = line_alpha;
-    }
+    // Center lines with thicker appearance
+    let center_vertical_intensity = 1.0 - smoothstep(center_line_thickness * 0.5 - falloff, center_line_thickness * 0.5 + falloff, abs(frag_coord.x - center_x));
+    let center_horizontal_intensity = 1.0 - smoothstep(center_line_thickness * 0.5 - falloff, center_line_thickness * 0.5 + falloff, abs(frag_coord.y - center_y));
 
-    // For thicker lines, antialiasing might be nice, but smoothstep can be expensive.
-    // Example with smoothstep for softer lines (replace above if/else):
-    // let falloff = 1.0; // Pixels over which the line fades
-    // let vertical_intensity = 1.0 - smoothstep(regular_line_thickness * 0.5 - falloff, regular_line_thickness * 0.5 + falloff, dist_to_regular_vertical_line);
-    // let horizontal_intensity = 1.0 - smoothstep(regular_line_thickness * 0.5 - falloff, regular_line_thickness * 0.5 + falloff, dist_to_regular_horizontal_line);
-    // let center_vertical_intensity = 1.0 - smoothstep(center_line_thickness * 0.5 - falloff, center_line_thickness * 0.5 + falloff, abs(frag_coord.x - center_x));
-    // let center_horizontal_intensity = 1.0 - smoothstep(center_line_thickness * 0.5 - falloff, center_line_thickness * 0.5 + falloff, abs(frag_coord.y - center_y));
-    // final_alpha = max(max(vertical_intensity, horizontal_intensity), max(center_vertical_intensity, center_horizontal_intensity)) * line_alpha;
+    // Combine all line intensities - center lines override regular lines
+    let regular_grid_intensity = max(vertical_intensity, horizontal_intensity);
+    let center_lines_intensity = max(center_vertical_intensity, center_horizontal_intensity);
+
+    // Center lines take priority, otherwise use regular grid
+    final_alpha = max(regular_grid_intensity, center_lines_intensity) * line_alpha;
 
     return vec4<f32>(line_color_rgb, final_alpha);
 }

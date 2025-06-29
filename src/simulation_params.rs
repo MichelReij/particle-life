@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
+// Central SimulationParams struct definition - used by both WASM and native
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct SimulationParams {
     pub delta_time: f32,
     pub friction: f32,
@@ -47,61 +47,7 @@ pub struct SimulationParams {
     pub transition_duration: f32,
     pub transition_start_count: u32,
     pub transition_end_count: u32,
-    pub transition_is_grow: bool, // true for grow, false for shrink
-
-    // Spatial grid optimization parameters
-    pub spatial_grid_enabled: bool,
-    pub spatial_grid_cell_size: f32,
-    pub spatial_grid_width: u32,
-    pub spatial_grid_height: u32,
-}
-
-// Native version (same fields, no wasm_bindgen annotations)
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SimulationParams {
-    pub delta_time: f32,
-    pub friction: f32,
-    pub num_particles: u32,
-    pub num_types: u32,
-    pub virtual_world_width: f32,
-    pub virtual_world_height: f32,
-    pub canvas_render_width: f32,
-    pub canvas_render_height: f32,
-    pub virtual_world_offset_x: f32,
-    pub virtual_world_offset_y: f32,
-    // Viewport size for zoom (the area of virtual world being viewed)
-    pub viewport_width: f32,
-    pub viewport_height: f32,
-    pub boundary_mode: u32,
-    pub particle_render_size: f32,
-    pub force_scale: f32,
-    pub r_smooth: f32,
-    pub flat_force: bool,
-    pub drift_x_per_second: f32,
-    pub inter_type_attraction_scale: f32,
-    pub inter_type_radius_scale: f32,
-    pub time: f32,
-    pub fisheye_strength: f32,
-    pub background_color_r: f32,
-    pub background_color_g: f32,
-    pub background_color_b: f32,
-    pub lenia_enabled: bool,
-    pub lenia_growth_mu: f32,
-    pub lenia_growth_sigma: f32,
-    pub lenia_kernel_radius: f32,
-    pub lightning_frequency: f32,
-    pub lightning_intensity: f32,
-    pub lightning_duration: f32,
-    // Particle transition parameters for GPU-based size transitions
-    pub transition_active: bool,
-    pub transition_start_time: f32,
-    pub transition_duration: f32,
-    pub transition_start_count: u32,
-    pub transition_end_count: u32,
-    pub transition_is_grow: bool, // true for grow, false for shrink
-
-    // Spatial grid optimization parameters
+    pub transition_is_grow: bool, // true for grow, false for shrink    // Spatial grid optimization parameters
     pub spatial_grid_enabled: bool,
     pub spatial_grid_cell_size: f32,
     pub spatial_grid_width: u32,
@@ -125,7 +71,7 @@ impl SimulationParams {
             // Default viewport is the entire virtual world (zoom level 1.0)
             viewport_width: VIRTUAL_WORLD_WIDTH,
             viewport_height: VIRTUAL_WORLD_HEIGHT,
-            boundary_mode: 1, // Hybrid mode: horizontal wrap + vertical bounce (0=wrap, 1=hybrid, 2=disappear)
+            boundary_mode: 2, // Respawn mode: particles respawn on opposite axis when out of bounds (0=wrap, 1=hybrid, 2=respawn)
             particle_render_size: PARTICLE_SIZE, // Use centralized particle size configuration
             force_scale: 400.0,
             r_smooth: 10.0, // Increased from 5.0 to make repulsion forces more visible
@@ -134,7 +80,7 @@ impl SimulationParams {
             inter_type_attraction_scale: 1.0,
             inter_type_radius_scale: 1.0,
             time: 0.0,
-            fisheye_strength: 3.0,
+            fisheye_strength: 0.0, // Disabled - no fisheye distortion
             background_color_r: 0.0,
             background_color_g: 0.0,
             background_color_b: 0.0,
@@ -252,7 +198,7 @@ impl SimulationParams {
 
     // Convert to buffer format for GPU upload with specific particle count
     pub fn to_buffer_with_particle_count(&self, actual_particle_count: u32) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(160); // 40 * 4 bytes = 160 bytes (added 4 spatial grid fields)
+        let mut buffer = Vec::with_capacity(160); // 40 * 4 bytes = 160 bytes (39 fields, no padding needed)
 
         // Match the exact layout from WGSL SimParams struct
         buffer.extend_from_slice(&self.delta_time.to_le_bytes()); // 0
@@ -312,7 +258,7 @@ impl SimulationParams {
     }
 
     pub fn get_buffer_size(&self) -> u32 {
-        160 // 40 * 4 bytes (added 4 spatial grid fields)
+        160 // 40 * 4 bytes (39 fields + 1 field removed = 40 fields total)
     }
 
     // === CENTRAL CONVERSION FUNCTIONS ===
@@ -389,8 +335,8 @@ impl SimulationParams {
 
     // Set zoom level and update viewport parameters
     pub fn apply_zoom(&mut self, zoom_level: f32, center_x: Option<f32>, center_y: Option<f32>) {
-        // Clamp zoom level to valid range (1.45 to 6.0)
-        let clamped_zoom = zoom_level.max(1.45).min(6.0);
+        // Clamp zoom level to valid range (1.0 to 6.0)
+        let clamped_zoom = zoom_level.max(1.0).min(6.0);
 
         // Calculate viewport size: at zoom 1.0 = full world, at zoom 2.0 = half world, etc.
         let viewport_width = VIRTUAL_WORLD_WIDTH / clamped_zoom;
