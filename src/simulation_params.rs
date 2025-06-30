@@ -98,11 +98,11 @@ impl SimulationParams {
             transition_end_count: 0,
             transition_is_grow: true,
 
-            // Spatial grid optimization - enabled by default with reasonable cell size
+            // Spatial grid optimization - enabled by default with optimized cell size
             spatial_grid_enabled: true,
-            spatial_grid_cell_size: 120.0, // 120 units per cell (VIRTUAL_WORLD_WIDTH/120 = 20x20 grid)
-            spatial_grid_width: (VIRTUAL_WORLD_WIDTH / 120.0) as u32, // 20 cells horizontally
-            spatial_grid_height: (VIRTUAL_WORLD_HEIGHT / 120.0) as u32, // 20 cells vertically
+            spatial_grid_cell_size: 80.0, // 80 units per cell (VIRTUAL_WORLD_WIDTH/80 = 40x40 grid)
+            spatial_grid_width: (VIRTUAL_WORLD_WIDTH / 80.0) as u32, // 40 cells horizontally
+            spatial_grid_height: (VIRTUAL_WORLD_HEIGHT / 80.0) as u32, // 40 cells vertically
         }
     }
 
@@ -270,8 +270,8 @@ impl SimulationParams {
         // Clamp temperature to valid range (3°C to 40°C)
         let clamped_temp = temp.max(3.0).min(40.0);
 
-        // 1. Update drift speed: temp [3, 40] → drift [0, -80]
-        let drift = -((clamped_temp - 3.0) * 80.0) / 37.0;
+        // 1. Update drift speed: temp [3, 40] → drift [0, -120]
+        let drift = -((clamped_temp - 3.0) * 120.0) / 37.0;
         self.drift_x_per_second = drift;
 
         // 2. Update friction: exponential mapping temp [3, 40] → friction [0.98, 0.05]
@@ -291,8 +291,8 @@ impl SimulationParams {
         // Clamp pressure to valid range (0 to 350)
         let clamped_pressure = pressure.max(0.0).min(350.0);
 
-        // 1. Update force scale: pressure [0, 350] → force_scale [100, 800]
-        let force_scale = 100.0 + (clamped_pressure * 700.0) / 350.0;
+        // 1. Update force scale: pressure [0, 350] → force_scale [100, 500]
+        let force_scale = 100.0 + (clamped_pressure * 400.0) / 350.0;
         self.force_scale = force_scale;
 
         // 2. Update rSmooth: exponential mapping pressure [0, 350] → rSmooth [20, 0.1]
@@ -316,10 +316,10 @@ impl SimulationParams {
         // Clamp electrical activity to valid range (0 to 3)
         let clamped_electrical = electrical_activity.max(0.0).min(3.0);
 
-        // Update inter-type attraction scale: cubic mapping [0, 3] → interTypeAttractionScale [0, 3]
+        // Update inter-type attraction scale: cubic mapping [0, 3] → interTypeAttractionScale [0, 1.5]
         let normalized_electrical = clamped_electrical / 3.0;
         let cubic_value = normalized_electrical * normalized_electrical * normalized_electrical;
-        let inter_type_attraction_scale = cubic_value * 3.0;
+        let inter_type_attraction_scale = cubic_value * 1.5;
         self.inter_type_attraction_scale = inter_type_attraction_scale;
 
         // Update lightning parameters based on electrical activity

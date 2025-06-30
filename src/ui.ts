@@ -109,10 +109,10 @@ function pressureToParticleCount(pressure: number): number {
 
 // Temperature mapping functions
 function temperatureToDrift(temp: number): number {
-    // Linear mapping: temp [3, 40] → drift [0, -80]
+    // Linear mapping: temp [3, 40] → drift [0, -120]
     // At temp = 3°C: drift = 0 px/s
-    // At temp = 40°C: drift = -80 px/s
-    return -((temp - 3) * 80) / 37;
+    // At temp = 40°C: drift = -120 px/s
+    return -((temp - 3) * 120) / 37;
 }
 
 function temperatureToFriction(temp: number): number {
@@ -163,8 +163,8 @@ function pressureToRSmooth(pressure: number): number {
 }
 
 function pressureToForceScale(pressure: number): number {
-    // Linear mapping: pressure [0, 350] → forceScale [100, 800]
-    return 100 + (pressure * 700) / 350;
+    // Linear mapping: pressure [0, 350] → forceScale [100, 500]
+    return 100 + (pressure * 400) / 350;
 }
 
 // UV Light mapping functions - NOW CONTROLS ONLY RADIUS SCALE
@@ -179,16 +179,16 @@ function uvToInterTypeRadiusScale(uv: number): number {
 function electricalActivityToInterTypeAttractionScale(
     electricalActivity: number
 ): number {
-    // Non-linear cubic mapping: Electrical Activity [0, 3] → interTypeAttractionScale [0, 3]
+    // Non-linear cubic mapping: Electrical Activity [0, 3] → interTypeAttractionScale [0, 1.5]
     // This creates a very pronounced acceleration curve where:
     // - Low electrical activity has very minimal effect on attraction
     // - Medium electrical activity has moderate effect
-    // - High electrical activity has extremely dramatic effect on attraction
-    // Formula: ITAS = (electricalActivity/3)³ × 3
+    // - High electrical activity has dramatic effect on attraction
+    // Formula: ITAS = (electricalActivity/3)³ × 1.5
     const normalizedElectrical = electricalActivity / 3.0; // Normalize to [0, 1]
     const cubicValue =
         normalizedElectrical * normalizedElectrical * normalizedElectrical; // Cube for strong non-linearity
-    return cubicValue * 3.0; // Scale back to [0, 3]
+    return cubicValue * 1.5; // Scale back to [0, 1.5]
 }
 
 // === Parameter Update Callbacks ===

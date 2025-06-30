@@ -207,11 +207,18 @@ fn should_process_spatial_interaction(p_idx: u32, q_idx: u32, p_cell: vec2<i32>,
     return random_value < probability_threshold;
 }
 
-// Calculate edge damping factor for particles near world boundaries
+// Calculate edge damping factor for particles near world boundaries with anti-sticking
 fn calculate_edge_damping_factor(pos: vec2<f32>) -> f32 {
-    // Define the damping zone near world edges
-    let damping_zone = 50.0;
-    // Distance from edge where damping starts
+    // Reduced damping zone scaling for less aggressive edge effects
+    // At 1600 particles: base_zone = 40.0 (reduced from 80.0)
+    // At 6400 particles: base_zone = 120.0 (reduced from 240.0)
+    let base_damping_zone = 40.0;
+    let reference_particle_count = 1600.0;
+    let particle_scale_factor = f32(sim_params.num_particles) / reference_particle_count;
+    // Use linear scaling instead of square root for less aggressive high-density damping
+    let density_scaling = particle_scale_factor;
+    let damping_zone = base_damping_zone * (1.0 + density_scaling * 2.0);
+
     let world_width = sim_params.virtual_world_width;
     let world_height = sim_params.virtual_world_height;
 
@@ -221,18 +228,80 @@ fn calculate_edge_damping_factor(pos: vec2<f32>) -> f32 {
     let dist_top = pos.y;
     let dist_bottom = world_height - pos.y;
 
-    // Find minimum distance to any edge
-    let min_edge_dist = min(min(dist_left, dist_right), min(dist_top, dist_bottom));
+    // ASYMMETRIC DAMPING: Only apply forces away from exit side to prevent accumulation
+    var min_edge_dist: f32;
 
-    // Calculate damping factor (1.0 = no damping, 0.0 = full damping)
+    if (abs(sim_params.drift_x_per_second) < 0.1) {
+        // No significant drift - apply to all edges (original behavior)
+        min_edge_dist = min(min(dist_left, dist_right), min(dist_top, dist_bottom));
+    } else if (sim_params.drift_x_per_second > 0.0) {
+        // Drifting right - particles exit RIGHT, so NO damping near RIGHT edge (exit side)
+        // Only apply very gentle damping near LEFT edge to prevent any accumulation there
+        min_edge_dist = dist_left;
+    } else {
+        // Drifting left - particles exit LEFT, so NO damping near LEFT edge (exit side)
+        // Only apply very gentle damping near RIGHT edge to prevent any accumulation there
+        min_edge_dist = dist_right;
+    }
+
+    // Multi-zone damping with exponential fall-off for better anti-sticking
     if (min_edge_dist >= damping_zone) {
         return 1.0;
         // No damping in the center
     }
     else {
-        return min_edge_dist / damping_zone;
-        // Linear damping near edges
+        // Use exponential curve for more aggressive edge repulsion
+        let normalized_dist = min_edge_dist / damping_zone;
+        let exponential_damping = normalized_dist * normalized_dist; // Quadratic for smoother transition
+
+        // Add extra repulsion in very edge zones (within 20% of damping zone)
+        if (normalized_dist < 0.2) {
+            let edge_repulsion = (0.2 - normalized_dist) / 0.2; // 0 to 1
+            return exponential_damping * (1.0 - edge_repulsion * 0.8); // Reduce forces by up to 80% at edges
+        }
+
+        return exponential_damping;
     }
+}
+
+// Calculate active anti-sticking force to push particles away from edges
+fn calculate_anti_sticking_force(pos: vec2<f32>) -> vec2<f32> {
+    let world_width = sim_params.virtual_world_width;
+    let world_height = sim_params.virtual_world_height;
+
+    // Calculate distances from each edge
+    let dist_left = pos.x;
+    let dist_right = world_width - pos.x;
+    let dist_top = pos.y;
+    let dist_bottom = world_height - pos.y;
+
+    // Much smaller anti-sticking zone - only for severe edge cases
+    let particle_scale_factor = f32(sim_params.num_particles) / 1600.0;
+    let anti_stick_zone = 30.0 + 20.0 * sqrt(particle_scale_factor); // Much smaller zone
+
+    var repulsion_force = vec2<f32>(0.0, 0.0);
+
+    // DISABLE anti-sticking forces when drift is active
+    // Drift naturally handles particle distribution, anti-sticking interferes
+    if (abs(sim_params.drift_x_per_second) < 0.1) {
+        // Only apply anti-sticking when there's no significant drift
+        // Apply gentle repulsion from all edges to prevent accumulation
+        if (dist_left < anti_stick_zone) {
+            let strength = (anti_stick_zone - dist_left) / anti_stick_zone;
+            let force_magnitude = strength * strength * 25.0; // Very gentle
+            repulsion_force.x += force_magnitude; // Push away from left edge
+        }
+        if (dist_right < anti_stick_zone) {
+            let strength = (anti_stick_zone - dist_right) / anti_stick_zone;
+            let force_magnitude = strength * strength * 25.0; // Very gentle
+            repulsion_force.x -= force_magnitude; // Push away from right edge
+        }
+    }
+
+    // NO vertical edge repulsion - allow particles to reach all boundaries freely
+    // Only horizontal anti-sticking remains for accumulation prevention
+
+    return repulsion_force;
 }
 
 // === Lenia Functions ===
@@ -352,18 +421,20 @@ fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, particle_vel:
         // Check if segment should be visible at current time
         let segment_age = time - segment.appear_time;
 
-        // SINGLE FRAME ELECTROMAGNETIC EFFECT: Only apply force on the exact frame when segment becomes visible
-        // This means segment_age should be between 0 and 1 frame duration
-        let frame_duration = sim_params.delta_time;
-        // Duration of one frame
+        // CONTINUOUS ELECTROMAGNETIC EFFECT: Apply force while segment is visible
+        // This creates a beautiful push-away effect instead of making particles disappear
+        let segment_duration = flash_duration * 0.8; // Segments are visible for most of the flash duration
 
-        if (segment_age < 0.0 || segment_age > frame_duration) {
+        if (segment_age < 0.0 || segment_age > segment_duration) {
             continue;
         }
 
+        // Calculate time-based intensity falloff for smoother effect
+        let intensity_factor = 1.0 - smoothstep(0.0, segment_duration, segment_age);
+
         // Calculate electromagnetic force from this segment
         let em_force = calculateSegmentElectromagneticForce(particle_pos, particle_vel, segment.start_pos, segment.end_pos, segment.generation, particle_type, time, segment_age);
-        total_em_force = total_em_force + em_force;
+        total_em_force = total_em_force + em_force * intensity_factor;
     }
 
     return total_em_force;
@@ -398,20 +469,40 @@ fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: v
     let force_vec_uv = particle_uv - closest_point;
     let distance_uv = length(force_vec_uv);
 
-    // Only affect particles within smaller radius for more localized effect
-    let influence_radius_uv = 0.03;
+    // Smaller influence radius like before, but with reduced strength for gentle push-away
+    let max_influence_radius_uv = 0.05;  // Back to smaller radius like before
+    let core_radius_uv = 0.01;           // Back to smaller core radius
+    let medium_radius_uv = 0.027;        // Back to smaller medium radius
 
-    if (distance_uv >= influence_radius_uv) {
-        // || distance_uv < 0.001) {
+    if (distance_uv >= max_influence_radius_uv || distance_uv < 0.001) {
         return vec2<f32>(0.0, 0.0);
     }
 
-    // Simple repulsion: push particles away from lightning
+    // Calculate repulsion direction
     let repulsion_direction = normalize(force_vec_uv);
-    let distance_factor = (influence_radius_uv - distance_uv) / influence_radius_uv;
 
-    // Much weaker repulsion strength for gentle pushing effect instead of teleporting
-    let repulsion_strength = 500.0 * sim_params.inter_type_attraction_scale * (1.0 + f32(generation) * 0.3);
+    // Gradual fall-off with multiple zones (much reduced strength for gentle push-away)
+    var distance_factor: f32;
+    var base_strength: f32;
+
+    if (distance_uv <= core_radius_uv) {
+        // Core zone: Much gentler strength
+        distance_factor = (core_radius_uv - distance_uv) / core_radius_uv;
+        base_strength = 30.0;   // Reduced from 60.0 to 30.0 for much gentler push
+    } else if (distance_uv <= medium_radius_uv) {
+        // Medium zone: Very gentle strength
+        let normalized_dist = (distance_uv - core_radius_uv) / (medium_radius_uv - core_radius_uv);
+        distance_factor = 1.0 - smoothstep(0.0, 1.0, normalized_dist);
+        base_strength = 20.0;   // Reduced from 40.0 to 20.0
+    } else {
+        // Outer zone: Extremely gentle effect
+        let normalized_dist = (distance_uv - medium_radius_uv) / (max_influence_radius_uv - medium_radius_uv);
+        distance_factor = 1.0 - smoothstep(0.0, 1.0, normalized_dist);
+        base_strength = 10.0;   // Reduced from 20.0 to 10.0
+    }
+
+    // Apply electrical activity scaling and generation effects (reduced multiplier)
+    let repulsion_strength = base_strength * sim_params.inter_type_attraction_scale * (1.0 + f32(generation) * 0.1);
     let repulsion_force_uv = repulsion_direction * distance_factor * repulsion_strength;
 
     // Convert force back to world coordinates
@@ -678,6 +769,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let edge_damping = calculate_edge_damping_factor(particle_p.pos);
     total_force = total_force * edge_damping;
 
+    // Add active anti-sticking edge repulsion force for high particle densities
+    let anti_stick_force = calculate_anti_sticking_force(particle_p.pos);
+    total_force = total_force + anti_stick_force;
+
     // Update velocity
     particle_p.vel = particle_p.vel + total_force * sim_params.force_scale * sim_params.delta_time;
     // Apply friction
@@ -706,10 +801,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     else if (sim_params.boundary_mode == 1u) {
-        // Hybrid mode: Horizontal wrap + Vertical bounce
-        let bounce_damping = 0.8;
-        let bounce_margin = 0.0005;
-        // Much smaller margin: ~1.2px in virtual world, ~0.4px in canvas
+        // Hybrid mode: Horizontal wrap + Vertical bounce with gentle anti-sticking
+        let bounce_damping = 0.75; // Moderate damping
+        let bounce_margin = 5.0; // Reasonable margin
+        let kick_velocity = 50.0; // Much gentler kick - reduced from 150
 
         // Horizontal: Wrap around (like wrap mode)
         if (particle_p.pos.x < 0.0) {
@@ -719,48 +814,113 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             particle_p.pos.x = particle_p.pos.x - sim_params.virtual_world_width;
         }
 
-        // Vertical: Bounce with small margin to prevent sticking
+        // Vertical: Bounce with gentle push to prevent sticking
         // Top boundary (y = 0)
         if (particle_p.pos.y < bounce_margin) {
             particle_p.pos.y = bounce_margin;
             if (particle_p.vel.y < 0.0) {
-                particle_p.vel.y = - particle_p.vel.y * bounce_damping;
+                particle_p.vel.y = -particle_p.vel.y * bounce_damping + kick_velocity;
+            } else if (particle_p.vel.y < kick_velocity) {
+                particle_p.vel.y = kick_velocity; // Gentle minimum outward velocity
             }
         }
         // Bottom boundary (y = height)
         if (particle_p.pos.y >= sim_params.virtual_world_height - bounce_margin) {
             particle_p.pos.y = sim_params.virtual_world_height - bounce_margin;
             if (particle_p.vel.y > 0.0) {
-                particle_p.vel.y = - particle_p.vel.y * bounce_damping;
+                particle_p.vel.y = -particle_p.vel.y * bounce_damping - kick_velocity;
+            } else if (particle_p.vel.y > -kick_velocity) {
+                particle_p.vel.y = -kick_velocity; // Gentle minimum outward velocity
             }
         }
-    }
-    else if (sim_params.boundary_mode == 2u) {
-        // Disappear and respawn
+    }    else if (sim_params.boundary_mode == 2u) {
+        // Disappear and respawn with better distribution
         let is_out_of_bounds = particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width || particle_p.pos.y < 0.0 || particle_p.pos.y >= sim_params.virtual_world_height;
 
-        if (is_out_of_bounds) {
-            // Give particle initial velocity in drift direction to prevent sticking
-            particle_p.vel = vec2<f32>(sim_params.drift_x_per_second * 1.8, 0.0);
+        // Additional respawn condition for particles stuck near Y edges
+        let y_margin = 2.0; // 2 units from top/bottom edges
+        let is_near_y_edge = particle_p.pos.y < y_margin || particle_p.pos.y > (sim_params.virtual_world_height - y_margin);
 
-            // Randomize Y position for respawn
-            particle_p.pos.y = random_float(global_id.x + particle_p.ptype) * sim_params.virtual_world_height;
+        if (is_out_of_bounds || is_near_y_edge) {
+            // Randomized initial velocity per particle
+            let base_velocity_boost = 1.2 + (f32(sim_params.num_particles) / 1600.0) * 0.3; // Base boost
+            let velocity_seed = hash(global_id.x * 41u + u32(sim_params.time * 1000.0) + particle_p.ptype * 43u);
+            let random_velocity_factor = random_float(velocity_seed); // 0.0 to 1.0
+            let velocity_boost = base_velocity_boost * random_velocity_factor; // Randomize between 0 and base_velocity_boost
+            particle_p.vel = vec2<f32>(sim_params.drift_x_per_second * velocity_boost, 0.0);            if (is_near_y_edge) {
+                // Particles near Y edges get clustered Y positioning for more natural distribution
+                let y_seed = hash(global_id.x * 13u + u32(sim_params.time * 1000.0) + particle_p.ptype * 17u);
+                let cluster_seed = hash(global_id.x * 29u + u32(sim_params.time * 500.0) + particle_p.ptype * 31u);
 
-            // Determine X respawn position based on drift direction
-            if (sim_params.drift_x_per_second > EPSILON) {
-                // Drifting significantly right, respawn left
-                particle_p.pos.x = EPSILON;
+                // Create slow-moving cluster centers that drift over time
+                let cluster_time_factor = sim_params.time * 0.1; // Slow cluster movement
+                let num_clusters = 3.0; // 3 main cluster zones
+
+                // Generate cluster center positions using sine waves for smooth movement
+                var cluster_centers: array<f32, 3>;
+                cluster_centers[0] = 0.2 + 0.15 * sin(cluster_time_factor * 0.7 + f32(particle_p.ptype) * 0.5);
+                cluster_centers[1] = 0.5 + 0.1 * sin(cluster_time_factor * 0.9 + f32(particle_p.ptype) * 0.7);
+                cluster_centers[2] = 0.8 + 0.15 * sin(cluster_time_factor * 0.5 + f32(particle_p.ptype) * 0.3);
+
+                // Choose a cluster based on particle properties and some randomness
+                let cluster_choice = random_float(cluster_seed);
+                var chosen_cluster_y: f32;
+                var cluster_strength: f32;
+
+                if (cluster_choice < 0.35) {
+                    // Cluster 1: ~35% chance
+                    chosen_cluster_y = cluster_centers[0];
+                    cluster_strength = 0.08; // Moderate clustering
+                } else if (cluster_choice < 0.7) {
+                    // Cluster 2: ~35% chance
+                    chosen_cluster_y = cluster_centers[1];
+                    cluster_strength = 0.06; // Tighter clustering
+                } else {
+                    // Cluster 3: ~30% chance
+                    chosen_cluster_y = cluster_centers[2];
+                    cluster_strength = 0.1; // Looser clustering
+                }
+
+                // Add some randomness around the cluster center using Gaussian-like distribution
+                let random1 = random_float(y_seed);
+                let random2 = random_float(hash(y_seed + 1u));
+
+                // Box-Muller-like transformation for more natural distribution
+                let gaussian_like = sqrt(-2.0 * log(max(random1, 0.0001))) * cos(6.28318530718 * random2);
+                let cluster_offset = gaussian_like * cluster_strength;
+
+                // Apply cluster positioning
+                let clustered_y = chosen_cluster_y + cluster_offset;
+
+                // Apply edge avoidance and bounds
+                let edge_avoidance_margin = 50.0; // 50 units from top/bottom
+                let safe_height = sim_params.virtual_world_height - 2.0 * edge_avoidance_margin;
+                let normalized_y = clamp(clustered_y, 0.0, 1.0);
+
+                particle_p.pos.y = edge_avoidance_margin + normalized_y * safe_height;
+            } else {
+                // Keep existing Y position for normal X-boundary respawns
+                // Only clamp Y to valid bounds if somehow out of range
+                particle_p.pos.y = clamp(particle_p.pos.y, 0.0, sim_params.virtual_world_height);
             }
-            else if (sim_params.drift_x_per_second < - EPSILON) {
-                // Drifting significantly left, respawn right
-                particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
+
+            // Deterministic X respawn - particles spawn exactly at the appropriate edge
+            if (sim_params.drift_x_per_second > EPSILON) {
+                // Drifting significantly right, respawn at left edge (x=0)
+                particle_p.pos.x = 0.0;
+                // Keep existing velocity (no forced velocity changes)
+            }
+            else if (sim_params.drift_x_per_second < -EPSILON) {
+                // Drifting significantly left, respawn at right edge (x=1UV)
+                particle_p.pos.x = sim_params.virtual_world_width;
+                // Keep existing velocity (no forced velocity changes)
             }
             else {
-                // No significant drift, respawn on the right (consistent default)
-                particle_p.pos.x = sim_params.virtual_world_width - EPSILON;
+                // No significant drift, respawn on the right edge
+                particle_p.pos.x = sim_params.virtual_world_width;
+                // Keep existing velocity (no forced velocity changes)
             }
 
-            // particle_p.ptype = u32(random_float(global_id.x + u32(particle_p.pos.y)) * f32(sim_params.num_types)); // Optionally randomize type
         }
     }
 
@@ -772,7 +932,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (progress < 1.0) {
             // Transition in progress
             if (particle_p.transition_type == 0u) {
-                // Grow transition: activate immediately and interpolate size
+                // Grow transition: Give new random position at start, then activate and interpolate size
+
+                // Check if this is the very beginning of the grow transition (first frame)
+                if (progress < 0.1) {  // Within first 10% of transition
+                    // Generate new random position for the growing particle
+                    let pos_seed_x = hash(global_id.x * 19u + u32(sim_params.time * 1000.0) + particle_p.ptype * 23u);
+                    let pos_seed_y = hash(global_id.x * 29u + u32(sim_params.time * 1000.0) + particle_p.ptype * 31u);
+
+                    particle_p.pos.x = random_float(pos_seed_x) * sim_params.virtual_world_width;
+                    particle_p.pos.y = random_float(pos_seed_y) * sim_params.virtual_world_height;
+
+                    // Give small random initial velocity
+                    let vel_seed_x = hash(pos_seed_x + 37u);
+                    let vel_seed_y = hash(pos_seed_y + 41u);
+                    particle_p.vel.x = (random_float(vel_seed_x) - 0.5) * 50.0;  // Random velocity -25 to +25
+                    particle_p.vel.y = (random_float(vel_seed_y) - 0.5) * 50.0;
+                }
+
                 particle_p.is_active = 1u;
                 // Activate at start of grow transition
                 let min_visible_size = 3.0;

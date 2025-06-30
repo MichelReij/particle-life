@@ -888,7 +888,7 @@ impl ParticleLifeEngine {
 
     #[wasm_bindgen]
     pub fn set_force_scale(&mut self, value: f32) {
-        self.simulation_params.force_scale = value.max(100.0).min(800.0);
+        self.simulation_params.force_scale = value.max(100.0).min(500.0);
         console_log!(
             "🔧 Individual parameter: force_scale = {:.1}",
             self.simulation_params.force_scale
@@ -1005,5 +1005,20 @@ impl ParticleLifeEngine {
             "🔧 Individual parameter: particle_render_size = {:.1}",
             self.simulation_params.particle_render_size
         );
+    }
+
+    /// Check if lightning is currently visible (simple status check)
+    #[wasm_bindgen]
+    pub fn is_lightning_visible(&self) -> bool {
+        // Return true if there's electrical activity that could generate lightning
+        // This is a simplified check that doesn't require GPU buffer reads
+        self.simulation_params.lightning_frequency > 0.0
+            && self.simulation_params.inter_type_attraction_scale > 0.1
+    }
+
+    /// Get current electrical activity level for lightning generation
+    #[wasm_bindgen]
+    pub fn get_electrical_activity(&self) -> f32 {
+        self.simulation_params.inter_type_attraction_scale
     }
 }

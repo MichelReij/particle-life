@@ -3,6 +3,41 @@ use crate::{InteractionRules, ParticleSystem, SimulationParams};
 use rand::Rng;
 use wgpu::util::DeviceExt;
 
+// Lightning bolt struct that matches WGSL layout
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct LightningBolt {
+    pub num_segments: u32,
+    pub flash_id: u32,
+    pub start_time: f32,
+    pub next_lightning_time: f32,
+    pub is_super_lightning: u32,
+    pub needs_rules_reset: u32,
+    pub _padding1: u32,
+    pub _padding2: u32,
+}
+
+impl LightningBolt {
+    /// Check if the lightning bolt is visible (has segments)
+    pub fn is_visible(&self) -> bool {
+        self.num_segments > 0
+    }
+
+    /// Check if this is a super lightning bolt
+    pub fn is_super(&self) -> bool {
+        self.is_super_lightning != 0
+    }
+
+    /// Get lightning type as string for logging
+    pub fn lightning_type(&self) -> &'static str {
+        if self.is_super() {
+            "SUPER LIGHTNING"
+        } else {
+            "normal lightning"
+        }
+    }
+}
+
 // Conditional error type: JsValue for WASM, Box<dyn std::error::Error> for native
 #[cfg(target_arch = "wasm32")]
 pub type RendererError = wasm_bindgen::JsValue;
@@ -45,7 +80,9 @@ pub struct WebGpuRenderer {
     quad_vertex_buffer: wgpu::Buffer,     // Add quad vertex buffer for instanced rendering
 
     // Textures for post-processing pipeline
+    scene_texture: wgpu::Texture,
     scene_texture_view: wgpu::TextureView,
+    intermediate_texture: wgpu::Texture,
     intermediate_texture_view: wgpu::TextureView,
     #[allow(dead_code)] // Used in bind group creation
     scene_sampler: wgpu::Sampler,
@@ -365,7 +402,9 @@ impl WebGpuRenderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: surface_format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
 
@@ -378,7 +417,9 @@ impl WebGpuRenderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: surface_format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
 
@@ -1484,7 +1525,9 @@ impl WebGpuRenderer {
             lightning_bolt_buffer,
             particle_colors_buffer,
             quad_vertex_buffer,
+            scene_texture,
             scene_texture_view,
+            intermediate_texture,
             intermediate_texture_view,
             scene_sampler,
             background_render_pipeline,
@@ -1716,9 +1759,9 @@ impl WebGpuRenderer {
             lightning_pass.draw(0..6, 0..1); // Fullscreen quad
         }
 
-        // Pass 5: Fisheye (always runs) - scene_texture -> intermediate_texture
-        // The shader decides whether to apply the effect based on fisheye_strength parameter
-        {
+        // Pass 5: Fisheye (conditional) - scene_texture -> intermediate_texture
+        if simulation_params.fisheye_strength != 0.0 {
+            // Apply fisheye distortion via shader
             let mut fisheye_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Fisheye Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1737,6 +1780,23 @@ impl WebGpuRenderer {
             fisheye_pass.set_pipeline(&self.fisheye_render_pipeline);
             fisheye_pass.set_bind_group(0, &self.fisheye_render_bind_group, &[]);
             fisheye_pass.draw(0..6, 0..1); // Fullscreen quad
+        } else {
+            // Skip fisheye processing - direct copy from scene_texture to intermediate_texture
+            encoder.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.scene_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.intermediate_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                self.scene_texture.size(),
+            );
         }
 
         // Pass 6: Zoom post-processing (final step) - matches TypeScript pipeline
@@ -1909,6 +1969,57 @@ impl WebGpuRenderer {
                 &data,
             );
         }
+    }
+
+    /// Read current lightning bolt status from GPU buffer
+    pub async fn get_lightning_status(&self) -> Result<LightningBolt, RendererError> {
+        // Create a staging buffer to read the data back from GPU
+        let size = std::mem::size_of::<LightningBolt>() as u64;
+        let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Lightning Status Staging Buffer"),
+            size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        // Create command encoder to copy data from GPU buffer to staging buffer
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Lightning Status Copy Encoder"),
+            });
+
+        encoder.copy_buffer_to_buffer(&self.lightning_bolt_buffer, 0, &staging_buffer, 0, size);
+
+        // Submit the copy command
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        // Map the staging buffer and read the data
+        let buffer_slice = staging_buffer.slice(..);
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).ok();
+        });
+
+        // Wait for mapping to complete
+        self.device
+            .poll(wgpu::MaintainBase::Wait)
+            .map_err(|e| renderer_error("Failed to poll device", e))?;
+        let map_result = receiver.await.map_err(|_| {
+            renderer_error("Failed to receive buffer mapping result", "oneshot channel")
+        })?;
+        map_result.map_err(|e| renderer_error("Buffer mapping failed", e))?;
+
+        // Read the data
+        let data = buffer_slice.get_mapped_range();
+        let lightning_bolt: LightningBolt =
+            *bytemuck::from_bytes(&data[..std::mem::size_of::<LightningBolt>()]);
+
+        // Clean up
+        drop(data);
+        staging_buffer.unmap();
+
+        Ok(lightning_bolt)
     }
 
     pub fn get_device(&self) -> &wgpu::Device {

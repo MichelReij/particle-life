@@ -369,6 +369,9 @@ class App {
 
                 // Update FPS display
                 this.updateFPSDisplay();
+
+                // Check lightning status (once per second to avoid spam)
+                this.checkLightningStatus();
             }
 
             if (this.engine) {
@@ -460,6 +463,35 @@ class App {
     // Getter for debugging access
     get simulation() {
         return this.engine;
+    }
+
+    private lastElectricalActivity = 0;
+    private lastLightningCheck = 0;
+
+    private async checkLightningStatus() {
+        if (this.engine) {
+            try {
+                const currentTime = performance.now();
+                const currentElectricalActivity =
+                    this.engine.get_electrical_activity();
+
+                // Track electrical activity changes (without logging)
+                if (
+                    Math.abs(
+                        currentElectricalActivity - this.lastElectricalActivity
+                    ) > 0.1
+                ) {
+                    this.lastElectricalActivity = currentElectricalActivity;
+                }
+
+                // Update lightning check timestamp
+                if (currentTime - this.lastLightningCheck > 5000) {
+                    this.lastLightningCheck = currentTime;
+                }
+            } catch (error) {
+                // Silently fail - lightning status checking is non-critical
+            }
+        }
     }
 }
 

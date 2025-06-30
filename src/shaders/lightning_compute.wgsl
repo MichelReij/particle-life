@@ -140,8 +140,6 @@ fn multi_random(seed: u32, count: u32) -> array<f32, 8> {
     return values;
 }
 
-
-
 @compute @workgroup_size(1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Only use the first thread for lightning generation
@@ -182,7 +180,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (lightning_bolt.next_lightning_time <= 0.0) {
         // For the first lightning, start much sooner to avoid long initial wait
         let init_seed = generate_segment_seed(time, 0u, 999u, electricalActivity);
-        let quick_delay = init_seed * 3.0; // 0-3s initial delay
+        let quick_delay = init_seed * 3.0;
+        // 0-3s initial delay
         lightning_bolt.next_lightning_time = time + quick_delay;
     }
 
@@ -196,17 +195,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         // Use different distributions for more natural variation
         // Exponential-like distribution for more realistic storm patterns
-        let random_factor1 = pow(interval_seed1, 2.0); // Quadratic for more short intervals
-        let random_factor2 = interval_seed2; // Linear
-        let random_factor3 = sqrt(interval_seed3); // Square root for more long intervals
+        let random_factor1 = pow(interval_seed1, 2.0);
+        // Quadratic for more short intervals
+        let random_factor2 = interval_seed2;
+        // Linear
+        let random_factor3 = sqrt(interval_seed3);
+        // Square root for more long intervals
 
         // Combine multiple random factors for complex timing patterns
         let combined_random = (random_factor1 * 0.5) + (random_factor2 * 0.3) + (random_factor3 * 0.2);
 
         // Weather pattern simulation - create longer-term storm cycles
-        let weather_cycle = sin(time * 0.05) * 0.5 + 0.5; // ~2-minute cycles
-        let storm_intensity = sin(time * 0.02 + electricalActivity) * 0.3 + 0.7; // ~5-minute cycles
-        let atmospheric_pressure = cos(time * 0.08 + 1.57) * 0.2 + 0.8; // ~1.5-minute cycles
+        let weather_cycle = sin(time * 0.05) * 0.5 + 0.5;
+        // ~2-minute cycles
+        let storm_intensity = sin(time * 0.02 + electricalActivity) * 0.3 + 0.7;
+        // ~5-minute cycles
+        let atmospheric_pressure = cos(time * 0.08 + 1.57) * 0.2 + 0.8;
+        // ~1.5-minute cycles
 
         // Storm cell movement - simulate moving thunderstorm cells
         let storm_cell_x = sin(time * 0.03) * 0.5 + 0.5;
@@ -216,16 +221,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         // Cumulative charge buildup - longer gaps increase probability
         let time_since_last = time - lightning_bolt.start_time;
-        let charge_buildup = clamp(time_since_last / 20.0, 0.0, 2.0); // Builds up over 20 seconds
-        let charge_factor = 1.0 + charge_buildup * 0.5; // Up to 50% increase in likelihood
+        let charge_buildup = clamp(time_since_last / 20.0, 0.0, 2.0);
+        // Builds up over 20 seconds
+        let charge_factor = 1.0 + charge_buildup * 0.5;
+        // Up to 50% increase in likelihood
 
         // Create bursts and lulls: sometimes lightning comes in clusters
         let burst_seed = generate_segment_seed(time, lightning_bolt.flash_id, 2000u, electricalActivity);
 
         // Enhanced burst/lull logic with weather influence
         let weather_burst_bias = weather_cycle * storm_intensity * atmospheric_pressure * storm_cell_factor;
-        let burst_threshold = 0.3 + (weather_burst_bias - 0.5) * 0.2; // Weather affects burst probability
-        let normal_threshold = 0.7 + (weather_burst_bias - 0.5) * 0.1; // Weather affects normal/lull balance
+        let burst_threshold = 0.3 + (weather_burst_bias - 0.5) * 0.2;
+        // Weather affects burst probability
+        let normal_threshold = 0.7 + (weather_burst_bias - 0.5) * 0.1;
+        // Weather affects normal/lull balance
 
         var final_variation: f32;
 
@@ -233,11 +242,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // Burst mode - very short intervals, influenced by weather
             let burst_intensity = weather_burst_bias * charge_factor;
             final_variation = (0.3 + combined_random * 1.2) / burst_intensity;
-        } else if (burst_seed < normal_threshold) {
+        }
+        else if (burst_seed < normal_threshold) {
             // Normal mode - medium intervals with weather variation
             let normal_factor = (weather_burst_bias * 0.5 + 0.5) * charge_factor;
             final_variation = (1.5 + combined_random * 5.0) / normal_factor;
-        } else {
+        }
+        else {
             // Lull mode - longer intervals, less affected by charge buildup
             let lull_factor = weather_burst_bias * 0.7 + 0.3;
             final_variation = (4.0 + combined_random * 12.0) / (lull_factor * sqrt(charge_factor));
@@ -245,9 +256,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         // Apply complex environmental scaling
         let environmental_factor = weather_cycle * storm_intensity * atmospheric_pressure * storm_cell_factor;
-        final_variation *= (1.0 - normalized_activity * 0.6); // Activity scaling
-        final_variation *= (1.0 - environmental_factor * 0.4); // Environmental scaling
-        final_variation = max(final_variation, 0.2); // Minimum 0.2s interval
+        final_variation *= (1.0 - normalized_activity * 0.6);
+        // Activity scaling
+        final_variation *= (1.0 - environmental_factor * 0.4);
+        // Environmental scaling
+        final_variation = max(final_variation, 0.2);
+        // Minimum 0.2s interval
 
         lightning_bolt.next_lightning_time = time + base_interval + final_variation;
 
@@ -257,14 +271,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         // 5% chance for super lightning - roll the dice!
         let super_lightning_roll = fract(sin(time * 87.9123 + electricalActivity * 52.845 + f32(lightning_bolt.flash_id) * 63.7429) * 37281.9876);
-        let is_super_lightning_bool = super_lightning_roll < 0.05; // 5% chance
+        let is_super_lightning_bool = super_lightning_roll < 0.05;
+        // 5% chance
 
         // Generate a new lightning bolt
         lightning_bolt.flash_id = lightning_bolt.flash_id + 1u;
         lightning_bolt.start_time = time;
         lightning_bolt.num_segments = 0u;
-        lightning_bolt.is_super_lightning = select(0u, 1u, is_super_lightning_bool); // Set the flag
-        lightning_bolt.needs_rules_reset = 0u; // Initialize to 0, will be set to 1 when last generation is reached
+        lightning_bolt.is_super_lightning = select(0u, 1u, is_super_lightning_bool);
+        // Set the flag
+        lightning_bolt.needs_rules_reset = 0u;
+        // Initialize to 0, will be set to 1 when last generation is reached
         lightning_bolt._padding1 = 0u;
         lightning_bolt._padding2 = 0u;
 
@@ -314,27 +331,28 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
             // Super lightning has thicker, brighter bolts
             var segment_thickness: f32;
-            var segment_alpha: f32;
+            var segment_alpha: f32 = 1.0;
+            // Full alpha for visibility
 
             if (lightning_bolt.is_super_lightning == 1u) {
                 // Super lightning: moderately thicker and brighter
-                segment_thickness = 0.003 + position_randoms[4] * 0.002; // Thicker 0.003-0.005 range
-                segment_alpha = 1.0; // Full alpha for super lightning
-            } else {
+                segment_thickness = 0.0012 + position_randoms[4] * 0.008;
+            }
+            else {
                 // Normal lightning thickness
-                segment_thickness = 0.002 + position_randoms[4] * 0.001; // Normal thickness 0.002-0.003 range
-                segment_alpha = 1.0; // Full alpha
+                segment_thickness = 0.0009 + position_randoms[4] * 0.0007;
             }
 
             lightning_segments[lightning_bolt.num_segments].thickness = segment_thickness;
             lightning_segments[lightning_bolt.num_segments].alpha = segment_alpha;
             lightning_segments[lightning_bolt.num_segments].generation = 0u;
-            lightning_segments[lightning_bolt.num_segments].appear_time = lightning_bolt.start_time + 0.01; // Small delay to match staggered timing
+            lightning_segments[lightning_bolt.num_segments].appear_time = lightning_bolt.start_time + 0.01;
+            // Small delay to match staggered timing
             lightning_segments[lightning_bolt.num_segments].is_visible = 0u;
-                // Start invisible - will be made visible by lifecycle logic
-                lightning_segments[lightning_bolt.num_segments]._padding = 0u;
-                lightning_segments[lightning_bolt.num_segments]._padding2 = 0u;
-                lightning_segments[lightning_bolt.num_segments]._padding3 = 0u;
+            // Start invisible - will be made visible by lifecycle logic
+            lightning_segments[lightning_bolt.num_segments]._padding = 0u;
+            lightning_segments[lightning_bolt.num_segments]._padding2 = 0u;
+            lightning_segments[lightning_bolt.num_segments]._padding3 = 0u;
             lightning_bolt.num_segments = lightning_bolt.num_segments + 1u;
         }
 
@@ -390,7 +408,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             else if (generation <= 4u) {
                 // Secondary branches: Mix of 0-2 branches
-                 if (branch_randoms[0] < 0.3) {
+                if (branch_randoms[0] < 0.3) {
                     num_spawns = 1u;
                     // 29% chance: 1 branch
                 }
@@ -505,29 +523,29 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 var segment_length: f32;
                 if (generation == 0u) {
                     // Main trunk: shorter segments (0.018-0.035 UV) - subtly increased
-                    segment_length = 0.018 + segment_randoms[2] * 0.017;
+                    segment_length = 0.015 + segment_randoms[2] * 0.015;
                 }
                 else if (generation == 1u) {
                     // Primary branches: medium length (0.032-0.05 UV) - subtly increased
-                    segment_length = 0.032 + segment_randoms[2] * 0.018;
+                    segment_length = 0.024 + segment_randoms[2] * 0.020;
                 }
                 else if (generation <= 7u) {
                     // Secondary+ branches: longest (0.032-0.06 UV) - subtly increased
-                    segment_length = 0.032 + segment_randoms[2] * 0.028;
+                    segment_length = 0.030 + segment_randoms[2] * 0.024;
                 }
                 else {
                     // Super lightning extra generations (8-9): even longer for wider spread
-                    segment_length = 0.025 + segment_randoms[2] * 0.025;
+                    segment_length = 0.032 + segment_randoms[2] * 0.025;
                 }
-
-
 
                 // Super lightning gets extra size boost for more dramatic effect
                 if (lightning_bolt.is_super_lightning == 1u) {
-                    segment_length *= 2.0; // Make super lightning twice as large
-                } else {
+                    segment_length *= 2.5;
+                    // Make super lightning twice as large
+                }
+                else {
                     // Add slight length variation based on electrical activity
-                    segment_length *= (0.9 + electricalActivity * 0.2);
+                    segment_length *= (0.7 + electricalActivity * 0.1);
                 }
 
                 // Calculate segment end position directly from angle and length
@@ -536,11 +554,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // Much more realistic thickness scaling (thicker for better anti-aliasing)
                 var segment_thickness: f32;
                 if (generation == 0u) {
-                    segment_thickness = 0.001 + segment_randoms[3] * 0.0008;
+                    segment_thickness = 0.0008 + segment_randoms[3] * 0.0006;
                     // 0.001 - 0.0018 (doubled for better visibility)
                 }
                 else if (generation == 1u) {
-                    segment_thickness = 0.0008 + segment_randoms[3] * 0.0006;
+                    segment_thickness = 0.0007 + segment_randoms[3] * 0.0005;
                     // 0.0008 - 0.0014 (doubled for better visibility)
                 }
                 else if (generation == 2u) {
@@ -548,7 +566,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     // 0.0006 - 0.001 (doubled for better visibility)
                 }
                 else {
-                    segment_thickness = 0.0004 + segment_randoms[3] * 0.0002;
+                    segment_thickness = 0.0005 + segment_randoms[3] * 0.0003;
                     // 0.0004 - 0.0006 (doubled for better visibility)
                 }
 
@@ -600,41 +618,56 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let lightning_age = time - lightning_bolt.start_time;
 
         // Don't update lifecycle in the same frame as creation to avoid race conditions
-        if (lightning_age > 0.016) { // Skip first frame (16ms at 60fps)
+        if (lightning_age > 0.016) {
+            // Skip first frame (16ms at 60fps)
             var any_segments_visible = false;
 
             // Update visibility with more natural fading and flickering
             for (var i = 0u; i < lightning_bolt.num_segments; i = i + 1u) {
                 let segment_age = time - lightning_segments[i].appear_time;
 
-            // Variable duration based on generation (main trunk lasts longer)
-            // Increased durations for better study
-            var segment_duration: f32;
-            if (lightning_segments[i].generation == 0u) {
-                segment_duration = 1.5 + hash_to_float(hash32(i * 0x9E3779B9u)) * 0.5;
-                // 1.5 - 2.0s (main trunk)
-            }
-            else if (lightning_segments[i].generation == 1u) {
-                segment_duration = 1.3 + hash_to_float(hash32(i * 0x85EBCA6Bu)) * 0.5;
-                // 1.3 - 1.8s (primary branches)
-            }
-            else {
-                segment_duration = 1.1 + hash_to_float(hash32(i * 0x45d9f3bu)) * 0.5;
-                // 1.1 - 1.6s (secondary branches)
-            }
+                // Variable duration based on generation (main trunk lasts longer)
+                // Increased durations for better study
+                var segment_duration: f32;
+                if (lightning_segments[i].generation == 0u) {
+                    segment_duration = 1.5 + hash_to_float(hash32(i * 0x9E3779B9u)) * 0.5;
+                    // 1.5 - 2.0s (main trunk)
+                }
+                else if (lightning_segments[i].generation == 1u) {
+                    segment_duration = 1.3 + hash_to_float(hash32(i * 0x85EBCA6Bu)) * 0.5;
+                    // 1.3 - 1.8s (primary branches)
+                }
+                else {
+                    segment_duration = 1.1 + hash_to_float(hash32(i * 0x45d9f3bu)) * 0.5;
+                    // 1.1 - 1.6s (secondary branches)
+                }
 
-            if (segment_age > 0.0 && segment_age < segment_duration) {
-                lightning_segments[i].is_visible = 1u;
-                any_segments_visible = true;
+                if (segment_age > 0.0 && segment_age < segment_duration) {
+                    lightning_segments[i].is_visible = 1u;
+                    any_segments_visible = true;
 
-                // DEBUG: Make lightning super visible with full alpha
-                lightning_segments[i].alpha = 1.0;
+                    // Beautiful gradual fade-out instead of abrupt disappearance
+                    let fade_start = segment_duration * 0.6;
+                    // Start fading at 60% of duration
+                    let base_alpha = 1.0 - (f32(lightning_segments[i].generation) * 0.15);
+                    // Generation-based base alpha
+
+                    if (segment_age < fade_start) {
+                        // Full brightness during first 60% of lifetime
+                        lightning_segments[i].alpha = base_alpha;
+                    }
+                    else {
+                        // Gradual fade during last 40% of lifetime
+                        let fade_progress = (segment_age - fade_start) / (segment_duration - fade_start);
+                        let fade_factor = 1.0 - smoothstep(0.0, 1.0, fade_progress);
+                        lightning_segments[i].alpha = base_alpha * fade_factor;
+                    }
+                }
+                else {
+                    lightning_segments[i].is_visible = 0u;
+                    lightning_segments[i].alpha = 0.0;
+                }
             }
-            else {
-                lightning_segments[i].is_visible = 0u;
-                lightning_segments[i].alpha = 0.0;
-            }
-        }
 
             // SUPER LIGHTNING RULES RESET: Trigger when lightning is most visually prominent
             if (lightning_bolt.is_super_lightning == 1u && lightning_bolt.needs_rules_reset == 0u) {
@@ -664,8 +697,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // - High-generation branches are visible (complex structure)
                 // - High average visibility (segments are bright and clear)
                 // - OR fallback: many segments visible regardless of generation
-                if ((visible_segments >= 8u && has_high_generation && avg_visibility >= 0.8) ||
-                    (visible_segments >= 15u && avg_visibility >= 0.7)) {
+                if ((visible_segments >= 8u && has_high_generation && avg_visibility >= 0.8) || (visible_segments >= 15u && avg_visibility >= 0.7)) {
                     lightning_bolt.needs_rules_reset = 1u;
                 }
             }
@@ -673,9 +705,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // Clear bolt when all segments are gone
             if (!any_segments_visible) {
                 lightning_bolt.num_segments = 0u;
-                lightning_bolt.is_super_lightning = 0u; // Reset super lightning flag
-                lightning_bolt.needs_rules_reset = 0u;  // Reset rules reset flag
+                lightning_bolt.is_super_lightning = 0u;
+                // Reset super lightning flag
+                lightning_bolt.needs_rules_reset = 0u;
+                // Reset rules reset flag
             }
-        } // End of lifecycle management guard
+        }
+        // End of lifecycle management guard
     }
 }
