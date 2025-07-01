@@ -19,6 +19,11 @@ export const DEFAULT_NUM_PARTICLES = 3200;
 export const MAX_PARTICLES = 6400;
 export const MIN_PARTICLES = 1600;
 
+// FPS display configuration
+export const FPS_SAMPLE_COUNT = 10; // Number of samples for moving average
+export const FPS_UPDATE_INTERVAL = 0.5; // Update interval in seconds
+export const FPS_CONSOLE_INTERVAL = 3.0; // Console output interval in seconds
+
 // Convenience constants derived from the main dimensions
 export const VIRTUAL_WORLD_CENTER_X = VIRTUAL_WORLD_WIDTH / 2.0; // 1620.0
 export const VIRTUAL_WORLD_CENTER_Y = VIRTUAL_WORLD_HEIGHT / 2.0; // 1620.0

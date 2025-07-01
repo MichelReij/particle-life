@@ -19,6 +19,11 @@ pub const DEFAULT_NUM_PARTICLES: u32 = 3200;
 pub const MAX_PARTICLES: u32 = 6400;
 pub const MIN_PARTICLES: u32 = 1600;
 
+/// FPS display configuration
+pub const FPS_SAMPLE_COUNT: usize = 10; // Number of samples for moving average
+pub const FPS_UPDATE_INTERVAL: f32 = 0.5; // Update interval in seconds
+pub const FPS_CONSOLE_INTERVAL: f32 = 3.0; // Console output interval in seconds
+
 /// Convenience constants derived from the main dimensions
 pub const VIRTUAL_WORLD_CENTER_X: f32 = VIRTUAL_WORLD_WIDTH / 2.0; // 1620.0
 pub const VIRTUAL_WORLD_CENTER_Y: f32 = VIRTUAL_WORLD_HEIGHT / 2.0; // 1620.0
@@ -119,8 +124,8 @@ mod tests {
         assert_eq!(config.virtual_world_height, 3240.0);
         assert_eq!(config.canvas_width, 1080.0);
         assert_eq!(config.canvas_height, 1080.0);
-        assert_eq!(config.particle_size, 16.0);
-        assert_eq!(config.default_num_particles, 6400);
+        assert_eq!(config.particle_size, 24.0);
+        assert_eq!(config.default_num_particles, 3200);
         assert_eq!(config.max_particles, 6400);
         assert_eq!(config.min_particles, 1600);
 
@@ -138,7 +143,7 @@ mod tests {
         assert_eq!(config.virtual_world_width, 3000.0);
         assert_eq!(config.canvas_width, 1000.0);
         assert_eq!(config.particle_size, 15.0);
-        assert_eq!(config.default_num_particles, 6400); // Should use default values
+        assert_eq!(config.default_num_particles, 3200); // Should use default values
         assert_eq!(config.max_particles, 6400);
         assert_eq!(config.min_particles, 1600);
 

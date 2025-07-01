@@ -23,10 +23,12 @@ struct MinimalNativeApp {
     // Native-specific
     last_frame: std::time::Instant,
     current_time: f32,
-    // FPS tracking for display
+    // FPS tracking for display with smoothing
     fps_last_update: std::time::Instant,
     fps_frame_count: u32,
     current_fps: f32,
+    fps_samples: Vec<f32>,
+    fps_sample_index: usize,
 }
 
 impl Default for MinimalNativeApp {
@@ -85,6 +87,8 @@ impl Default for MinimalNativeApp {
             fps_last_update: std::time::Instant::now(),
             fps_frame_count: 0,
             current_fps: 0.0,
+            fps_samples: vec![60.0; FPS_SAMPLE_COUNT], // Initialize with samples at 60 FPS
+            fps_sample_index: 0,
         }
     }
 }
@@ -161,9 +165,24 @@ impl ApplicationHandler for MinimalNativeApp {
                 let fps_now = std::time::Instant::now();
                 let fps_elapsed = (fps_now - self.fps_last_update).as_secs_f32();
 
-                // Update FPS data every 0.5 seconds for responsive on-screen display
-                if fps_elapsed >= 0.5 {
-                    self.current_fps = self.fps_frame_count as f32 / fps_elapsed;
+                // Update FPS data every FPS_UPDATE_INTERVAL seconds for responsive on-screen display
+                if fps_elapsed >= FPS_UPDATE_INTERVAL {
+                    let instantaneous_fps = self.fps_frame_count as f32 / fps_elapsed;
+
+                    // Reset samples if there's a big performance stutter (more than 50% difference)
+                    let current_avg =
+                        self.fps_samples.iter().sum::<f32>() / self.fps_samples.len() as f32;
+                    if (instantaneous_fps - current_avg).abs() > current_avg * 0.5 {
+                        self.reset_fps_samples(instantaneous_fps);
+                    }
+
+                    // Add to circular buffer for moving average
+                    self.fps_samples[self.fps_sample_index] = instantaneous_fps;
+                    self.fps_sample_index = (self.fps_sample_index + 1) % self.fps_samples.len();
+
+                    // Calculate moving average
+                    self.current_fps =
+                        self.fps_samples.iter().sum::<f32>() / self.fps_samples.len() as f32;
 
                     // Update FPS data in renderer for on-screen display
                     if let Some(renderer) = &mut self.renderer {
@@ -180,8 +199,8 @@ impl ApplicationHandler for MinimalNativeApp {
                     self.fps_frame_count = 0;
                 }
 
-                // Console output every 3 seconds now that on-screen overlay is active
-                if fps_elapsed >= 3.0 {
+                // Console output every FPS_CONSOLE_INTERVAL seconds now that on-screen overlay is active
+                if fps_elapsed >= FPS_CONSOLE_INTERVAL {
                     // Clear console and show FPS prominently
                     print!("\x1B[2J\x1B[1;1H"); // Clear screen and move to top
                     let active_particles = self.particle_system.get_active_count();
@@ -210,6 +229,14 @@ impl ApplicationHandler for MinimalNativeApp {
             }
             _ => {}
         }
+    }
+}
+
+impl MinimalNativeApp {
+    /// Reset FPS samples to current value (useful after performance stutters)
+    fn reset_fps_samples(&mut self, current_fps: f32) {
+        self.fps_samples.fill(current_fps);
+        self.fps_sample_index = 0;
     }
 }
 
