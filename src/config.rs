@@ -10,9 +10,14 @@ pub const CANVAS_WIDTH: f32 = 1080.0;
 pub const CANVAS_HEIGHT: f32 = 1080.0;
 
 /// Particle rendering size - the diameter of particles in pixels
-pub const PARTICLE_SIZE: f32 = 16.0;
+pub const PARTICLE_SIZE: f32 = 24.0;
 pub const PARTICLE_SIZE_MIN: f32 = 8.0;
 pub const PARTICLE_SIZE_MAX: f32 = 32.0;
+
+/// Particle system configuration
+pub const DEFAULT_NUM_PARTICLES: u32 = 3200;
+pub const MAX_PARTICLES: u32 = 6400;
+pub const MIN_PARTICLES: u32 = 1600;
 
 /// Convenience constants derived from the main dimensions
 pub const VIRTUAL_WORLD_CENTER_X: f32 = VIRTUAL_WORLD_WIDTH / 2.0; // 1620.0
@@ -35,6 +40,9 @@ pub struct WorldConfig {
     pub canvas_width: f32,
     pub canvas_height: f32,
     pub particle_size: f32,
+    pub default_num_particles: u32,
+    pub max_particles: u32,
+    pub min_particles: u32,
 }
 
 impl Default for WorldConfig {
@@ -45,6 +53,9 @@ impl Default for WorldConfig {
             canvas_width: CANVAS_WIDTH,
             canvas_height: CANVAS_HEIGHT,
             particle_size: PARTICLE_SIZE,
+            default_num_particles: DEFAULT_NUM_PARTICLES,
+            max_particles: MAX_PARTICLES,
+            min_particles: MIN_PARTICLES,
         }
     }
 }
@@ -64,6 +75,9 @@ impl WorldConfig {
             canvas_width,
             canvas_height,
             particle_size,
+            default_num_particles: DEFAULT_NUM_PARTICLES,
+            max_particles: MAX_PARTICLES,
+            min_particles: MIN_PARTICLES,
         }
     }
 
@@ -106,6 +120,9 @@ mod tests {
         assert_eq!(config.canvas_width, 1080.0);
         assert_eq!(config.canvas_height, 1080.0);
         assert_eq!(config.particle_size, 16.0);
+        assert_eq!(config.default_num_particles, 6400);
+        assert_eq!(config.max_particles, 6400);
+        assert_eq!(config.min_particles, 1600);
 
         let (center_x, center_y) = config.center();
         assert_eq!(center_x, 1620.0);
@@ -121,6 +138,9 @@ mod tests {
         assert_eq!(config.virtual_world_width, 3000.0);
         assert_eq!(config.canvas_width, 1000.0);
         assert_eq!(config.particle_size, 15.0);
+        assert_eq!(config.default_num_particles, 6400); // Should use default values
+        assert_eq!(config.max_particles, 6400);
+        assert_eq!(config.min_particles, 1600);
 
         let (center_x, center_y) = config.center();
         assert_eq!(center_x, 1500.0);

@@ -47,8 +47,8 @@ pub struct ParticleSystem {
 
 impl ParticleSystem {
     pub fn new(params: &SimulationParams, _rules: &InteractionRules, rng: &mut SmallRng) -> Self {
-        let max_particles = 6400;
-        let min_particles = 1600;
+        let max_particles = MAX_PARTICLES;
+        let min_particles = MIN_PARTICLES;
         let num_types = 5;
 
         let mut particles = Vec::with_capacity(max_particles as usize);

@@ -10,9 +10,14 @@ export const CANVAS_WIDTH = 1080.0;
 export const CANVAS_HEIGHT = 1080.0;
 
 // Particle rendering size - the diameter of particles in pixels
-export const PARTICLE_SIZE = 16.0;
+export const PARTICLE_SIZE = 24.0;
 export const PARTICLE_SIZE_MIN = 8.0;
 export const PARTICLE_SIZE_MAX = 32.0;
+
+// Particle system configuration
+export const DEFAULT_NUM_PARTICLES = 3200;
+export const MAX_PARTICLES = 6400;
+export const MIN_PARTICLES = 1600;
 
 // Convenience constants derived from the main dimensions
 export const VIRTUAL_WORLD_CENTER_X = VIRTUAL_WORLD_WIDTH / 2.0; // 1620.0
@@ -34,6 +39,9 @@ export interface WorldConfig {
     canvasWidth: number;
     canvasHeight: number;
     particleSize: number;
+    defaultNumParticles: number;
+    maxParticles: number;
+    minParticles: number;
 }
 
 export const DEFAULT_WORLD_CONFIG: WorldConfig = {
@@ -42,6 +50,9 @@ export const DEFAULT_WORLD_CONFIG: WorldConfig = {
     canvasWidth: CANVAS_WIDTH,
     canvasHeight: CANVAS_HEIGHT,
     particleSize: PARTICLE_SIZE,
+    defaultNumParticles: DEFAULT_NUM_PARTICLES,
+    maxParticles: MAX_PARTICLES,
+    minParticles: MIN_PARTICLES,
 };
 
 // Utility functions
