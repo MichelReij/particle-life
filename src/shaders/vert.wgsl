@@ -128,8 +128,8 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
     }
 
     // Use per-particle size instead of global particle_render_size
-    let particle_radius_pixels = clamp(particle_attrs.particle_size, 1.0, 30.0);
-    // Safety clamp in vertex shader too!
+    let particle_radius_pixels = clamp(particle_attrs.particle_size, 8.0, 32.0);
+    // Use config values that match Rust PARTICLE_SIZE_MIN/MAX
 
     // Particle position is in virtual world coordinates (0-virtual_world_width/height range)
     // Convert directly to clip space (-1 to 1) based on the virtual world dimensions from sim_params

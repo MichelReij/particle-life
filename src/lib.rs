@@ -1001,6 +1001,11 @@ impl ParticleLifeEngine {
     pub fn set_particle_render_size(&mut self, value: f32) {
         self.simulation_params.particle_render_size =
             value.max(PARTICLE_SIZE_MIN).min(PARTICLE_SIZE_MAX);
+
+        // Update all existing particle sizes
+        self.particle_system
+            .update_particle_sizes(self.simulation_params.particle_render_size, &mut self.rng);
+
         console_log!(
             "🔧 Individual parameter: particle_render_size = {:.1}",
             self.simulation_params.particle_render_size

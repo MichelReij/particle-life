@@ -48,6 +48,7 @@ const STORAGE_KEYS = {
     interTypeAttractionScale: "particleLife_interTypeAttractionScale",
     interTypeRadiusScale: "particleLife_interTypeRadiusScale",
     fisheyeStrength: "particleLife_fisheyeStrength",
+    particleRenderSize: "particleLife_particleRenderSize",
 };
 
 // === Storage Functions ===
@@ -778,6 +779,7 @@ export function initializeUI(
     initializeRSmoothSlider(simParams);
     initializeInterTypeScaleSliders(simParams);
     initializeFisheyeSlider(simParams);
+    initializeParticleRenderSizeSlider();
     initializeZoomSlider(currentZoomLevel);
     initializeLeniaControls(simParams);
     initializeEnvironmentalSliders();
@@ -1035,6 +1037,42 @@ function initializeFisheyeSlider(simParams: SimulationParams): void {
             );
             fisheyeStrengthValueDisplay.textContent = newValue.toFixed(2);
             saveToLocalStorage(STORAGE_KEYS.fisheyeStrength, newValue);
+        });
+    }
+}
+
+function initializeParticleRenderSizeSlider(): void {
+    const particleRenderSizeSlider = document.getElementById(
+        "particleRenderSizeSlider"
+    ) as HTMLInputElement;
+    const particleRenderSizeValueDisplay = document.getElementById(
+        "particleRenderSizeValue"
+    );
+
+    if (particleRenderSizeSlider && particleRenderSizeValueDisplay) {
+        // Get current value from engine, fall back to localStorage or default
+        let currentValue =
+            parameterUpdateCallbacks.getParameter("particleRenderSize");
+        if (currentValue === 0) {
+            currentValue = loadFromLocalStorage(
+                STORAGE_KEYS.particleRenderSize,
+                16.0 // Default value matching the HTML and PARTICLE_SIZE config
+            );
+        }
+
+        particleRenderSizeSlider.value = currentValue.toString();
+        particleRenderSizeValueDisplay.textContent = currentValue.toFixed(1);
+
+        particleRenderSizeSlider.addEventListener("input", (event) => {
+            const newValue = parseFloat(
+                (event.target as HTMLInputElement).value
+            );
+            parameterUpdateCallbacks.updateSimulationParameter(
+                "particleRenderSize",
+                newValue
+            );
+            particleRenderSizeValueDisplay.textContent = newValue.toFixed(1);
+            saveToLocalStorage(STORAGE_KEYS.particleRenderSize, newValue);
         });
     }
 }
