@@ -112,7 +112,13 @@ class App {
             // Start the real Rust simulation
             this.updateStatus("Starting particle simulation...");
             this.startRustSimulation();
-            this.updateStatus("Particle simulation running!");
+            // Remove status message after simulation starts successfully
+            setTimeout(() => {
+                const statusElement = document.getElementById("status-message");
+                if (statusElement) {
+                    statusElement.style.display = "none";
+                }
+            }, 2000); // Hide after 2 seconds
         } catch (error) {
             console.error("💥 Failed to initialize WASM:", error);
             if (error instanceof Error) {

@@ -309,6 +309,10 @@ impl SimulationParams {
         // Update inter-type radius scale: UV [0, 50] → interTypeRadiusScale [0.1, 2.0]
         let inter_type_radius_scale = 0.1 + (clamped_uv / 50.0) * (2.0 - 0.1);
         self.inter_type_radius_scale = inter_type_radius_scale;
+
+        // Update Lenia kernel radius: UV [0, 50] → LeniaKernelRadius [30.0, 100.0]
+        let lenia_kernel_radius = 30.0 + (clamped_uv / 50.0) * (100.0 - 30.0);
+        self.lenia_kernel_radius = lenia_kernel_radius;
     }
 
     // Set electrical activity and update all electrical-related simulation parameters

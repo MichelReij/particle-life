@@ -1006,6 +1006,11 @@ impl ParticleLifeEngine {
         self.particle_system
             .update_particle_sizes(self.simulation_params.particle_render_size, &mut self.rng);
 
+        // Update GPU buffers with the new particle sizes
+        if let Some(renderer) = &mut self.renderer {
+            renderer.update_particle_sizes(&self.particle_system);
+        }
+
         console_log!(
             "🔧 Individual parameter: particle_render_size = {:.1}",
             self.simulation_params.particle_render_size

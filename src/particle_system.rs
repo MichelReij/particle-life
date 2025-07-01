@@ -125,34 +125,6 @@ impl ParticleSystem {
         }
     }
 
-    pub fn grow_particles(&mut self, new_count: u32, rng: &mut SmallRng) {
-        let old_count = self.active_count;
-        self.active_count = new_count.min(self.max_particles);
-
-        // Initialize newly activated particles
-        for i in old_count..self.active_count {
-            let particle_type = (i % self.num_types) as u32;
-            let base_multiplier = PARTICLE_TYPE_SIZE_MULTIPLIERS[particle_type as usize];
-
-            // Add ±20% randomization to the base multiplier
-            let randomization_factor = rng.gen_range(-0.2..0.2);
-            let size_multiplier = base_multiplier * (1.0 + randomization_factor);
-
-            if let Some(particle) = self.particles.get_mut(i as usize) {
-                particle.position = [
-                    rng.gen_range(0.0..VIRTUAL_WORLD_WIDTH), // Use config world size
-                    rng.gen_range(0.0..VIRTUAL_WORLD_HEIGHT),
-                ];
-                particle.velocity = [rng.gen_range(-2.0..2.0), rng.gen_range(-2.0..2.0)];
-                particle.particle_type = particle_type;
-                particle.size = self.base_particle_size * size_multiplier; // Use the base size from SimulationParams
-                particle.target_size = self.base_particle_size * size_multiplier;
-                particle.is_active = true; // Activate the particle
-                                           // Store the intended size
-            }
-        }
-    }
-
     pub fn get_particle(&self, index: usize) -> Option<&Particle> {
         self.particles.get(index)
     }
@@ -212,7 +184,7 @@ impl ParticleSystem {
 
     // Get particle colors buffer in RGBA format
     pub fn get_colors_buffer(&self) -> Vec<u8> {
-        let default_opacity = 0.6f32;
+        let default_opacity = 0.5f32;
         let mut buffer = Vec::with_capacity(self.num_types as usize * 16); // 4 floats per type
 
         for i in 0..self.num_types as usize {
@@ -436,22 +408,24 @@ impl ParticleSystem {
     }
 
     // Update particle sizes when SimulationParams.particle_render_size changes
-    pub fn update_particle_sizes(&mut self, new_base_size: f32, rng: &mut SmallRng) {
+    pub fn update_particle_sizes(&mut self, new_base_size: f32, _rng: &mut SmallRng) {
+        // Calculate the scaling factor from old base size to new base size
+        let size_scale_factor = if self.base_particle_size > 0.0 {
+            new_base_size / self.base_particle_size
+        } else {
+            1.0
+        };
+
         self.base_particle_size = new_base_size;
 
-        // Update all active particles
+        // Update all particles by scaling their existing target_size
+        // This preserves the original per-particle randomization
         for i in 0..self.max_particles as usize {
             if let Some(particle) = self.particles.get_mut(i) {
-                if particle.is_active {
-                    let base_multiplier =
-                        PARTICLE_TYPE_SIZE_MULTIPLIERS[particle.particle_type as usize];
-
-                    // Add ±20% randomization to the base multiplier
-                    let randomization_factor = rng.gen_range(-0.2..0.2);
-                    let size_multiplier = base_multiplier * (1.0 + randomization_factor);
-                    particle.size = new_base_size * size_multiplier;
-                    particle.target_size = new_base_size * size_multiplier;
-                }
+                // Scale both current size and target_size proportionally
+                // This preserves the original ±20% randomization that was applied at creation
+                particle.size *= size_scale_factor;
+                particle.target_size *= size_scale_factor;
             }
         }
     }

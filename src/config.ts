@@ -10,19 +10,25 @@ export const CANVAS_WIDTH = 1080.0;
 export const CANVAS_HEIGHT = 1080.0;
 
 // Particle rendering size - the diameter of particles in pixels
-export const PARTICLE_SIZE = 24.0;
+export const PARTICLE_SIZE = 20.0;
 export const PARTICLE_SIZE_MIN = 8.0;
 export const PARTICLE_SIZE_MAX = 32.0;
 
 // Particle system configuration
-export const DEFAULT_NUM_PARTICLES = 3200;
-export const MAX_PARTICLES = 6400;
-export const MIN_PARTICLES = 1600;
+export const DEFAULT_NUM_PARTICLES = 4800;
+export const MAX_PARTICLES = 4800;
+export const MIN_PARTICLES = 1200;
 
 // FPS display configuration
 export const FPS_SAMPLE_COUNT = 10; // Number of samples for moving average
 export const FPS_UPDATE_INTERVAL = 0.5; // Update interval in seconds
 export const FPS_CONSOLE_INTERVAL = 3.0; // Console output interval in seconds
+export const FPS_DISPLAY_MAX = 99.0; // Maximum FPS to display (cap at 99 for formatting)
+
+// Cap FPS value for consistent display formatting
+export function capFpsForDisplay(fps: number): number {
+    return Math.min(fps, FPS_DISPLAY_MAX);
+}
 
 // Convenience constants derived from the main dimensions
 export const VIRTUAL_WORLD_CENTER_X = VIRTUAL_WORLD_WIDTH / 2.0; // 1620.0

@@ -1038,47 +1038,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
 
-    // Update target_size based on current particle_render_size parameter and particle type
-    // Size multipliers matching the Rust PARTICLE_TYPE_SIZE_MULTIPLIERS array
-    var size_multiplier = 1.0;
-    switch (particle_p.ptype) {
-        case 0u : {
-            size_multiplier = 1.5;
-        }
-        // Type 0: Blue - large, dominant
-        case 1u : {
-            size_multiplier = 1.2;
-        }
-        // Type 1: Orange - medium-large
-        case 2u : {
-            size_multiplier = 0.7;
-        }
-        // Type 2: Red - small, agile
-        case 3u : {
-            size_multiplier = 0.9;
-        }
-        // Type 3: Purple - smaller, compact
-        case 4u : {
-            size_multiplier = 1.0;
-        }
-        // Type 4: Green - medium, balanced
-        default : {
-            size_multiplier = 1.0;
-        }
-    }
-
-    // Calculate new target size from UI parameter and type multiplier
-    let new_target_size = sim_params.particle_render_size * size_multiplier;
-
-    // Only update target_size if not in a transition
-    if (particle_p.transition_start == 0.0) {
-        particle_p.target_size = new_target_size;
-        // Update current size immediately when not transitioning
-        particle_p.size = particle_p.target_size;
-    }
-
     // Final safety clamps to prevent visual issues
-    particle_p.size = clamp(particle_p.size, 1.0, particle_p.target_size);
+    // particle_p.size = clamp(particle_p.size, 1.0, particle_p.target_size);
 
     particles_out[p_idx] = particle_p;
 }

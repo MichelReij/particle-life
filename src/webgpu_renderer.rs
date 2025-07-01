@@ -1921,12 +1921,40 @@ impl WebGpuRenderer {
         for i in 0..max_particles {
             let byte_offset = (i * 48 + 36) as u64; // is_active is at offset 36 in each 48-byte particle
             let is_active = if i < active_count { 1u32 } else { 0u32 };
-
             self.queue.write_buffer(
                 &self.particle_buffers[self.current_buffer_index],
                 byte_offset,
                 &is_active.to_le_bytes(),
             );
+        }
+    }
+
+    /// Update particle sizes on GPU when the base size changes
+    /// This preserves live GPU physics data while updating size and target_size fields
+    pub fn update_particle_sizes(&mut self, particle_system: &ParticleSystem) {
+        let max_particles = particle_system.get_max_particles() as usize;
+
+        // Update size and target_size fields for each particle
+        for i in 0..max_particles {
+            if let Some(particle) = particle_system.get_particle(i) {
+                let particle_offset = i * 48; // 48 bytes per particle
+
+                // Update size field (offset 20, 4 bytes)
+                let size_offset = particle_offset + 20;
+                self.queue.write_buffer(
+                    &self.particle_buffers[self.current_buffer_index],
+                    size_offset as u64,
+                    &particle.size.to_le_bytes(),
+                );
+
+                // Update target_size field (offset 24, 4 bytes)
+                let target_size_offset = particle_offset + 24;
+                self.queue.write_buffer(
+                    &self.particle_buffers[self.current_buffer_index],
+                    target_size_offset as u64,
+                    &particle.target_size.to_le_bytes(),
+                );
+            }
         }
     }
 

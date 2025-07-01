@@ -10,19 +10,25 @@ pub const CANVAS_WIDTH: f32 = 1080.0;
 pub const CANVAS_HEIGHT: f32 = 1080.0;
 
 /// Particle rendering size - the diameter of particles in pixels
-pub const PARTICLE_SIZE: f32 = 24.0;
+pub const PARTICLE_SIZE: f32 = 20.0;
 pub const PARTICLE_SIZE_MIN: f32 = 8.0;
 pub const PARTICLE_SIZE_MAX: f32 = 32.0;
 
 /// Particle system configuration
-pub const DEFAULT_NUM_PARTICLES: u32 = 3200;
-pub const MAX_PARTICLES: u32 = 6400;
-pub const MIN_PARTICLES: u32 = 1600;
+pub const DEFAULT_NUM_PARTICLES: u32 = 4800;
+pub const MAX_PARTICLES: u32 = 4800;
+pub const MIN_PARTICLES: u32 = 1200;
 
 /// FPS display configuration
 pub const FPS_SAMPLE_COUNT: usize = 10; // Number of samples for moving average
 pub const FPS_UPDATE_INTERVAL: f32 = 0.5; // Update interval in seconds
 pub const FPS_CONSOLE_INTERVAL: f32 = 3.0; // Console output interval in seconds
+pub const FPS_DISPLAY_MAX: f32 = 99.0; // Maximum FPS to display (cap at 99 for formatting)
+
+/// Cap FPS value for consistent display formatting
+pub fn cap_fps_for_display(fps: f32) -> f32 {
+    fps.min(FPS_DISPLAY_MAX)
+}
 
 /// Convenience constants derived from the main dimensions
 pub const VIRTUAL_WORLD_CENTER_X: f32 = VIRTUAL_WORLD_WIDTH / 2.0; // 1620.0

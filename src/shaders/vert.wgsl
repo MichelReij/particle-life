@@ -127,9 +127,9 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
         debug_color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
 
-    // Use per-particle size instead of global particle_render_size
-    let particle_radius_pixels = clamp(particle_attrs.particle_size, 8.0, 32.0);
-    // Use config values that match Rust PARTICLE_SIZE_MIN/MAX
+    // Use per-particle size directly (CPU already handles proper bounds)
+    let particle_radius_pixels = particle_attrs.particle_size;
+    // Trust the CPU calculations which include type multipliers and randomization
 
     // Particle position is in virtual world coordinates (0-virtual_world_width/height range)
     // Convert directly to clip space (-1 to 1) based on the virtual world dimensions from sim_params
