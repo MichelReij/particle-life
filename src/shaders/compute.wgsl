@@ -12,8 +12,7 @@ struct Particle {
     // 0 = grow, 1 = shrink
     is_active: u32,
     // Whether this particle is active/visible (bool as u32)
-    size_variation: f32,
-    // Per-particle size variation factor (0.9-1.1, ±10% variation)
+    _padding1: f32,
     _padding2: f32,
     // Ensure 16-byte alignment (48 bytes total)
 }
@@ -1068,14 +1067,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
 
-    // Initialize per-particle size variation if not already set (±10% variation)
-    if (particle_p.size_variation == 0.0) {
-        // Use particle index as seed for consistent per-particle variation
-        particle_p.size_variation = random_range(p_idx + 12345u, 0.9, 1.1);
-    }
-
-    // Calculate new target size from UI parameter, type multiplier, and per-particle variation
-    let new_target_size = sim_params.particle_render_size * size_multiplier * particle_p.size_variation;
+    // Calculate new target size from UI parameter and type multiplier
+    let new_target_size = sim_params.particle_render_size * size_multiplier;
 
     // Only update target_size if not in a transition
     if (particle_p.transition_start == 0.0) {
@@ -1084,8 +1077,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         particle_p.size = particle_p.target_size;
     }
 
-    // Apply safety clamps to prevent visual issues (no upper limit on target_size)
-    particle_p.size = clamp(particle_p.size, 1.0, 64.0);
+    // Final safety clamps to prevent visual issues
+    particle_p.size = clamp(particle_p.size, 1.0, particle_p.target_size);
 
     particles_out[p_idx] = particle_p;
 }

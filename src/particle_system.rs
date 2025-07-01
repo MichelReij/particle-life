@@ -13,7 +13,6 @@ pub struct Particle {
     pub transition_start: f32, // Start time of transition, 0 means no transition
     pub transition_type: u32,  // 0 = grow, 1 = shrink
     pub is_active: bool,       // Whether this particle is active/visible
-    pub size_variation: f32,   // Per-particle size variation factor (0.9-1.1)
 }
 
 // Size ranges for each particle type (multipliers of base size)
@@ -59,12 +58,9 @@ impl ParticleSystem {
             let particle_type = (i % num_types) as u32;
             let base_multiplier = PARTICLE_TYPE_SIZE_MULTIPLIERS[particle_type as usize];
 
-            // Add ±20% randomization to the base multiplier for initial size
+            // Add ±20% randomization to the base multiplier
             let randomization_factor = rng.gen_range(-0.2..0.2);
             let size_multiplier = base_multiplier * (1.0 + randomization_factor);
-
-            // Generate per-particle size variation factor (±10% for ongoing variation)
-            let size_variation = rng.gen_range(0.9..1.1);
 
             let particle = Particle {
                 position: [
@@ -78,7 +74,6 @@ impl ParticleSystem {
                 transition_start: 0.0,               // No transition initially
                 transition_type: 0,                  // Default to grow type
                 is_active: i < params.num_particles, // Only first num_particles are initially active
-                size_variation,                      // Per-particle size variation factor
             };
             particles.push(particle);
         }
@@ -172,7 +167,7 @@ impl ParticleSystem {
 
     // Convert particles to buffer format for GPU upload
     pub fn to_buffer(&self) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(self.max_particles as usize * 48); // 12 fields * 4 bytes = 48 bytes per particle (16-byte aligned)
+        let mut buffer = Vec::with_capacity(self.max_particles as usize * 48); // 10 fields + 8 bytes padding = 48 bytes per particle (16-byte aligned)
 
         for i in 0..self.max_particles as usize {
             if let Some(particle) = self.particles.get(i) {
@@ -203,10 +198,8 @@ impl ParticleSystem {
                 let is_active_u32 = if particle.is_active { 1u32 } else { 0u32 };
                 buffer.extend_from_slice(&is_active_u32.to_le_bytes());
 
-                // Size variation (f32) - 4 bytes (per-particle size variation factor)
-                buffer.extend_from_slice(&particle.size_variation.to_le_bytes());
-
-                // Padding (f32) - 4 bytes (for 16-byte alignment, total 48 bytes)
+                // Padding (f32) - 8 bytes (for 16-byte alignment, total 48 bytes)
+                buffer.extend_from_slice(&0.0f32.to_le_bytes());
                 buffer.extend_from_slice(&0.0f32.to_le_bytes());
             } else {
                 // Fill with zeros for missing particles
