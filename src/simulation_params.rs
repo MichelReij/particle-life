@@ -47,11 +47,21 @@ pub struct SimulationParams {
     pub transition_duration: f32,
     pub transition_start_count: u32,
     pub transition_end_count: u32,
-    pub transition_is_grow: bool, // true for grow, false for shrink    // Spatial grid optimization parameters
+    pub transition_is_grow: bool, // true for grow, false for shrink
+
+    // Spatial grid optimization parameters
     pub spatial_grid_enabled: bool,
     pub spatial_grid_cell_size: f32,
     pub spatial_grid_width: u32,
     pub spatial_grid_height: u32,
+
+    // Viewport/zoom parameters for rendering optimization
+    pub viewport_center_x: f32,
+    pub viewport_center_y: f32,
+    pub viewport_radius: f32,
+
+    // Current zoom level - used for zoom-adjusted drift calculation
+    pub current_zoom_level: f32,
 }
 
 impl SimulationParams {
@@ -100,9 +110,17 @@ impl SimulationParams {
 
             // Spatial grid optimization - enabled by default with optimized cell size
             spatial_grid_enabled: true,
-            spatial_grid_cell_size: 80.0, // 80 units per cell (VIRTUAL_WORLD_WIDTH/80 = 40x40 grid)
-            spatial_grid_width: (VIRTUAL_WORLD_WIDTH / 80.0) as u32, // 40 cells horizontally
-            spatial_grid_height: (VIRTUAL_WORLD_HEIGHT / 80.0) as u32, // 40 cells vertically
+            spatial_grid_cell_size: 80.0, // 80 units per cell (VIRTUAL_WORLD_WIDTH/80 = 54x54 grid)
+            spatial_grid_width: (VIRTUAL_WORLD_WIDTH / 80.0) as u32, // 54 cells horizontally
+            spatial_grid_height: (VIRTUAL_WORLD_HEIGHT / 80.0) as u32, // 54 cells vertically
+
+            // Viewport/zoom parameters for rendering optimization
+            viewport_center_x: VIRTUAL_WORLD_CENTER_X, // Default to world center
+            viewport_center_y: VIRTUAL_WORLD_CENTER_Y, // Default to world center
+            viewport_radius: VIRTUAL_WORLD_WIDTH / 2.0, // Default radius for circular viewport
+
+            // Default zoom level
+            current_zoom_level: 1.0,
         }
     }
 
@@ -193,12 +211,22 @@ impl SimulationParams {
 
     // Convert to buffer format for GPU upload
     pub fn to_buffer(&self) -> Vec<u8> {
-        self.to_buffer_with_particle_count(self.num_particles)
+        self.to_buffer_with_particle_count_and_zoom(self.num_particles, 1.0) // Default zoom level
     }
 
     // Convert to buffer format for GPU upload with specific particle count
     pub fn to_buffer_with_particle_count(&self, actual_particle_count: u32) -> Vec<u8> {
-        let mut buffer = Vec::with_capacity(160); // 40 * 4 bytes = 160 bytes (39 fields, no padding needed)
+        self.to_buffer_with_particle_count_and_zoom(actual_particle_count, 1.0) // Default zoom level
+    }
+
+    // Convert to buffer format for GPU upload with specific particle count and zoom level
+    // The zoom level is used to adjust drift speed: higher zoom = slower drift
+    pub fn to_buffer_with_particle_count_and_zoom(
+        &self,
+        actual_particle_count: u32,
+        zoom_level: f32,
+    ) -> Vec<u8> {
+        let mut buffer = Vec::with_capacity(192); // 48 * 4 bytes = 192 bytes (45 fields + 3 padding = 48 fields total)
 
         // Match the exact layout from WGSL SimParams struct
         buffer.extend_from_slice(&self.delta_time.to_le_bytes()); // 0
@@ -211,13 +239,15 @@ impl SimulationParams {
         buffer.extend_from_slice(&self.canvas_render_height.to_le_bytes()); // 7
         buffer.extend_from_slice(&self.virtual_world_offset_x.to_le_bytes()); // 8
         buffer.extend_from_slice(&self.virtual_world_offset_y.to_le_bytes()); // 9
-                                                                              // NOTE: Removed viewport_width and viewport_height as they don't exist in WGSL
         buffer.extend_from_slice(&self.boundary_mode.to_le_bytes()); // 10
         buffer.extend_from_slice(&self.particle_render_size.to_le_bytes()); // 11
         buffer.extend_from_slice(&self.force_scale.to_le_bytes()); // 12
         buffer.extend_from_slice(&self.r_smooth.to_le_bytes()); // 13
         buffer.extend_from_slice(&(if self.flat_force { 1u32 } else { 0u32 }).to_le_bytes()); // 14
-        buffer.extend_from_slice(&self.drift_x_per_second.to_le_bytes()); // 15
+
+        // Apply zoom-adjusted drift: divide drift by zoom level for better user experience when zoomed in
+        let zoom_adjusted_drift = self.drift_x_per_second / zoom_level.max(1.0); // Ensure we don't divide by 0
+        buffer.extend_from_slice(&zoom_adjusted_drift.to_le_bytes()); // 15
         buffer.extend_from_slice(&self.inter_type_attraction_scale.to_le_bytes()); // 16
         buffer.extend_from_slice(&self.inter_type_radius_scale.to_le_bytes()); // 17
         buffer.extend_from_slice(&self.time.to_le_bytes()); // 18
@@ -254,11 +284,23 @@ impl SimulationParams {
         buffer.extend_from_slice(&self.spatial_grid_width.to_le_bytes()); // 38
         buffer.extend_from_slice(&self.spatial_grid_height.to_le_bytes()); // 39
 
+        // Viewport/zoom parameters for rendering optimization
+        buffer.extend_from_slice(&self.viewport_center_x.to_le_bytes()); // 40
+        buffer.extend_from_slice(&self.viewport_center_y.to_le_bytes()); // 41
+        buffer.extend_from_slice(&self.viewport_width.to_le_bytes()); // 42
+        buffer.extend_from_slice(&self.viewport_height.to_le_bytes()); // 43
+        buffer.extend_from_slice(&self.viewport_radius.to_le_bytes()); // 44
+
+        // Padding to ensure 16-byte alignment (3 × f32 = 12 bytes)
+        buffer.extend_from_slice(&0.0f32.to_le_bytes()); // 45 - padding
+        buffer.extend_from_slice(&0.0f32.to_le_bytes()); // 46 - padding
+        buffer.extend_from_slice(&0.0f32.to_le_bytes()); // 47 - padding
+
         buffer
     }
 
     pub fn get_buffer_size(&self) -> u32 {
-        160 // 40 * 4 bytes (39 fields + 1 field removed = 40 fields total)
+        192 // 48 * 4 bytes = 192 bytes (45 fields + 3 padding = 48 fields total)
     }
 
     // === CENTRAL CONVERSION FUNCTIONS ===
@@ -341,6 +383,9 @@ impl SimulationParams {
     pub fn apply_zoom(&mut self, zoom_level: f32, center_x: Option<f32>, center_y: Option<f32>) {
         // Clamp zoom level to valid range (1.0 to 6.0)
         let clamped_zoom = zoom_level.max(1.0).min(6.0);
+
+        // Store the current zoom level for drift adjustment
+        self.current_zoom_level = clamped_zoom;
 
         // Calculate viewport size: at zoom 1.0 = full world, at zoom 2.0 = half world, etc.
         let viewport_width = VIRTUAL_WORLD_WIDTH / clamped_zoom;

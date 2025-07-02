@@ -14,7 +14,11 @@
     <body>
         <div id="Dashboard">
             <div id="Zoom" class="slider-container">
-                <label for="zoomSlider">Zoom:</label>
+                <label
+                    for="zoomSlider"
+                    title="Zoom into the virtual world (1x = full view, 6x = maximum detail)"
+                    >Zoom (1x-6x):</label
+                >
                 <input
                     type="range"
                     id="zoomSlider"
@@ -23,17 +27,26 @@
                     value="1.0"
                     step="0.01"
                     class="vertical-slider"
+                    title="Zoom level: 1.0x shows the entire 3240x3240 world, 6.0x shows maximum detail"
                 />
-                <span id="zoomValue">1.0</span>
+                <span id="zoomValue">1.0x</span>
             </div>
             <div id="canvasContainer">
                 <canvas id="canvas"></canvas>
             </div>
             <div id="Joystick">
-                <label>Navigation:</label>
+                <label
+                    title="Use the joystick to navigate around the virtual world when zoomed in"
+                    >Navigation:</label
+                >
                 <div id="joyDiv"></div>
-                <div id="zoomCenterInfo">
+                <div
+                    id="zoomCenterInfo"
+                    title="Current viewport center coordinates in the 3240×3240 virtual world, visible area size, and joystick movement range"
+                >
                     Center: (1620, 1620)
+                    <br />
+                    Visible: 3240×3240
                     <br />
                     Range: 0
                 </div>

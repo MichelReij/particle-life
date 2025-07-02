@@ -25,6 +25,16 @@ export const FPS_UPDATE_INTERVAL = 0.5; // Update interval in seconds
 export const FPS_CONSOLE_INTERVAL = 3.0; // Console output interval in seconds
 export const FPS_DISPLAY_MAX = 99.0; // Maximum FPS to display (cap at 99 for formatting)
 
+// Zoom configuration - maximum 6x zoom capability
+export const ZOOM_MIN = 1.0;
+export const ZOOM_MAX = 6.0;
+export const ZOOM_DEFAULT = 1.0;
+export const ZOOM_STEP = 0.01;
+
+// At max zoom (8x), each screen pixel represents this many world units
+export const MAX_ZOOM_WORLD_UNITS_PER_PIXEL =
+    VIRTUAL_WORLD_WIDTH / (CANVAS_WIDTH * ZOOM_MAX); // ~0.5
+
 // Cap FPS value for consistent display formatting
 export function capFpsForDisplay(fps: number): number {
     return Math.min(fps, FPS_DISPLAY_MAX);
@@ -35,7 +45,7 @@ export const VIRTUAL_WORLD_CENTER_X = VIRTUAL_WORLD_WIDTH / 2.0; // 1620.0
 export const VIRTUAL_WORLD_CENTER_Y = VIRTUAL_WORLD_HEIGHT / 2.0; // 1620.0
 
 // Scaling factor from virtual world to canvas
-export const WORLD_TO_CANVAS_SCALE = CANVAS_WIDTH / VIRTUAL_WORLD_WIDTH; // 0.333...
+export const WORLD_TO_CANVAS_SCALE = CANVAS_WIDTH / VIRTUAL_WORLD_WIDTH; // 0.333
 
 // Integer versions for GPU operations
 export const VIRTUAL_WORLD_WIDTH_U32 = Math.floor(VIRTUAL_WORLD_WIDTH); // 3240

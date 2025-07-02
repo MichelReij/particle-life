@@ -114,10 +114,13 @@ impl ParticleLifeEngine {
     // Get the current simulation parameters as a buffer for GPU
     #[wasm_bindgen]
     pub fn get_simulation_params_buffer(&self) -> Vec<u8> {
-        // Use actual particle count from particle system
+        // Use actual particle count from particle system and current zoom level for drift adjustment
         let actual_particle_count = self.particle_system.get_active_count() as u32;
         self.simulation_params
-            .to_buffer_with_particle_count(actual_particle_count)
+            .to_buffer_with_particle_count_and_zoom(
+                actual_particle_count,
+                self.simulation_params.current_zoom_level,
+            )
     }
 
     // Get the interaction rules as a buffer for GPU

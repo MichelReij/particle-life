@@ -68,13 +68,13 @@ struct SimParams {
     num_types: u32,
 
     virtual_world_width: f32,
-    // e.g. 1000.0
+    // e.g. 4320.0 - full virtual simulation space width (4 × 1080)
     virtual_world_height: f32,
-    // e.g. 1000.0
+    // e.g. 4320.0 - full virtual simulation space height (4 × 1080)
     canvas_render_width: f32,
-    // e.g. 800.0 (used for rendering normalization)
+    // e.g. 1080.0 - final canvas display width for rendering normalization
     canvas_render_height: f32,
-    // e.g. 800.0 (used for rendering normalization)
+    // e.g. 1080.0 - final canvas display height for rendering normalization
     virtual_world_offset_x: f32,
     // e.g. 100.0
     virtual_world_offset_y: f32,
@@ -145,6 +145,23 @@ struct SimParams {
     // Number of grid cells horizontally
     spatial_grid_height: u32,
     // Number of grid cells vertically
+
+    // Viewport/zoom parameters for rendering optimization
+    viewport_center_x: f32,
+    // Center of viewport in virtual world coordinates
+    viewport_center_y: f32,
+    // Center of viewport in virtual world coordinates
+    viewport_width: f32,
+    // Width of visible area in virtual world coordinates
+    viewport_height: f32,
+    // Height of visible area in virtual world coordinates
+    viewport_radius: f32,
+    // Radius of circular viewport in virtual world coordinates (for round screen)
+
+    // Padding to ensure 16-byte alignment (3 × f32 = 12 bytes)
+    _viewport_padding1: f32,
+    _viewport_padding2: f32,
+    _viewport_padding3: f32,
 }
 
 // Particle data (input)

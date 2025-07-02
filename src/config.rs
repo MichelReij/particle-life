@@ -25,6 +25,15 @@ pub const FPS_UPDATE_INTERVAL: f32 = 0.5; // Update interval in seconds
 pub const FPS_CONSOLE_INTERVAL: f32 = 3.0; // Console output interval in seconds
 pub const FPS_DISPLAY_MAX: f32 = 99.0; // Maximum FPS to display (cap at 99 for formatting)
 
+/// Zoom configuration - maximum 6x zoom capability
+pub const ZOOM_MIN: f32 = 1.0;
+pub const ZOOM_MAX: f32 = 6.0;
+pub const ZOOM_DEFAULT: f32 = 1.0;
+pub const ZOOM_STEP: f32 = 0.01;
+
+/// At max zoom (6x), each screen pixel represents this many world units
+pub const MAX_ZOOM_WORLD_UNITS_PER_PIXEL: f32 = VIRTUAL_WORLD_WIDTH / (CANVAS_WIDTH * ZOOM_MAX); // ~0.5
+
 /// Cap FPS value for consistent display formatting
 pub fn cap_fps_for_display(fps: f32) -> f32 {
     fps.min(FPS_DISPLAY_MAX)
@@ -35,7 +44,7 @@ pub const VIRTUAL_WORLD_CENTER_X: f32 = VIRTUAL_WORLD_WIDTH / 2.0; // 1620.0
 pub const VIRTUAL_WORLD_CENTER_Y: f32 = VIRTUAL_WORLD_HEIGHT / 2.0; // 1620.0
 
 /// Scaling factor from virtual world to canvas
-pub const WORLD_TO_CANVAS_SCALE: f32 = CANVAS_WIDTH / VIRTUAL_WORLD_WIDTH; // 0.333...
+pub const WORLD_TO_CANVAS_SCALE: f32 = CANVAS_WIDTH / VIRTUAL_WORLD_WIDTH; // 0.333
 
 /// Integer versions for WebGPU texture creation
 pub const VIRTUAL_WORLD_WIDTH_U32: u32 = VIRTUAL_WORLD_WIDTH as u32; // 3240
@@ -130,10 +139,10 @@ mod tests {
         assert_eq!(config.virtual_world_height, 3240.0);
         assert_eq!(config.canvas_width, 1080.0);
         assert_eq!(config.canvas_height, 1080.0);
-        assert_eq!(config.particle_size, 24.0);
-        assert_eq!(config.default_num_particles, 3200);
-        assert_eq!(config.max_particles, 6400);
-        assert_eq!(config.min_particles, 1600);
+        assert_eq!(config.particle_size, 20.0);
+        assert_eq!(config.default_num_particles, 4800);
+        assert_eq!(config.max_particles, 4800);
+        assert_eq!(config.min_particles, 1200);
 
         let (center_x, center_y) = config.center();
         assert_eq!(center_x, 1620.0);
@@ -149,9 +158,9 @@ mod tests {
         assert_eq!(config.virtual_world_width, 3000.0);
         assert_eq!(config.canvas_width, 1000.0);
         assert_eq!(config.particle_size, 15.0);
-        assert_eq!(config.default_num_particles, 3200); // Should use default values
-        assert_eq!(config.max_particles, 6400);
-        assert_eq!(config.min_particles, 1600);
+        assert_eq!(config.default_num_particles, 4800); // Should use default values
+        assert_eq!(config.max_particles, 4800);
+        assert_eq!(config.min_particles, 1200);
 
         let (center_x, center_y) = config.center();
         assert_eq!(center_x, 1500.0);

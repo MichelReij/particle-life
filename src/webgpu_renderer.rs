@@ -1571,7 +1571,7 @@ impl WebGpuRenderer {
         // Only update simulation parameters buffer (contains time and deltaTime which change every frame)
         let actual_particle_count = particle_system.get_active_count();
         let sim_params_data =
-            simulation_params.to_buffer_with_particle_count(actual_particle_count);
+            simulation_params.to_buffer_with_particle_count_and_zoom(actual_particle_count, simulation_params.current_zoom_level);
         self.queue
             .write_buffer(&self.sim_params_buffer, 0, &sim_params_data);
 

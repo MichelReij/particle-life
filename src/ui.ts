@@ -1400,13 +1400,21 @@ function initializeEnvironmentalSliders(): void {
 function updateZoomCenterInfo(currentZoomLevel: number): void {
     const zoomCenterInfo = document.getElementById("zoomCenterInfo");
     if (zoomCenterInfo) {
+        // Calculate the visible area dimensions at current zoom
+        const visibleWidth = VIRTUAL_WORLD_WIDTH / currentZoomLevel;
+        const visibleHeight = VIRTUAL_WORLD_HEIGHT / currentZoomLevel;
+
         // Use the same formula as in the joystick callback for consistency
         const maxMovementRange = Math.max(0, 112 * currentZoomLevel - 150);
-        zoomCenterInfo.innerHTML = `Center: (${zoomCenterX.toFixed(
-            0
-        )}, ${zoomCenterY.toFixed(0)})<br>Range: ${maxMovementRange.toFixed(
-            0
-        )}`;
+
+        zoomCenterInfo.innerHTML =
+            `Center: (${zoomCenterX.toFixed(0)}, ${zoomCenterY.toFixed(
+                0
+            )})<br>` +
+            `Visible: ${visibleWidth.toFixed(0)}×${visibleHeight.toFixed(
+                0
+            )}<br>` +
+            `Range: ${maxMovementRange.toFixed(0)}`;
     }
 }
 

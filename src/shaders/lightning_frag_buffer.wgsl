@@ -51,6 +51,23 @@ struct SimParams {
     spatial_grid_cell_size: f32,
     spatial_grid_width: u32,
     spatial_grid_height: u32,
+
+    // Viewport/zoom parameters for rendering optimization
+    viewport_center_x: f32,
+    // Center of viewport in virtual world coordinates
+    viewport_center_y: f32,
+    // Center of viewport in virtual world coordinates
+    viewport_width: f32,
+    // Width of visible area in virtual world coordinates
+    viewport_height: f32,
+    // Height of visible area in virtual world coordinates
+    viewport_radius: f32,
+    // Radius of circular viewport in virtual world coordinates (for round screen)
+
+    // Padding to ensure 16-byte alignment (3 × f32 = 12 bytes)
+    _viewport_padding1: f32,
+    _viewport_padding2: f32,
+    _viewport_padding3: f32,
 }
 
 // Lightning segment data structure (must match compute shader)
