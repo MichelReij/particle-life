@@ -284,8 +284,8 @@ impl WebGpuRenderer {
 
             // Size based on particle type
             let base_multiplier = match particle_type {
-                0 => 1.5f32, // Blue - large
-                1 => 1.2f32, // Orange - medium-large
+                0 => 1.2f32, // Blue - large
+                1 => 1.5f32, // Orange - medium-large
                 2 => 0.7f32, // Red - small
                 3 => 0.9f32, // Purple - medium-small
                 4 => 1.0f32, // Green - balanced

@@ -311,20 +311,23 @@ impl SimulationParams {
 
     // Set temperature and update all temperature-related simulation parameters
     pub fn apply_temperature(&mut self, temp: f32) {
-        // Clamp temperature to valid range (3°C to 40°C)
-        let clamped_temp = temp.max(3.0).min(40.0);
+        // Clamp temperature to valid range (3°C to 130°C)
+        let clamped_temp = temp.max(3.0).min(130.0);
 
-        // 1. Update drift speed: temp [3, 40] → drift [0, -120]
-        let drift = -((clamped_temp - 3.0) * 120.0) / 37.0;
+        // Apply scale factor to maintain same effect as old 40°C max: (40-3)/(130-3) = 37/127 ≈ 0.2913
+        let effective_temp = 3.0 + (clamped_temp - 3.0) * (37.0 / 127.0);
+
+        // 1. Update drift speed: effective_temp [3, 40] → drift [0, -120]
+        let drift = -((effective_temp - 3.0) * 120.0) / 37.0;
         self.drift_x_per_second = drift;
 
-        // 2. Update friction: exponential mapping temp [3, 40] → friction [0.98, 0.05]
-        let normalized_temp = (clamped_temp - 3.0) / 37.0;
+        // 2. Update friction: exponential mapping effective_temp [3, 40] → friction [0.98, 0.05]
+        let normalized_temp = (effective_temp - 3.0) / 37.0;
         let friction = 0.98 * (-3.0 * normalized_temp).exp();
         self.friction = friction;
 
-        // 3. Update background color using HSLuv: temp [3, 40] → hue [200°, 15°]
-        let (r, g, b) = Self::temperature_to_background_color(clamped_temp);
+        // 3. Update background color using HSLuv: effective_temp [3, 40] → hue [200°, 15°]
+        let (r, g, b) = Self::temperature_to_background_color(effective_temp);
         self.background_color_r = r;
         self.background_color_g = g;
         self.background_color_b = b;
@@ -442,7 +445,8 @@ impl SimulationParams {
 
     // Temperature-based background color mapping using HSLuv (static helper)
     fn temperature_to_background_color(temp: f32) -> (f32, f32, f32) {
-        // Temperature mapping: 3°C to 40°C → Hue 200° to 15°
+        // Temperature mapping: 3°C to 40°C (effective range) → Hue 200° to 15°
+        // Note: Input temp is already scaled to effective range [3,40] from UI range [3,130]
         // Clamp temperature to valid range
         let clamped_temp = temp.max(3.0).min(40.0);
 

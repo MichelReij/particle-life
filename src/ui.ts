@@ -110,17 +110,21 @@ function pressureToParticleCount(pressure: number): number {
 
 // Temperature mapping functions
 function temperatureToDrift(temp: number): number {
-    // Linear mapping: temp [3, 40] → drift [0, -120]
+    // Linear mapping: temp [3, 130] → drift [0, -120]
     // At temp = 3°C: drift = 0 px/s
-    // At temp = 40°C: drift = -120 px/s
-    return -((temp - 3) * 120) / 37;
+    // At temp = 130°C: drift = -120 px/s
+    // Scale factor applied to maintain same effect: (40-3)/(130-3) = 37/127 ≈ 0.2913
+    const effectiveTemp = 3 + (temp - 3) * (37 / 127); // Map [3,130] to [3,40] equivalent
+    return -((effectiveTemp - 3) * 120) / 37;
 }
 
 function temperatureToFriction(temp: number): number {
-    // Exponential mapping: temp [3, 40] → friction [0.98, 0.05]
+    // Exponential mapping: temp [3, 130] → friction [0.98, 0.05]
     // At temp = 3°C: friction = 0.98 (highest resistance, near total fixation)
-    // At temp = 40°C: friction = 0.05 (lowest resistance)
-    const normalizedTemp = (temp - 3) / 37; // Normalize to [0, 1]
+    // At temp = 130°C: friction = 0.05 (lowest resistance)
+    // Scale factor applied to maintain same effect: (40-3)/(130-3) = 37/127 ≈ 0.2913
+    const effectiveTemp = 3 + (temp - 3) * (37 / 127); // Map [3,130] to [3,40] equivalent
+    const normalizedTemp = (effectiveTemp - 3) / 37; // Normalize to [0, 1]
     return 0.98 * Math.exp(-3.0 * normalizedTemp); // Exponential decay from 0.98 to 0.05
 }
 
@@ -132,8 +136,10 @@ function temperatureToBackgroundColor(temp: number): {
     // Temperature mapping to background color
     // Cold (3°C): Deep blue/purple
     // Room temp (20°C): Dark gray/black
-    // Hot (40°C): Red/orange
-    const normalizedTemp = Math.max(0, Math.min(1, (temp - 3) / 37)); // Clamp to [0, 1]
+    // Hot (130°C): Red/orange
+    // Scale factor applied to maintain same effect: (40-3)/(130-3) = 37/127 ≈ 0.2913
+    const effectiveTemp = 3 + (temp - 3) * (37 / 127); // Map [3,130] to [3,40] equivalent
+    const normalizedTemp = Math.max(0, Math.min(1, (effectiveTemp - 3) / 37)); // Clamp to [0, 1]
 
     if (normalizedTemp < 0.5) {
         // Cold to neutral: blue/purple to black

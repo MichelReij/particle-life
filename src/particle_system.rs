@@ -18,8 +18,8 @@ pub struct Particle {
 // Size ranges for each particle type (multipliers of base size)
 // We'll use the middle value of each range with ±20% randomization
 const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 5] = [
-    1.5, // Type 0: Blue   - large, dominant
-    1.2, // Type 1: Orange - medium-large
+    1.2, // Type 0: Blue   - medium-large
+    1.5, // Type 1: Yellow - large, dominant
     0.7, // Type 2: Red    - small, agile
     0.9, // Type 3: Purple - smaller, compact
     1.0, // Type 4: Green  - medium, balanced
@@ -28,7 +28,7 @@ const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 5] = [
 // Custom color palette matching TypeScript version
 const CUSTOM_COLORS: [[f32; 3]; 5] = [
     [0.0141, 0.4549, 0.6784], // #0374ad - Blue
-    [0.7804, 0.5216, 0.0745], // #c78513 - Orange
+    [0.7804, 0.5216, 0.0745], // #c78513 - Yellow
     [0.7490, 0.1098, 0.1098], // #bf1c1c - Red
     [0.4275, 0.1882, 0.7412], // #6d30bd - Purple
     [0.3216, 0.5843, 0.3020], // #52964d - Green
@@ -184,7 +184,7 @@ impl ParticleSystem {
 
     // Get particle colors buffer in RGBA format
     pub fn get_colors_buffer(&self) -> Vec<u8> {
-        let default_opacity = 0.5f32;
+        let default_opacity = 0.6f32;
         let mut buffer = Vec::with_capacity(self.num_types as usize * 16); // 4 floats per type
 
         for i in 0..self.num_types as usize {
