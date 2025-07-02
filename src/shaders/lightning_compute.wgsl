@@ -353,7 +353,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
             if (lightning_bolt.is_super_lightning == 1u) {
                 // Super lightning: moderately thicker and brighter
-                segment_thickness = 0.0012 + position_randoms[4] * 0.008;
+                segment_thickness = 0.0012 + position_randoms[4] * 0.0008;
             }
             else {
                 // Normal lightning thickness
@@ -536,23 +536,29 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                 }
 
-                // More realistic segment length variation based on generation (subtly enlarged for better visibility)
+                // Zoom-aware segment length scaling for better detail at high zoom
+                // Calculate the zoom factor to adjust segment detail
+                let zoom_factor_detail = sim_params.virtual_world_width / sim_params.viewport_width;
+                let detail_scale = 1.0 / sqrt(zoom_factor_detail);
+                // More segments at higher zoom (square root for smoother scaling)
+
+                // More realistic segment length variation based on generation (zoom-aware)
                 var segment_length: f32;
                 if (generation == 0u) {
-                    // Main trunk: shorter segments (0.018-0.035 UV) - subtly increased
-                    segment_length = 0.015 + segment_randoms[2] * 0.015;
+                    // Main trunk: shorter segments (0.018-0.035 UV) - scale with zoom for more detail
+                    segment_length = (0.015 + segment_randoms[2] * 0.015) * detail_scale;
                 }
                 else if (generation == 1u) {
-                    // Primary branches: medium length (0.032-0.05 UV) - subtly increased
-                    segment_length = 0.024 + segment_randoms[2] * 0.020;
+                    // Primary branches: medium length (0.032-0.05 UV) - scale with zoom
+                    segment_length = (0.024 + segment_randoms[2] * 0.020) * detail_scale;
                 }
                 else if (generation <= 7u) {
-                    // Secondary+ branches: longest (0.032-0.06 UV) - subtly increased
-                    segment_length = 0.030 + segment_randoms[2] * 0.024;
+                    // Secondary+ branches: longest (0.032-0.06 UV) - scale with zoom
+                    segment_length = (0.030 + segment_randoms[2] * 0.024) * detail_scale;
                 }
                 else {
-                    // Super lightning extra generations (8-9): even longer for wider spread
-                    segment_length = 0.032 + segment_randoms[2] * 0.025;
+                    // Super lightning extra generations (8-9): even longer for wider spread - scale with zoom
+                    segment_length = (0.032 + segment_randoms[2] * 0.025) * detail_scale;
                 }
 
                 // Super lightning gets extra size boost for more dramatic effect
@@ -568,23 +574,29 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // Calculate segment end position directly from angle and length
                 let new_end = vec2<f32>(branch_pos.x + cos(new_angle) * segment_length, branch_pos.y + sin(new_angle) * segment_length);
 
+                // Zoom-aware thickness scaling for crisp lightning at all zoom levels
+                // Calculate the zoom factor to adjust thickness
+                let zoom_factor = sim_params.virtual_world_width / sim_params.viewport_width;
+                let base_thickness_scale = 1.0 / zoom_factor;
+                // Thinner at higher zoom for crisp details
+
                 // Much more realistic thickness scaling (thicker for better anti-aliasing)
                 var segment_thickness: f32;
                 if (generation == 0u) {
-                    segment_thickness = 0.0008 + segment_randoms[3] * 0.0006;
-                    // 0.001 - 0.0018 (doubled for better visibility)
+                    segment_thickness = (0.0008 + segment_randoms[3] * 0.0006) * base_thickness_scale;
+                    // Scale main trunk with zoom
                 }
                 else if (generation == 1u) {
-                    segment_thickness = 0.0007 + segment_randoms[3] * 0.0005;
-                    // 0.0008 - 0.0014 (doubled for better visibility)
+                    segment_thickness = (0.0007 + segment_randoms[3] * 0.0005) * base_thickness_scale;
+                    // Scale primary branches with zoom
                 }
                 else if (generation == 2u) {
-                    segment_thickness = 0.0006 + segment_randoms[3] * 0.0004;
-                    // 0.0006 - 0.001 (doubled for better visibility)
+                    segment_thickness = (0.0006 + segment_randoms[3] * 0.0004) * base_thickness_scale;
+                    // Scale secondary branches with zoom
                 }
                 else {
-                    segment_thickness = 0.0005 + segment_randoms[3] * 0.0003;
-                    // 0.0004 - 0.0006 (doubled for better visibility)
+                    segment_thickness = (0.0005 + segment_randoms[3] * 0.0003) * base_thickness_scale;
+                    // Scale tertiary+ branches with zoom
                 }
 
                 // Vary alpha based on generation for natural fading
