@@ -257,21 +257,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
         if (burst_seed < burst_threshold) {
             // Burst mode - very short intervals, influenced by weather
-            let burst_intensity = weather_burst_bias * charge_factor;
+            let burst_intensity = max(weather_burst_bias * charge_factor, 0.1);  // Prevent division by zero
             final_variation = (0.3 + combined_random * 1.2) / burst_intensity;
         }
         else if (burst_seed < normal_threshold) {
             // Normal mode - medium intervals with weather variation
-            let normal_factor = (weather_burst_bias * 0.5 + 0.5) * charge_factor;
+            let normal_factor = max((weather_burst_bias * 0.5 + 0.5) * charge_factor, 0.1);  // Prevent division by zero
             final_variation = (1.5 + combined_random * 5.0) / normal_factor;
         }
         else {
             // Lull mode - longer intervals, less affected by charge buildup
-            let lull_factor = weather_burst_bias * 0.7 + 0.3;
-            final_variation = (4.0 + combined_random * 12.0) / (lull_factor * sqrt(charge_factor));
+            let lull_factor = max(weather_burst_bias * 0.7 + 0.3, 0.1);  // Prevent division by zero
+            final_variation = (4.0 + combined_random * 12.0) / (lull_factor * max(sqrt(charge_factor), 0.1));
         }
 
-        // Apply complex environmental scaling
+        // Apply complex environmental scaling with safety checks
         let environmental_factor = weather_cycle * storm_intensity * atmospheric_pressure * storm_cell_factor;
         final_variation *= (1.0 - normalized_activity * 0.6);
         // Activity scaling
@@ -280,7 +280,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         final_variation = max(final_variation, 0.2);
         // Minimum 0.2s interval
 
-        lightning_bolt.next_lightning_time = time + base_interval + final_variation;
+        // Safety check: prevent extremely long intervals that could break the cycle
+        final_variation = min(final_variation, 120.0);  // Maximum 2 minutes interval
+
+        // Safety check: ensure next_lightning_time doesn't overflow or become invalid
+        let next_time = time + base_interval + final_variation;
+        if (next_time > time && next_time < time + 300.0) {  // Sanity check: must be reasonable future time
+            lightning_bolt.next_lightning_time = next_time;
+        } else {
+            // Fallback: simple 5-second interval if calculation went wrong
+            lightning_bolt.next_lightning_time = time + 5.0;
+        }
 
         // Time-based random seed generation for bolt creation
         let bolt_seed = fract(sin(time * 12.9898 + electricalActivity * 78.233 + f32(lightning_bolt.flash_id) * 91.2347) * 43758.5453);
@@ -741,5 +751,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
         // End of lifecycle management guard
+    }
+
+    // SAFETY FALLBACK: If lightning cycle seems broken, reset it
+    // This handles edge cases where next_lightning_time becomes invalid
+    if (lightning_bolt.next_lightning_time <= 0.0 ||
+        lightning_bolt.next_lightning_time < time ||
+        lightning_bolt.next_lightning_time > time + 300.0) {
+        // Reset with a reasonable delay
+        lightning_bolt.next_lightning_time = time + 10.0;  // 10 second delay
+        lightning_bolt.num_segments = 0u;
+        lightning_bolt.is_super_lightning = 0u;
+        lightning_bolt.needs_rules_reset = 0u;
     }
 }
