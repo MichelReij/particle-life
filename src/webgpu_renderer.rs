@@ -381,17 +381,17 @@ impl WebGpuRenderer {
         });
 
         // Create post-processing textures
-        // Scene texture now matches canvas size for direct rendering (more efficient)
+        // Scene texture now uses fisheye buffer size for global fisheye effect
         let scene_texture_size = wgpu::Extent3d {
-            width: CANVAS_WIDTH_U32,
-            height: CANVAS_HEIGHT_U32,
+            width: FISHEYE_BUFFER_WIDTH_U32,
+            height: FISHEYE_BUFFER_HEIGHT_U32,
             depth_or_array_layers: 1,
         };
 
-        // Intermediate texture should match canvas size to match scene texture
+        // Intermediate texture should match fisheye buffer size
         let intermediate_texture_size = wgpu::Extent3d {
-            width: CANVAS_WIDTH_U32,
-            height: CANVAS_HEIGHT_U32,
+            width: FISHEYE_BUFFER_WIDTH_U32,
+            height: FISHEYE_BUFFER_HEIGHT_U32,
             depth_or_array_layers: 1,
         };
 
@@ -419,7 +419,8 @@ impl WebGpuRenderer {
             format: surface_format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::COPY_DST,
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC, // Added for fisheye buffer center cropping
             view_formats: &[],
         });
 
@@ -1801,10 +1802,10 @@ impl WebGpuRenderer {
             );
         }
 
-        // Pass 6: Zoom post-processing (final step) - matches TypeScript pipeline
+        // Pass 6: Apply center crop and zoom via shader (samples central region of fisheye buffer)
         {
             let mut zoom_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Zoom Render Pass"),
+                label: Some("Zoom Render Pass (Center Crop)"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
@@ -1818,8 +1819,6 @@ impl WebGpuRenderer {
                 occlusion_query_set: None,
             });
 
-            // Always use zoom pipeline as final step (matches TypeScript)
-            // This reads from intermediate_texture (after fisheye processing)
             zoom_pass.set_pipeline(&self.zoom_render_pipeline);
             zoom_pass.set_bind_group(0, &self.zoom_render_bind_group, &[]);
             zoom_pass.draw(0..6, 0..1); // Fullscreen quad

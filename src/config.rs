@@ -34,6 +34,10 @@ pub const ZOOM_STEP: f32 = 0.01;
 /// At max zoom (12x), each screen pixel represents this many world units
 pub const MAX_ZOOM_WORLD_UNITS_PER_PIXEL: f32 = VIRTUAL_WORLD_WIDTH / (CANVAS_WIDTH * ZOOM_MAX); // ~0.25
 
+/// Fisheye configuration - fixed strength for consistent global fisheye effect
+pub const FISHEYE_STRENGTH: f32 = 1.5;
+pub const FISHEYE_BUFFER_SCALE: f32 = 1.3; // Buffer enlargement factor (can be tweaked iteratively)
+
 /// Convenience constants derived from the main dimensions
 pub const VIRTUAL_WORLD_CENTER_X: f32 = VIRTUAL_WORLD_WIDTH / 2.0; // 1620.0
 pub const VIRTUAL_WORLD_CENTER_Y: f32 = VIRTUAL_WORLD_HEIGHT / 2.0; // 1620.0
@@ -46,6 +50,33 @@ pub const VIRTUAL_WORLD_WIDTH_U32: u32 = VIRTUAL_WORLD_WIDTH as u32; // 3240
 pub const VIRTUAL_WORLD_HEIGHT_U32: u32 = VIRTUAL_WORLD_HEIGHT as u32; // 3240
 pub const CANVAS_WIDTH_U32: u32 = CANVAS_WIDTH as u32; // 1080
 pub const CANVAS_HEIGHT_U32: u32 = CANVAS_HEIGHT as u32; // 1080
+
+/// Fisheye buffer dimensions - larger rendering area for global fisheye effect
+/// We render to this larger buffer and then crop the center for the final output
+pub const FISHEYE_BUFFER_WIDTH: f32 = CANVAS_WIDTH * FISHEYE_BUFFER_SCALE; // 1404.0
+pub const FISHEYE_BUFFER_HEIGHT: f32 = CANVAS_HEIGHT * FISHEYE_BUFFER_SCALE; // 1404.0
+pub const FISHEYE_BUFFER_WIDTH_U32: u32 = FISHEYE_BUFFER_WIDTH as u32; // 1404
+pub const FISHEYE_BUFFER_HEIGHT_U32: u32 = FISHEYE_BUFFER_HEIGHT as u32; // 1404
+
+/// Calculate the offset needed to center the canvas crop within the fisheye buffer
+pub const FISHEYE_CROP_OFFSET_X: f32 = (FISHEYE_BUFFER_WIDTH - CANVAS_WIDTH) / 2.0; // 162.0
+pub const FISHEYE_CROP_OFFSET_Y: f32 = (FISHEYE_BUFFER_HEIGHT - CANVAS_HEIGHT) / 2.0; // 162.0
+
+/// Calculate the size of the fisheye buffer based on fisheye strength
+/// For true global fisheye, we need a larger buffer that gets distorted and cropped
+pub fn calculate_fisheye_buffer_size(fisheye_strength: f32) -> (u32, u32) {
+    if fisheye_strength <= 0.0 {
+        // No fisheye, use canvas size
+        (CANVAS_WIDTH_U32, CANVAS_HEIGHT_U32)
+    } else {
+        // Buffer needs to be larger than canvas by fisheye_strength factor
+        // For fisheye strength 1.3, buffer should be 1404x1404
+        let scale_factor = 1.0 + fisheye_strength;
+        let buffer_width = (CANVAS_WIDTH * scale_factor).ceil() as u32;
+        let buffer_height = (CANVAS_HEIGHT * scale_factor).ceil() as u32;
+        (buffer_width, buffer_height)
+    }
+}
 
 /// Configuration for easy experimentation
 /// Change these values to experiment with different world/canvas sizes

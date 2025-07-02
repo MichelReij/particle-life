@@ -778,7 +778,7 @@ export function initializeUI(
     initializeFrictionSlider(simParams);
     initializeRSmoothSlider(simParams);
     initializeInterTypeScaleSliders(simParams);
-    initializeFisheyeSlider(simParams);
+    // initializeFisheyeSlider(simParams); // Removed - fisheye strength is now fixed at 1.5
     initializeParticleRenderSizeSlider();
     initializeZoomSlider(currentZoomLevel);
     initializeLeniaControls(simParams);

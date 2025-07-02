@@ -65,8 +65,36 @@ struct SimParams {
 
 @group(0) @binding(0)
 var<uniform> sim_params: SimParams;
-// No texture input needed for a static grid overlay, unless we were blending with previous pass manually.
-// However, this pass will be blended by the pipeline settings on top of the canvas.
+
+// Inverse fisheye transformation - maps screen-space position back to original world coordinates
+fn applyInverseFisheyeTransform(transformed_pos: vec2<f32>, strength: f32) -> vec2<f32> {
+    // If strength is 0 or negative, return original position (no distortion)
+    if (strength <= 0.0) {
+        return transformed_pos;
+    }
+
+    // Convert transformed coordinates to centered UV coordinates (-0.5 to 0.5)
+    let world_center = vec2<f32>(sim_params.virtual_world_width * 0.5, sim_params.virtual_world_height * 0.5);
+    let centered_pos = (transformed_pos - world_center) / sim_params.virtual_world_width;
+
+    // Calculate distance from center
+    let distance = length(centered_pos);
+
+    // Apply inverse fisheye transformation
+    if (distance > 0.0) {
+        // Inverse fisheye formula: original_distance = tan(distance * strength) / strength
+        let original_distance = tan(distance * strength) / strength;
+        let direction = centered_pos / distance;
+        let original_pos = direction * original_distance;
+
+        // Convert back to world coordinates
+        return world_center + original_pos * sim_params.virtual_world_width;
+    }
+    else {
+        // Center point remains unchanged
+        return transformed_pos;
+    }
+}
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
@@ -74,9 +102,19 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let viewport_left = sim_params.viewport_center_x - sim_params.viewport_width * 0.5;
     let viewport_top = sim_params.viewport_center_y - sim_params.viewport_height * 0.5;
 
-    // Convert fragment coord (0-1080) to world coordinate
-    let world_x = viewport_left + (frag_coord.x / sim_params.canvas_render_width) * sim_params.viewport_width;
-    let world_y = viewport_top + (frag_coord.y / sim_params.canvas_render_height) * sim_params.viewport_height;
+    // Convert fragment coord to world coordinate using fisheye buffer dimensions
+    // frag_coord ranges from 0 to fisheye_buffer_size (1404x1404), not canvas size (1080x1080)
+    let fisheye_buffer_width = 1404.0;
+    let fisheye_buffer_height = 1404.0;
+    let fisheye_world_x = viewport_left + (frag_coord.x / fisheye_buffer_width) * sim_params.viewport_width;
+    let fisheye_world_y = viewport_top + (frag_coord.y / fisheye_buffer_height) * sim_params.viewport_height;
+
+    // Apply INVERSE fisheye transformation to get original world coordinates for grid calculation
+    // This is necessary because we want to draw the grid in the original coordinate space,
+    // then let the fisheye effect make it appear curved to match the particles
+    let original_world_pos = applyInverseFisheyeTransform(vec2<f32>(fisheye_world_x, fisheye_world_y), sim_params.fisheye_strength);
+    let world_x = original_world_pos.x;
+    let world_y = original_world_pos.y;
 
     // Grid spacing in world coordinates (always show ~21 lines across the virtual world)
     let world_grid_spacing_x = sim_params.virtual_world_width / 20.0;

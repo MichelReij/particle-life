@@ -48,6 +48,18 @@ struct SimParams {
     spatial_grid_cell_size: f32,
     spatial_grid_width: u32,
     spatial_grid_height: u32,
+
+    // Viewport/zoom parameters for rendering optimization
+    viewport_center_x: f32,
+    viewport_center_y: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+    viewport_radius: f32,
+
+    // Padding to ensure 16-byte alignment (3 × f32 = 12 bytes)
+    _viewport_padding1: f32,
+    _viewport_padding2: f32,
+    _viewport_padding3: f32,
 }
 
 @group(0) @binding(0)

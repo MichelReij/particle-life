@@ -151,8 +151,8 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
         return out;
     }
 
-    // VIEWPORT CULLING: Cull particles outside the visible zoom area
-    // Calculate viewport bounds in virtual world coordinates
+    // STANDARD CULLING: Check if particle position is outside the viewport bounds
+    // No fisheye expansion needed - we'll let the grid handle fisheye via fragment shader
     let viewport_left = sim_params.viewport_center_x - sim_params.viewport_width * 0.5;
     let viewport_right = sim_params.viewport_center_x + sim_params.viewport_width * 0.5;
     let viewport_top = sim_params.viewport_center_y - sim_params.viewport_height * 0.5;
@@ -161,9 +161,8 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
     // Add particle radius as margin to ensure particles partially in view are rendered
     let particle_radius = particle_attrs.particle_size;
     let margin = particle_radius * 2.0;
-    // Extra margin for safety
 
-    // RECTANGULAR CULLING: Check if particle is outside viewport bounds (with margin)
+    // Check if particle is outside viewport bounds (with margin)
     if (particle_attrs.particle_pos.x < viewport_left - margin || particle_attrs.particle_pos.x > viewport_right + margin || particle_attrs.particle_pos.y < viewport_top - margin || particle_attrs.particle_pos.y > viewport_bottom + margin) {
 
         // Cull by positioning outside clip space
@@ -183,35 +182,14 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
         return out;
     }
 
-    // DEBUG: Color particles based on is_active value to diagnose the issue
-    var debug_color = getColorForType(particle_attrs.particle_type, sim_params.num_types);
-
-    // Debug color coding:
-    // Normal color = is_active == 1u (expected)
-    // Bright red = is_active != 0u and is_active != 1u (corrupted)
-    // Bright blue = is_active == 0u (inactive, should be culled above)
-    // Bright yellow = any other unexpected case
-
-    if (particle_attrs.is_active == 0u) {
-        debug_color = vec4<f32>(0.0, 0.0, 1.0, 1.0);
-        // Blue for inactive (shouldn't happen since culled above)
-    }
-    else if (particle_attrs.is_active == 1u) {
-        // Keep normal color - this is expected
-    }
-    else {
-        // Red for corrupted values (not 0 or 1)
-        debug_color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
-    }
+    // Get particle color
+    let particle_color = getColorForType(particle_attrs.particle_type, sim_params.num_types);
 
     // Use per-particle size directly - no scaling needed since we render directly to canvas
-    // The particle sizes are already calculated correctly for the final display
     let particle_radius_pixels = particle_attrs.particle_size;
 
-    // Particle position is in virtual world coordinates (0-virtual_world_width/height range)
-    // Convert directly to canvas clip space, taking zoom and viewport into account
-
-    // Transform from virtual world coords to viewport-relative coords
+    // POSITION CALCULATION: Transform from world coords to viewport-relative coords
+    // NO fisheye transformation here - particles will render straight, grid will have fisheye
     let viewport_relative_x = (particle_attrs.particle_pos.x - viewport_left) / sim_params.viewport_width;
     let viewport_relative_y = (particle_attrs.particle_pos.y - viewport_top) / sim_params.viewport_height;
 
@@ -219,15 +197,12 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
     let normalized_particle_pos = vec2<f32>(viewport_relative_x * 2.0 - 1.0, (1.0 - viewport_relative_y) * 2.0 - 1.0);
 
     // Scale quad vertex by particle size - scale relative to viewport size for proper zoom behavior
-    // When zoomed in, the viewport is smaller, so particles should appear larger
     let viewport_scale_x = 2.0 / sim_params.viewport_width;
-    // Scale relative to viewport width
     let viewport_scale_y = 2.0 / sim_params.viewport_height;
-    // Scale relative to viewport height
     let scaled_quad_pos = vec2<f32>(vertex_attrs.quad_pos.x * particle_radius_pixels * viewport_scale_x, vertex_attrs.quad_pos.y * particle_radius_pixels * viewport_scale_y);
 
     out.position = vec4<f32>(normalized_particle_pos + scaled_quad_pos, 0.0, 1.0);
-    out.particle_color = debug_color;
+    out.particle_color = particle_color;
 
     // Calculate UV coordinates for the quad (convert from [-1,1] to [0,1])
     out.quad_uv = (vertex_attrs.quad_pos + 1.0) * 0.5;

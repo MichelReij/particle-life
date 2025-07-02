@@ -92,7 +92,7 @@ impl SimulationParams {
             inter_type_attraction_scale: 1.0,
             inter_type_radius_scale: 1.0,
             time: 0.0,
-            fisheye_strength: 0.0, // Disabled - no fisheye distortion
+            fisheye_strength: 1.5, // Fixed fisheye strength for consistent global effect
             background_color_r: 0.0,
             background_color_g: 0.0,
             background_color_b: 0.0,
@@ -169,7 +169,7 @@ impl SimulationParams {
             "driftXPerSecond" => self.drift_x_per_second = value,
             "interTypeAttractionScale" => self.inter_type_attraction_scale = value,
             "interTypeRadiusScale" => self.inter_type_radius_scale = value,
-            "fisheyeStrength" => self.fisheye_strength = value,
+            // "fisheyeStrength" => self.fisheye_strength = value, // Now fixed at 1.5
             "leniaGrowthMu" => self.lenia_growth_mu = value,
             "leniaGrowthSigma" => self.lenia_growth_sigma = value,
             "leniaKernelRadius" => self.lenia_kernel_radius = value,

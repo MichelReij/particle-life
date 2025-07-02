@@ -48,6 +48,18 @@ struct SimParams {
     spatial_grid_cell_size: f32,
     spatial_grid_width: u32,
     spatial_grid_height: u32,
+
+    // Viewport/zoom parameters for rendering optimization
+    viewport_center_x: f32,
+    viewport_center_y: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+    viewport_radius: f32,
+
+    // Padding to ensure 16-byte alignment (3 × f32 = 12 bytes)
+    _viewport_padding1: f32,
+    _viewport_padding2: f32,
+    _viewport_padding3: f32,
 }
 
 ;
@@ -61,9 +73,11 @@ var scene_texture: texture_2d<f32>;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    // frag_coord.xy is now in canvas coordinates (0 to canvas_width/height)
-    // Convert to UV coordinates (0 to 1)
-    let uv = frag_coord.xy / vec2<f32>(sim_params.canvas_render_width, sim_params.canvas_render_height);
+    // frag_coord.xy is in fisheye buffer coordinates (0 to 1404x1404)
+    // Convert to UV coordinates (0 to 1) using the actual fisheye buffer dimensions
+    let fisheye_buffer_width = 1404.0;
+    let fisheye_buffer_height = 1404.0;
+    let uv = frag_coord.xy / vec2<f32>(fisheye_buffer_width, fisheye_buffer_height);
 
     // Center the UV coordinates around (0, 0) for distortion calculation
     let centered_uv = uv - 0.5;
