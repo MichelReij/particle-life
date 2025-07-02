@@ -10,7 +10,7 @@ pub const CANVAS_WIDTH: f32 = 1080.0;
 pub const CANVAS_HEIGHT: f32 = 1080.0;
 
 /// Particle rendering size - the diameter of particles in pixels
-pub const PARTICLE_SIZE: f32 = 20.0;
+pub const PARTICLE_SIZE: f32 = 10.0;
 pub const PARTICLE_SIZE_MIN: f32 = 8.0;
 pub const PARTICLE_SIZE_MAX: f32 = 32.0;
 
@@ -19,25 +19,20 @@ pub const DEFAULT_NUM_PARTICLES: u32 = 4800;
 pub const MAX_PARTICLES: u32 = 4800;
 pub const MIN_PARTICLES: u32 = 1200;
 
-/// FPS display configuration
+/// FPS display configuration - no longer capped to allow 3-digit display
 pub const FPS_SAMPLE_COUNT: usize = 10; // Number of samples for moving average
 pub const FPS_UPDATE_INTERVAL: f32 = 0.5; // Update interval in seconds
 pub const FPS_CONSOLE_INTERVAL: f32 = 3.0; // Console output interval in seconds
-pub const FPS_DISPLAY_MAX: f32 = 99.0; // Maximum FPS to display (cap at 99 for formatting)
 
-/// Zoom configuration - maximum 6x zoom capability
+/// Zoom configuration - maximum 12x zoom capability with direct canvas rendering
+/// The efficient direct-to-canvas pipeline allows for high zoom levels while maintaining quality
 pub const ZOOM_MIN: f32 = 1.0;
-pub const ZOOM_MAX: f32 = 6.0;
+pub const ZOOM_MAX: f32 = 12.0;
 pub const ZOOM_DEFAULT: f32 = 1.0;
 pub const ZOOM_STEP: f32 = 0.01;
 
-/// At max zoom (6x), each screen pixel represents this many world units
-pub const MAX_ZOOM_WORLD_UNITS_PER_PIXEL: f32 = VIRTUAL_WORLD_WIDTH / (CANVAS_WIDTH * ZOOM_MAX); // ~0.5
-
-/// Cap FPS value for consistent display formatting
-pub fn cap_fps_for_display(fps: f32) -> f32 {
-    fps.min(FPS_DISPLAY_MAX)
-}
+/// At max zoom (12x), each screen pixel represents this many world units
+pub const MAX_ZOOM_WORLD_UNITS_PER_PIXEL: f32 = VIRTUAL_WORLD_WIDTH / (CANVAS_WIDTH * ZOOM_MAX); // ~0.25
 
 /// Convenience constants derived from the main dimensions
 pub const VIRTUAL_WORLD_CENTER_X: f32 = VIRTUAL_WORLD_WIDTH / 2.0; // 1620.0

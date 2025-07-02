@@ -2,6 +2,8 @@ use crate::config::*;
 use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use web_sys;
 
 // Central SimulationParams struct definition - used by both WASM and native
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -321,7 +323,7 @@ impl SimulationParams {
         let friction = 0.98 * (-3.0 * normalized_temp).exp();
         self.friction = friction;
 
-        // 3. Update background color using HSLuv: temp [3, 40] → hue [215°, 15°]
+        // 3. Update background color using HSLuv: temp [3, 40] → hue [200°, 15°]
         let (r, g, b) = Self::temperature_to_background_color(clamped_temp);
         self.background_color_r = r;
         self.background_color_g = g;
@@ -381,8 +383,8 @@ impl SimulationParams {
 
     // Set zoom level and update viewport parameters
     pub fn apply_zoom(&mut self, zoom_level: f32, center_x: Option<f32>, center_y: Option<f32>) {
-        // Clamp zoom level to valid range (1.0 to 6.0)
-        let clamped_zoom = zoom_level.max(1.0).min(6.0);
+        // Clamp zoom level to valid range (1.0 to ZOOM_MAX)
+        let clamped_zoom = zoom_level.max(ZOOM_MIN).min(ZOOM_MAX);
 
         // Store the current zoom level for drift adjustment
         self.current_zoom_level = clamped_zoom;
@@ -394,6 +396,16 @@ impl SimulationParams {
         // Center the viewport around world center by default
         let center_x = center_x.unwrap_or(VIRTUAL_WORLD_CENTER_X);
         let center_y = center_y.unwrap_or(VIRTUAL_WORLD_CENTER_Y);
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_2(
+            &format!(
+                "🎯 apply_zoom: zoom={:.2}, center=({:.1}, {:.1}), viewport={}x{}",
+                clamped_zoom, center_x, center_y, viewport_width as u32, viewport_height as u32
+            )
+            .into(),
+            &wasm_bindgen::JsValue::UNDEFINED,
+        );
 
         // Calculate offset to center the viewport
         let offset_x = center_x - (viewport_width / 2.0);
@@ -411,19 +423,34 @@ impl SimulationParams {
         self.virtual_world_offset_y = clamped_offset_y;
         self.viewport_width = viewport_width;
         self.viewport_height = viewport_height;
+
+        // IMPORTANT: Update viewport center coordinates that are sent to GPU!
+        // Recalculate the actual center from the clamped offset
+        self.viewport_center_x = clamped_offset_x + (viewport_width / 2.0);
+        self.viewport_center_y = clamped_offset_y + (viewport_height / 2.0);
+
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_2(
+            &format!(
+                "🎯 viewport updated: offset=({:.1}, {:.1}), center=({:.1}, {:.1})",
+                clamped_offset_x, clamped_offset_y, self.viewport_center_x, self.viewport_center_y
+            )
+            .into(),
+            &wasm_bindgen::JsValue::UNDEFINED,
+        );
     }
 
     // Temperature-based background color mapping using HSLuv (static helper)
     fn temperature_to_background_color(temp: f32) -> (f32, f32, f32) {
-        // Temperature mapping: 3°C to 40°C → Hue 215° to 15°
+        // Temperature mapping: 3°C to 40°C → Hue 200° to 15°
         // Clamp temperature to valid range
         let clamped_temp = temp.max(3.0).min(40.0);
 
         // Normalize temperature: 0.0 at 3°C, 1.0 at 40°C
         let normalized_temp = (clamped_temp - 3.0) / (40.0 - 3.0);
 
-        // Map to hue range: 215° (cold/blue) to 15° (hot/red)
-        let hue = 215.0 - normalized_temp * 200.0; // 215° to 15°
+        // Map to hue range: 200° (cold/blue) to 15° (hot/red)
+        let hue = 200.0 - normalized_temp * 185.0; // 200° to 15°
 
         // Uniform saturation and lightness values for both platforms
         let (saturation, lightness) = (33.0, 66.0);

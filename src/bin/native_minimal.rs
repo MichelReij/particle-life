@@ -187,10 +187,9 @@ impl ApplicationHandler for MinimalNativeApp {
                     // Update FPS data in renderer for on-screen display
                     if let Some(renderer) = &mut self.renderer {
                         let active_particles = self.particle_system.get_active_count();
-                        // Cap FPS display to prevent formatting issues
-                        let display_fps = cap_fps_for_display(self.current_fps);
+                        // Show full FPS value with 3 digits for values above 99
                         renderer.update_fps_data(
-                            display_fps,
+                            self.current_fps,
                             0, // frame_count reset
                             active_particles,
                             self.current_time,
@@ -210,7 +209,7 @@ impl ApplicationHandler for MinimalNativeApp {
                     println!("╔══════════════════════════════════════╗");
                     println!("║          PARTICLE LIFE NATIVE       ║");
                     println!("╠══════════════════════════════════════╣");
-                    println!("║  FPS: {:<27.0} ║", cap_fps_for_display(self.current_fps));
+                    println!("║  FPS: {:<27.0} ║", self.current_fps);
                     println!("║  Particles: {:<22} ║", active_particles);
                     println!("║  Time: {:<25.1} ║", self.current_time);
                     println!("╚══════════════════════════════════════╝");

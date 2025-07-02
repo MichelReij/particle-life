@@ -204,21 +204,27 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
         debug_color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
 
-    // Use per-particle size directly (CPU already handles proper bounds)
+    // Use per-particle size directly - no scaling needed since we render directly to canvas
+    // The particle sizes are already calculated correctly for the final display
     let particle_radius_pixels = particle_attrs.particle_size;
-    // Trust the CPU calculations which include type multipliers and randomization
 
     // Particle position is in virtual world coordinates (0-virtual_world_width/height range)
-    // Convert to viewport-relative coordinates, then to clip space
+    // Convert directly to canvas clip space, taking zoom and viewport into account
+
     // Transform from virtual world coords to viewport-relative coords
     let viewport_relative_x = (particle_attrs.particle_pos.x - viewport_left) / sim_params.viewport_width;
     let viewport_relative_y = (particle_attrs.particle_pos.y - viewport_top) / sim_params.viewport_height;
 
-    // Convert to clip space (-1 to 1)
+    // Convert to clip space (-1 to 1) - this now renders directly to canvas size
     let normalized_particle_pos = vec2<f32>(viewport_relative_x * 2.0 - 1.0, (1.0 - viewport_relative_y) * 2.0 - 1.0);
 
-    // Scale quad vertex by particle size - now scale relative to viewport instead of full world
-    let scaled_quad_pos = vec2<f32>(vertex_attrs.quad_pos.x * (particle_radius_pixels / sim_params.viewport_width), vertex_attrs.quad_pos.y * (particle_radius_pixels / sim_params.viewport_height));
+    // Scale quad vertex by particle size - scale relative to viewport size for proper zoom behavior
+    // When zoomed in, the viewport is smaller, so particles should appear larger
+    let viewport_scale_x = 2.0 / sim_params.viewport_width;
+    // Scale relative to viewport width
+    let viewport_scale_y = 2.0 / sim_params.viewport_height;
+    // Scale relative to viewport height
+    let scaled_quad_pos = vec2<f32>(vertex_attrs.quad_pos.x * particle_radius_pixels * viewport_scale_x, vertex_attrs.quad_pos.y * particle_radius_pixels * viewport_scale_y);
 
     out.position = vec4<f32>(normalized_particle_pos + scaled_quad_pos, 0.0, 1.0);
     out.particle_color = debug_color;

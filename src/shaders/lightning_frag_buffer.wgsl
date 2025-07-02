@@ -123,9 +123,29 @@ var<storage, read> lightning_segments: array<LightningSegment>;
 @group(0) @binding(10)
 var<storage, read> lightning_bolt: LightningBolt;
 
-// Helper function to draw a single segment in UV coordinates with improved anti-aliasing
+// Helper function to draw a single segment in UV coordinates with zoom adjustment
 fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thickness: f32, color: vec3<f32>) -> vec4<f32> {
-    let segmentDir = end - start;
+    // Transform lightning segment coordinates from virtual world UV (0-1) to viewport-relative coordinates
+    // Lightning segments are stored in UV coordinates where (0,0) = top-left of virtual world, (1,1) = bottom-right
+
+    // Convert lightning segment UV coordinates to virtual world coordinates
+    let start_world = vec2<f32>(start.x * sim_params.virtual_world_width, start.y * sim_params.virtual_world_height);
+    let end_world = vec2<f32>(end.x * sim_params.virtual_world_width, end.y * sim_params.virtual_world_height);
+
+    // Calculate viewport bounds
+    let viewport_left = sim_params.viewport_center_x - sim_params.viewport_width * 0.5;
+    let viewport_top = sim_params.viewport_center_y - sim_params.viewport_height * 0.5;
+
+    // Transform to viewport-relative coordinates (0-1 within the current viewport)
+    let start_viewport = vec2<f32>((start_world.x - viewport_left) / sim_params.viewport_width, (start_world.y - viewport_top) / sim_params.viewport_height);
+    let end_viewport = vec2<f32>((end_world.x - viewport_left) / sim_params.viewport_width, (end_world.y - viewport_top) / sim_params.viewport_height);
+
+    // Scale thickness to viewport (smaller viewport = larger relative thickness)
+    let viewport_scale = sim_params.virtual_world_width / sim_params.viewport_width;
+    // zoom factor
+    let scaled_thickness = thickness * viewport_scale;
+
+    let segmentDir = end_viewport - start_viewport;
     let segmentLength = length(segmentDir);
 
     if (segmentLength < 0.001) {
@@ -133,16 +153,16 @@ fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thic
     }
 
     let normalizedDir = segmentDir / segmentLength;
-    let toPoint = uv - start;
+    let toPoint = uv - start_viewport;
     let projLength = dot(toPoint, normalizedDir);
 
     if (projLength >= 0.0 && projLength <= segmentLength) {
-        let closestPoint = start + normalizedDir * projLength;
+        let closestPoint = start_viewport + normalizedDir * projLength;
         let distToSegment = length(uv - closestPoint);
 
-        // Improved anti-aliasing with soft falloff
-        let halfThickness = thickness * 0.5;
-        let antiAliasWidth = thickness * 0.3;
+        // Use scaled thickness for proper zoom behavior
+        let halfThickness = scaled_thickness * 0.5;
+        let antiAliasWidth = scaled_thickness * 0.3;
         // 30% of thickness for smooth falloff
 
         // Core intensity (full brightness within half thickness)

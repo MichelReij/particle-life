@@ -61,9 +61,9 @@ var scene_texture: texture_2d<f32>;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    // frag_coord.xy is in intermediate texture coordinates (0 to virtual_world_width/height)
+    // frag_coord.xy is now in canvas coordinates (0 to canvas_width/height)
     // Convert to UV coordinates (0 to 1)
-    let uv = frag_coord.xy / vec2<f32>(sim_params.virtual_world_width, sim_params.virtual_world_height);
+    let uv = frag_coord.xy / vec2<f32>(sim_params.canvas_render_width, sim_params.canvas_render_height);
 
     // Center the UV coordinates around (0, 0) for distortion calculation
     let centered_uv = uv - 0.5;
@@ -87,7 +87,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
         // No distortion at the center
     }
 
-    // Sample the scene texture (virtual_world_width x virtual_world_height) using the distorted UV coordinates
+    // Sample the scene texture (now canvas_width x canvas_height) using the distorted UV coordinates
     let scene_color = textureSample(scene_texture, scene_sampler, distorted_uv);
 
     // Create a boundary mask to handle areas outside [0,1]

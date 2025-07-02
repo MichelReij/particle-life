@@ -10,7 +10,7 @@ export const CANVAS_WIDTH = 1080.0;
 export const CANVAS_HEIGHT = 1080.0;
 
 // Particle rendering size - the diameter of particles in pixels
-export const PARTICLE_SIZE = 20.0;
+export const PARTICLE_SIZE = 10.0;
 export const PARTICLE_SIZE_MIN = 8.0;
 export const PARTICLE_SIZE_MAX = 32.0;
 
@@ -19,26 +19,28 @@ export const DEFAULT_NUM_PARTICLES = 4800;
 export const MAX_PARTICLES = 4800;
 export const MIN_PARTICLES = 1200;
 
-// FPS display configuration
+// FPS display configuration - no longer capped to allow 3-digit display
 export const FPS_SAMPLE_COUNT = 10; // Number of samples for moving average
 export const FPS_UPDATE_INTERVAL = 0.5; // Update interval in seconds
 export const FPS_CONSOLE_INTERVAL = 3.0; // Console output interval in seconds
-export const FPS_DISPLAY_MAX = 99.0; // Maximum FPS to display (cap at 99 for formatting)
 
-// Zoom configuration - maximum 6x zoom capability
+// Zoom configuration - maximum 12x zoom capability with direct canvas rendering
+// The efficient direct-to-canvas pipeline allows for high zoom levels while maintaining quality
 export const ZOOM_MIN = 1.0;
-export const ZOOM_MAX = 6.0;
+export const ZOOM_MAX = 12.0;
 export const ZOOM_DEFAULT = 1.0;
 export const ZOOM_STEP = 0.01;
 
-// At max zoom (8x), each screen pixel represents this many world units
-export const MAX_ZOOM_WORLD_UNITS_PER_PIXEL =
-    VIRTUAL_WORLD_WIDTH / (CANVAS_WIDTH * ZOOM_MAX); // ~0.5
+// Rendering pipeline configuration
+// We now render directly to canvas size (1080x1080) instead of virtual world size (3240x3240)
+// This is 9x more efficient (1080²/3240² = 0.11) while maintaining visual quality through:
+// - GPU viewport culling (only visible particles are rendered)
+// - Proper particle scaling (particles maintain size across zoom levels)
+// - Direct canvas-space rendering (no downsampling required)
 
-// Cap FPS value for consistent display formatting
-export function capFpsForDisplay(fps: number): number {
-    return Math.min(fps, FPS_DISPLAY_MAX);
-}
+// At max zoom (12x), each screen pixel represents this many world units
+export const MAX_ZOOM_WORLD_UNITS_PER_PIXEL =
+    VIRTUAL_WORLD_WIDTH / (CANVAS_WIDTH * ZOOM_MAX); // ~0.25
 
 // Convenience constants derived from the main dimensions
 export const VIRTUAL_WORLD_CENTER_X = VIRTUAL_WORLD_WIDTH / 2.0; // 1620.0

@@ -48,6 +48,17 @@ struct SimParams {
     spatial_grid_cell_size: f32,
     spatial_grid_width: u32,
     spatial_grid_height: u32,
+
+    // Viewport/zoom parameters for rendering optimization
+    viewport_center_x: f32,
+    viewport_center_y: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+    viewport_radius: f32,
+
+    // Padding to ensure 16-byte alignment
+    _viewport_padding1: f32,
+    _viewport_padding2: f32,
 }
 
 ;
@@ -59,58 +70,68 @@ var<uniform> sim_params: SimParams;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    let regular_line_thickness: f32 = 3.0;
-    // Iets dikker voor betere zichtbaarheid bij alle zoom niveaus
-    let center_line_thickness: f32 = 5.0;
-    // Aangepast om proportie te behouden
+    // Convert screen coordinates to world coordinates using viewport
+    let viewport_left = sim_params.viewport_center_x - sim_params.viewport_width * 0.5;
+    let viewport_top = sim_params.viewport_center_y - sim_params.viewport_height * 0.5;
 
-    // Dynamic spacing: always show exactly 21 lines (10 + center + 10)
-    // This means 20 intervals, so spacing = world_size / 20
-    let spacing_x: f32 = sim_params.virtual_world_width / 20.0;
-    let spacing_y: f32 = sim_params.virtual_world_height / 20.0;
+    // Convert fragment coord (0-1080) to world coordinate
+    let world_x = viewport_left + (frag_coord.x / sim_params.canvas_render_width) * sim_params.viewport_width;
+    let world_y = viewport_top + (frag_coord.y / sim_params.canvas_render_height) * sim_params.viewport_height;
+
+    // Grid spacing in world coordinates (always show ~21 lines across the virtual world)
+    let world_grid_spacing_x = sim_params.virtual_world_width / 20.0;
+    let world_grid_spacing_y = sim_params.virtual_world_height / 20.0;
+
+    // Calculate zoom level (how much we're zoomed in)
+    let zoom_level = sim_params.virtual_world_width / sim_params.viewport_width;
+
+    // Line thickness in world coordinates, scaled by zoom for consistent visual appearance
+    let world_line_thickness = (3.0 / zoom_level);
+    // Regular lines get thinner when zoomed in
+    let world_center_line_thickness = (5.0 / zoom_level);
+    // Center lines get thinner when zoomed in
+
+    // World center coordinates
+    let world_center_x = sim_params.virtual_world_width * 0.5;
+    let world_center_y = sim_params.virtual_world_height * 0.5;
+
+    // Calculate distance to grid lines in world coordinates
+    let offset_from_center_x = world_x - world_center_x;
+    let offset_from_center_y = world_y - world_center_y;
+
+    // Distance to nearest vertical grid line
+    let mod_x = offset_from_center_x - world_grid_spacing_x * floor(offset_from_center_x / world_grid_spacing_x);
+    let dist_to_vertical_line = min(abs(mod_x), world_grid_spacing_x - abs(mod_x));
+
+    // Distance to nearest horizontal grid line
+    let mod_y = offset_from_center_y - world_grid_spacing_y * floor(offset_from_center_y / world_grid_spacing_y);
+    let dist_to_horizontal_line = min(abs(mod_y), world_grid_spacing_y - abs(mod_y));
+
+    // Distance to center lines
+    let dist_to_center_vertical = abs(world_x - world_center_x);
+    let dist_to_center_horizontal = abs(world_y - world_center_y);
 
     let line_color_rgb = vec3<f32>(1.0, 1.0, 1.0);
-    // Jouw huidige waarde (wit)
     let line_alpha: f32 = 0.1;
-    // Jouw huidige waarde
 
-    // Grid should always be centered at the center of the virtual world
-    let center_x = sim_params.virtual_world_width / 2.0;
-    // Center of virtual world
-    let center_y = sim_params.virtual_world_height / 2.0;
-    // Center of virtual world
+    // Anti-aliasing falloff in world coordinates
+    let falloff = 0.5 / zoom_level;
+    // Falloff scales with zoom to maintain sharpness
 
-    // Calculate grid lines that are aligned with the virtual world center
-    let offset_from_center_x = frag_coord.x - center_x;
-    let offset_from_center_y = frag_coord.y - center_y;
-
-    // Calculate distance to nearest grid line relative to center using dynamic spacing
-    let mod_x = offset_from_center_x - spacing_x * floor(offset_from_center_x / spacing_x);
-    let dist_to_regular_vertical_line = min(abs(mod_x), spacing_x - abs(mod_x));
-
-    let mod_y = offset_from_center_y - spacing_y * floor(offset_from_center_y / spacing_y);
-    let dist_to_regular_horizontal_line = min(abs(mod_y), spacing_y - abs(mod_y));
-
-    var final_alpha: f32 = 0.0;
-
-    // Use smoothstep for consistent anti-aliased lines at all zoom levels
-    let falloff = 0.5;
-    // Kleinere falloff voor scherpere lijnen met anti-aliasing
-
-    // Calculate intensities using smoothstep for anti-aliasing
-    let vertical_intensity = 1.0 - smoothstep(regular_line_thickness * 0.5 - falloff, regular_line_thickness * 0.5 + falloff, dist_to_regular_vertical_line);
-    let horizontal_intensity = 1.0 - smoothstep(regular_line_thickness * 0.5 - falloff, regular_line_thickness * 0.5 + falloff, dist_to_regular_horizontal_line);
+    // Calculate line intensities using smoothstep for anti-aliasing
+    let vertical_intensity = 1.0 - smoothstep(world_line_thickness * 0.5 - falloff, world_line_thickness * 0.5 + falloff, dist_to_vertical_line);
+    let horizontal_intensity = 1.0 - smoothstep(world_line_thickness * 0.5 - falloff, world_line_thickness * 0.5 + falloff, dist_to_horizontal_line);
 
     // Center lines with thicker appearance
-    let center_vertical_intensity = 1.0 - smoothstep(center_line_thickness * 0.5 - falloff, center_line_thickness * 0.5 + falloff, abs(frag_coord.x - center_x));
-    let center_horizontal_intensity = 1.0 - smoothstep(center_line_thickness * 0.5 - falloff, center_line_thickness * 0.5 + falloff, abs(frag_coord.y - center_y));
+    let center_vertical_intensity = 1.0 - smoothstep(world_center_line_thickness * 0.5 - falloff, world_center_line_thickness * 0.5 + falloff, dist_to_center_vertical);
+    let center_horizontal_intensity = 1.0 - smoothstep(world_center_line_thickness * 0.5 - falloff, world_center_line_thickness * 0.5 + falloff, dist_to_center_horizontal);
 
     // Combine all line intensities - center lines override regular lines
     let regular_grid_intensity = max(vertical_intensity, horizontal_intensity);
     let center_lines_intensity = max(center_vertical_intensity, center_horizontal_intensity);
 
     // Center lines take priority, otherwise use regular grid
-    final_alpha = max(regular_grid_intensity, center_lines_intensity) * line_alpha;
+    let final_alpha = max(regular_grid_intensity, center_lines_intensity) * line_alpha;
 
     return vec4<f32>(line_color_rgb, final_alpha);
 }

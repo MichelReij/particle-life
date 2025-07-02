@@ -44,8 +44,8 @@ pub fn pressure_to_particle_count(pressure: f32, min_particles: u32, max_particl
 pub fn calculate_background_color_from_drift(drift_x_per_second: f32) -> [f32; 3] {
     let normalized_abs_drift = (drift_x_per_second.abs() / 80.0).min(1.0);
 
-    // Hue transitions from blue (215°) at no drift to red (15°) at max drift
-    let hue = 215.0 - normalized_abs_drift * 200.0;
+    // Hue transitions from blue (200°) at no drift to red (15°) at max drift
+    let hue = 200.0 - normalized_abs_drift * 185.0;
     let saturation = 33.0;
     let lightness = 66.0;
 

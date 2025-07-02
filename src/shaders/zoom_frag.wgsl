@@ -22,34 +22,18 @@ var<uniform> zoom_uniforms: ZoomUniforms;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    // frag_coord.xy is in final canvas coordinates (0 to canvas_width/height)
-    // We need to map this to a portion of the virtual_world_width x virtual_world_height rendered texture
+    // frag_coord.xy is in canvas coordinates (0 to canvas_width/height)
+    // Since we now render directly to canvas size, we can sample directly from the scene texture
+    // The zoom and viewport logic is already handled in the vertex shader
 
-    // Calculate the size of the area to sample from the virtual world texture
-    // At 1x zoom: sample full virtual world
-    // At 2x zoom: sample center half size
-    // At 3x zoom: sample center third size
-    // At 6x zoom: sample center sixth size
-    let sample_size = zoom_uniforms.virtual_world_width / zoom_uniforms.zoom_level;
+    // Convert fragment coordinates to UV coordinates for direct sampling
+    let canvas_uv = frag_coord.xy / vec2<f32>(zoom_uniforms.canvas_width, zoom_uniforms.canvas_height);
 
-    // Use the dynamic zoom center from uniforms
-    let texture_center = vec2<f32>(zoom_uniforms.center_x, zoom_uniforms.center_y);
-
-    // Calculate the top-left corner of our sample area
-    let sample_top_left = texture_center - vec2<f32>(sample_size / 2.0, sample_size / 2.0);
-
-    // Map fragment coordinates (0-canvas_width/height) to sample area coordinates
-    let sample_pos = sample_top_left + (frag_coord.xy / zoom_uniforms.canvas_width) * sample_size;
-
-    // Convert to UV coordinates for the virtual world texture
-    let sample_uv = sample_pos / vec2<f32>(zoom_uniforms.virtual_world_width, zoom_uniforms.virtual_world_height);
-
-    // Sample the scene texture
-    let scene_color = textureSample(scene_texture, scene_sampler, sample_uv);
+    // Sample the scene texture directly (no coordinate transformation needed)
+    let scene_color = textureSample(scene_texture, scene_sampler, canvas_uv);
 
     // Add vignette effect
-    // Convert fragment coordinates to UV coordinates in final canvas (0-1)
-    let canvas_uv = frag_coord.xy / vec2<f32>(zoom_uniforms.canvas_width, zoom_uniforms.canvas_height);
+    // canvas_uv is already calculated above for direct sampling
 
     // Center the UV coordinates around (0, 0) for vignette calculation
     let centered_uv = canvas_uv - 0.5;

@@ -381,17 +381,17 @@ impl WebGpuRenderer {
         });
 
         // Create post-processing textures
-        // Scene texture should match virtual world size to render the full virtual world
+        // Scene texture now matches canvas size for direct rendering (more efficient)
         let scene_texture_size = wgpu::Extent3d {
-            width: VIRTUAL_WORLD_WIDTH_U32,
-            height: VIRTUAL_WORLD_HEIGHT_U32,
+            width: CANVAS_WIDTH_U32,
+            height: CANVAS_HEIGHT_U32,
             depth_or_array_layers: 1,
         };
 
-        // Intermediate texture should also match virtual world size to match scene texture
+        // Intermediate texture should match canvas size to match scene texture
         let intermediate_texture_size = wgpu::Extent3d {
-            width: VIRTUAL_WORLD_WIDTH_U32,
-            height: VIRTUAL_WORLD_HEIGHT_U32,
+            width: CANVAS_WIDTH_U32,
+            height: CANVAS_HEIGHT_U32,
             depth_or_array_layers: 1,
         };
 
@@ -1570,8 +1570,10 @@ impl WebGpuRenderer {
     ) -> Result<(), RendererError> {
         // Only update simulation parameters buffer (contains time and deltaTime which change every frame)
         let actual_particle_count = particle_system.get_active_count();
-        let sim_params_data =
-            simulation_params.to_buffer_with_particle_count_and_zoom(actual_particle_count, simulation_params.current_zoom_level);
+        let sim_params_data = simulation_params.to_buffer_with_particle_count_and_zoom(
+            actual_particle_count,
+            simulation_params.current_zoom_level,
+        );
         self.queue
             .write_buffer(&self.sim_params_buffer, 0, &sim_params_data);
 
