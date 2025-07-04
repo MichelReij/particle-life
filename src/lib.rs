@@ -15,6 +15,10 @@ mod simulation_params;
 mod spatial_grid;
 mod webgpu_renderer;
 
+// ESP32 communication only for native builds
+#[cfg(not(target_arch = "wasm32"))]
+mod esp32_communication;
+
 pub use buffer_utils::*;
 pub use config::*;
 pub use interaction_rules::*;
@@ -23,6 +27,9 @@ pub use shader_constants::*;
 pub use simulation_params::*;
 pub use spatial_grid::*;
 pub use webgpu_renderer::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use esp32_communication::*;
 
 // Hook for better error messages in browser console
 #[cfg(target_arch = "wasm32")]

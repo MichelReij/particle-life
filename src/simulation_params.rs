@@ -488,4 +488,39 @@ impl SimulationParams {
         // Round to nearest multiple of 64 for optimal GPU workgroup dispatch
         ((target / 64.0).round() * 64.0) as u32
     }
+
+    // === ESP32 SENSOR INTEGRATION ===
+    // Apply ESP32 sensor data to all simulation parameters
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn apply_esp32_sensor_data(
+        &mut self,
+        sensor_data: &crate::esp32_communication::ESP32SensorData,
+    ) {
+        // Apply zoom with current viewport center
+        let zoom_level = sensor_data.to_zoom_level();
+        self.apply_zoom(zoom_level, None, None);
+
+        // Apply pan (update viewport center)
+        let (pan_x, pan_y) =
+            sensor_data.to_pan_coordinates(VIRTUAL_WORLD_WIDTH, VIRTUAL_WORLD_HEIGHT);
+        self.apply_zoom(zoom_level, Some(pan_x), Some(pan_y));
+
+        // Apply temperature
+        let temperature = sensor_data.to_temperature_celsius();
+        self.apply_temperature(temperature);
+
+        // Apply pressure
+        let pressure = sensor_data.to_pressure();
+        self.apply_pressure(pressure);
+
+        // Apply UV light
+        let uv = sensor_data.to_uv();
+        self.apply_uv_light(uv);
+
+        // Apply electrical activity
+        let electrical = sensor_data.to_electrical_activity();
+        self.apply_electrical_activity(electrical);
+
+        // Note: sleep parameter is handled separately by the application
+    }
 }

@@ -20,6 +20,9 @@ struct MinimalNativeApp {
     simulation_params: SimulationParams,
     interaction_rules: InteractionRules,
     renderer: Option<WebGpuRenderer>,
+    // ESP32 communication
+    esp32_manager: Option<ESP32Manager>,
+    last_esp32_update: std::time::Instant,
     // Native-specific
     last_frame: std::time::Instant,
     current_time: f32,
@@ -82,6 +85,8 @@ impl Default for MinimalNativeApp {
             simulation_params,
             interaction_rules,
             renderer: None,
+            esp32_manager: None, // Will be initialized when ESP32 is detected
+            last_esp32_update: std::time::Instant::now(),
             last_frame: std::time::Instant::now(),
             current_time: 0.0,
             fps_last_update: std::time::Instant::now(),
@@ -96,6 +101,14 @@ impl Default for MinimalNativeApp {
 impl ApplicationHandler for MinimalNativeApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         console_log!("🚀 Native app using shared core components");
+
+        // Initialize ESP32 communication
+        console_log!("🔌 Starting ESP32 communication...");
+
+        // Test ESP32 sensor data conversion functions
+        test_esp32_sensor_data_conversion();
+
+        self.esp32_manager = Some(ESP32Manager::new());
 
         // Only platform-specific part: window creation
         let window_attributes = Window::default_attributes()
@@ -133,6 +146,42 @@ impl ApplicationHandler for MinimalNativeApp {
                 let now = std::time::Instant::now();
                 let delta_time = (now - self.last_frame).as_secs_f32();
                 self.last_frame = now;
+
+                // Update ESP32 sensor data (non-blocking)
+                if let Some(esp32_manager) = &self.esp32_manager {
+                    // Check for updates every 16ms (~60 FPS)
+                    if now.duration_since(self.last_esp32_update).as_millis() >= 16 {
+                        self.last_esp32_update = now;
+
+                        match esp32_manager.get_sensor_data() {
+                            Ok(sensor_data) => {
+                                // Apply ESP32 sensor data to simulation parameters
+                                self.simulation_params.apply_esp32_sensor_data(&sensor_data);
+
+                                // Handle sleep mode
+                                if sensor_data.sleep {
+                                    // TODO: Implement sleep mode (screen saver, reduced processing, etc.)
+                                    console_log!("😴 ESP32 sleep mode activated");
+                                }
+                            }
+                            Err(ESP32Error::PortNotFound) => {
+                                // ESP32 not connected yet, use default values
+                            }
+                            Err(ESP32Error::ConnectionLost) => {
+                                console_log!("📡 ESP32 connection lost, using default values");
+                            }
+                            Err(err) => {
+                                console_log!("❌ ESP32 error: {:?}", err);
+                            }
+                        }
+
+                        // Log ESP32 status occasionally
+                        if now.duration_since(self.last_esp32_update).as_secs() >= 5 {
+                            let status = esp32_manager.get_status();
+                            console_log!("📡 ESP32 Status: {:?}", status);
+                        }
+                    }
+                }
 
                 // Update simulation
                 self.current_time += delta_time;
