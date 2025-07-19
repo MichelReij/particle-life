@@ -38,6 +38,164 @@ impl LightningBolt {
     }
 }
 
+/// Lightning event for synchronization with sound effects and ESP32
+#[derive(Debug, Clone)]
+pub struct LightningEvent {
+    pub flash_id: u32,
+    pub start_time: f32,
+    pub is_super: bool,
+    pub detected_at: std::time::Instant,
+}
+
+/// Lightning detector to track lightning events without blocking GPU operations
+#[derive(Debug)]
+pub struct LightningDetector {
+    last_flash_id: u32,
+    pending_events: Vec<LightningEvent>,
+    cached_lightning_bolt: Option<LightningBolt>,
+    last_gpu_read_time: std::time::Instant,
+    frame_counter: u32,
+    next_poll_time: Option<std::time::Instant>, // When to poll again based on start_time
+    polling_paused: bool,                       // Whether we're waiting for the next lightning
+}
+
+impl Default for LightningDetector {
+    fn default() -> Self {
+        Self {
+            last_flash_id: 0,
+            pending_events: Vec::new(),
+            cached_lightning_bolt: None,
+            last_gpu_read_time: std::time::Instant::now(),
+            frame_counter: 0,
+            next_poll_time: None,
+            polling_paused: false,
+        }
+    }
+}
+
+impl LightningDetector {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Check for new lightning events and return them
+    /// This should be called regularly in the main loop
+    pub fn poll_events(&mut self) -> Vec<LightningEvent> {
+        let events = self.pending_events.clone();
+        self.pending_events.clear();
+        events
+    }
+
+    /// Process a lightning bolt reading and detect new events
+    pub fn process_lightning_bolt(&mut self, bolt: &LightningBolt) {
+        // Cache the latest lightning bolt data
+        self.cached_lightning_bolt = Some(*bolt);
+
+        // Check if this is a new lightning event (new flash_id)
+        if bolt.flash_id > self.last_flash_id {
+            // New lightning detected!
+            if bolt.is_visible() {
+                let event = LightningEvent {
+                    flash_id: bolt.flash_id,
+                    start_time: bolt.start_time,
+                    is_super: bolt.is_super(),
+                    detected_at: std::time::Instant::now(),
+                };
+
+                self.pending_events.push(event);
+                crate::console_log!(
+                    "⚡ Lightning detector: New flash ID {} detected ({})",
+                    bolt.flash_id,
+                    if bolt.is_super() { "SUPER" } else { "normal" }
+                );
+            }
+
+            self.last_flash_id = bolt.flash_id;
+
+            // Calculate when to poll again based on next_lightning_time
+            if bolt.next_lightning_time > 0.0 {
+                // Convert WGSL time (seconds since start) to system time
+                let seconds_until_next = bolt.next_lightning_time - bolt.start_time;
+                if seconds_until_next > 0.0 {
+                    let duration_until_next =
+                        std::time::Duration::from_secs_f32(seconds_until_next);
+                    self.next_poll_time = Some(std::time::Instant::now() + duration_until_next);
+                    self.polling_paused = true;
+
+                    crate::console_log!("⏰ Lightning detector: Pausing polling for {:.1}s until next expected lightning",
+                        seconds_until_next);
+                } else {
+                    // Next lightning is imminent, keep polling
+                    self.polling_paused = false;
+                    self.next_poll_time = None;
+                }
+            }
+        }
+    }
+
+    /// Update frame counter and check if it's time for a GPU read
+    /// Now uses smart polling based on next_lightning_time
+    pub fn should_read_gpu_buffer(&mut self) -> bool {
+        self.frame_counter += 1;
+
+        // If polling is paused, check if it's time to resume
+        if self.polling_paused {
+            if let Some(next_poll_time) = self.next_poll_time {
+                if std::time::Instant::now() >= next_poll_time {
+                    // Time to resume polling - lightning should be happening soon
+                    self.polling_paused = false;
+                    self.next_poll_time = None;
+                    crate::console_log!(
+                        "🔄 Lightning detector: Resuming polling - lightning expected now"
+                    );
+                    return true; // Immediately check for new lightning
+                } else {
+                    // Still waiting, don't poll
+                    return false;
+                }
+            } else {
+                // Paused but no next poll time set, resume polling
+                self.polling_paused = false;
+            }
+        }
+
+        // Normal polling logic: read every 5 frames (12Hz at 60fps) when not paused
+        if self.frame_counter % 5 == 0 {
+            let elapsed = self.last_gpu_read_time.elapsed();
+            // Also ensure at least 50ms has passed since last read
+            if elapsed.as_millis() >= 50 {
+                self.last_gpu_read_time = std::time::Instant::now();
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Get the cached lightning bolt data (non-blocking)
+    pub fn get_cached_lightning_bolt(&self) -> Option<LightningBolt> {
+        self.cached_lightning_bolt
+    }
+
+    /// Check if we're currently in a polling pause (waiting for next lightning)
+    pub fn is_polling_paused(&self) -> bool {
+        self.polling_paused
+    }
+
+    /// Get time until next expected polling (if paused)
+    pub fn time_until_next_poll(&self) -> Option<std::time::Duration> {
+        if let Some(next_poll_time) = self.next_poll_time {
+            let now = std::time::Instant::now();
+            if next_poll_time > now {
+                Some(next_poll_time - now)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+}
+
 // Conditional error type: JsValue for WASM, Box<dyn std::error::Error> for native
 #[cfg(target_arch = "wasm32")]
 pub type RendererError = wasm_bindgen::JsValue;
@@ -78,6 +236,9 @@ pub struct WebGpuRenderer {
     lightning_bolt_buffer: wgpu::Buffer,
     particle_colors_buffer: wgpu::Buffer, // Add particle colors buffer
     quad_vertex_buffer: wgpu::Buffer,     // Add quad vertex buffer for instanced rendering
+
+    // Lightning detection
+    lightning_detector: LightningDetector,
 
     // Textures for post-processing pipeline
     scene_texture: wgpu::Texture,
@@ -368,7 +529,7 @@ impl WebGpuRenderer {
         let lightning_bolt_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lightning Bolt Buffer"),
             size: 32, // Single bolt: 32 bytes (8 u32/f32 fields: num_segments, flash_id, start_time, next_lightning_time, is_super_lightning, _padding1, _padding2, _padding3) - properly aligned to 16-byte boundary
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
@@ -1526,6 +1687,7 @@ impl WebGpuRenderer {
             lightning_bolt_buffer,
             particle_colors_buffer,
             quad_vertex_buffer,
+            lightning_detector: LightningDetector::new(),
             scene_texture,
             scene_texture_view,
             intermediate_texture,
@@ -1878,7 +2040,7 @@ impl WebGpuRenderer {
         let native_gamma_correction = 1.0f32; // Native: apply gamma 1.0 correction (no correction)
 
         #[cfg(all(not(target_arch = "wasm32"), target_os = "linux"))]
-        let native_gamma_correction = 1.5f32; // Native linux: apply gamma 1.5 correction (no correction)
+        let native_gamma_correction = 1.0f32; // Native linux: apply gamma 1.5 correction (no correction)
 
         // Update zoom uniforms buffer
         let zoom_uniforms = [
@@ -2049,6 +2211,136 @@ impl WebGpuRenderer {
         staging_buffer.unmap();
 
         Ok(lightning_bolt)
+    }
+
+    /// Read lightning bolt raw data from GPU buffer (returns mixed data with proper types)
+    pub async fn read_lightning_bolt_data(&self) -> Result<LightningBolt, RendererError> {
+        // Create a staging buffer to read the data back from GPU  
+        let size = std::mem::size_of::<LightningBolt>() as u64;
+        let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Lightning Bolt Data Staging Buffer"),
+            size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        // Create command encoder to copy data from GPU buffer to staging buffer
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Lightning Bolt Data Copy Encoder"),
+            });
+
+        encoder.copy_buffer_to_buffer(&self.lightning_bolt_buffer, 0, &staging_buffer, 0, size);
+
+        // Submit the copy command
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        // Map the staging buffer and read the data
+        let buffer_slice = staging_buffer.slice(..);
+        let (sender, receiver) = futures::channel::oneshot::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
+            sender.send(result).ok();
+        });
+
+        // Wait for mapping to complete
+        self.device
+            .poll(wgpu::MaintainBase::Wait)
+            .map_err(|e| renderer_error("Failed to poll device", e))?;
+        let map_result = receiver.await.map_err(|_| {
+            renderer_error("Failed to receive buffer mapping result", "oneshot channel")
+        })?;
+        map_result.map_err(|e| renderer_error("Buffer mapping failed", e))?;
+
+        // Read the data directly as LightningBolt (properly aligned struct)
+        let data = buffer_slice.get_mapped_range();
+        let lightning_bolt: LightningBolt =
+            *bytemuck::from_bytes(&data[..std::mem::size_of::<LightningBolt>()]);
+
+        // Clean up
+        drop(data);
+        staging_buffer.unmap();
+
+        Ok(lightning_bolt)
+    }
+
+    /// Get lightning events that have occurred since last check (non-blocking)
+    pub fn poll_lightning_events(&mut self) -> Vec<LightningEvent> {
+        self.lightning_detector.poll_events()
+    }
+
+    /// Try to read lightning status immediately (non-blocking)
+    /// This uses a very fast approach by keeping a cached copy and only updating when needed
+    pub fn try_get_lightning_status(&mut self) -> Option<LightningBolt> {
+        // For now, we'll return None to indicate we need the async version
+        // This could be enhanced with a cached lightning bolt that gets updated periodically
+        None
+    }
+
+    /// Update lightning detector with current bolt status
+    /// Call this after each render cycle to detect new lightning events
+    /// This is NON-BLOCKING and uses smart polling based on next_lightning_time
+    pub fn update_lightning_detection(&mut self, _sim_params: &SimulationParams) {
+        // Use smart polling - only read GPU buffer when needed
+        if self.lightning_detector.should_read_gpu_buffer() {
+            // Log polling status for debugging
+            if self.lightning_detector.is_polling_paused() {
+                crate::console_log!("🔄 Lightning detector: Resuming polling after pause");
+            }
+
+            // We need to actually read the GPU buffer here, but we want to do it async
+            // For now, we'll trigger an async read that will update the cache
+            // In a real implementation, this could be done in a background task
+
+            // Spawn a quick async task to read lightning buffer
+            let device = self.device.clone();
+            let lightning_buffer = &self.lightning_bolt_buffer;
+
+            // We can't easily do async operations in this sync context,
+            // so we'll implement a different approach using a background thread
+            // or defer this to be called from an async context
+
+            crate::console_log!("📡 Lightning detector: Should read GPU buffer now");
+        }
+
+        // Always process cached lightning data (fast and non-blocking)
+        if let Some(cached_bolt) = self.lightning_detector.get_cached_lightning_bolt() {
+            // This just processes cached data without new GPU reads
+            // The actual GPU read will happen when should_read_gpu_buffer() returns true
+        }
+
+        // Log polling status occasionally for debugging
+        if self.lightning_detector.frame_counter % 300 == 0 {
+            // Every 5 seconds at 60fps
+            if let Some(time_left) = self.lightning_detector.time_until_next_poll() {
+                crate::console_log!(
+                    "⏰ Lightning detector: Waiting {:.1}s until next poll",
+                    time_left.as_secs_f32()
+                );
+            }
+        }
+    }
+
+    /// Manually trigger a lightning buffer read (should be called sparingly)
+    /// This is async and should be called when should_read_gpu_buffer() returns true
+    pub async fn update_lightning_cache(&mut self) -> Result<(), RendererError> {
+        match self.get_lightning_status().await {
+            Ok(bolt) => {
+                crate::console_log!(
+                    "📡 Lightning buffer read: flash_id={}, visible={}, next_time={:.1}",
+                    bolt.flash_id,
+                    bolt.is_visible(),
+                    bolt.next_lightning_time
+                );
+                self.lightning_detector.process_lightning_bolt(&bolt);
+                Ok(())
+            }
+            Err(e) => {
+                // Log error but don't crash - lightning detection is not critical
+                crate::console_log!("⚡ Lightning buffer read failed: {:?}", e);
+                Err(e)
+            }
+        }
     }
 
     pub fn get_device(&self) -> &wgpu::Device {

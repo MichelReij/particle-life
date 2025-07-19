@@ -32,6 +32,13 @@ struct MinimalNativeApp {
     current_fps: f32,
     fps_samples: Vec<f32>,
     fps_sample_index: usize,
+    // Smart lightning detection
+    lightning_polling_enabled: bool,
+    last_lightning_poll: std::time::Instant,
+    current_flash_id: u32,
+    lightning_start_time: f32,
+    lightning_communicated: bool,
+    next_poll_time: std::time::Instant,
 }
 
 impl Default for MinimalNativeApp {
@@ -45,7 +52,7 @@ impl Default for MinimalNativeApp {
         simulation_params.apply_temperature(20.0); // temperature = 20.0°C
         simulation_params.apply_pressure(200.0); // pressure = 200.0
         simulation_params.apply_uv_light(40.0); // uv_light = 40.0
-        simulation_params.apply_electrical_activity(2.0); // electrical_activity = 2.0
+        simulation_params.apply_electrical_activity(2.0); // electrical_activity = 2.0 (default)
 
         console_log!("🎯 Applied native defaults via central conversion functions:");
         console_log!(
@@ -94,6 +101,13 @@ impl Default for MinimalNativeApp {
             current_fps: 0.0,
             fps_samples: vec![60.0; FPS_SAMPLE_COUNT], // Initialize with samples at 60 FPS
             fps_sample_index: 0,
+            // Initialize smart lightning detection
+            lightning_polling_enabled: true,
+            last_lightning_poll: std::time::Instant::now(),
+            current_flash_id: 0,
+            lightning_start_time: 0.0,
+            lightning_communicated: false,
+            next_poll_time: std::time::Instant::now(),
         }
     }
 }
@@ -111,6 +125,16 @@ impl ApplicationHandler for MinimalNativeApp {
         self.esp32_manager = Some(ESP32Manager::new());
 
         // Only platform-specific part: window creation
+        #[cfg(target_os = "linux")]
+        let window_attributes = {
+            use winit::window::Fullscreen;
+            Window::default_attributes()
+                .with_title("Particle Life - Shared Components")
+                .with_fullscreen(Some(Fullscreen::Borderless(None))) // Fullscreen without borders on Linux
+                .with_resizable(false)
+        };
+
+        #[cfg(not(target_os = "linux"))]
         let window_attributes = Window::default_attributes()
             .with_title("Particle Life - Shared Components")
             .with_inner_size(winit::dpi::LogicalSize::new(
@@ -121,6 +145,13 @@ impl ApplicationHandler for MinimalNativeApp {
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         self.window = Some(window.clone());
+
+        // Display fullscreen instructions for Linux
+        #[cfg(target_os = "linux")]
+        console_log!("🖥️  FULLSCREEN MODE: Press [Escape] or [Q] to exit the application");
+        
+        #[cfg(not(target_os = "linux"))]
+        console_log!("🪟 WINDOWED MODE: Close window or press Alt+F4 to exit");
 
         // Initialize shared renderer (only surface creation is platform-specific)
         pollster::block_on(async {
@@ -141,6 +172,22 @@ impl ApplicationHandler for MinimalNativeApp {
             WindowEvent::CloseRequested => {
                 console_log!("👋 Closing native app");
                 event_loop.exit();
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                // Handle keyboard input for fullscreen mode exit
+                if event.state == winit::event::ElementState::Pressed {
+                    match event.logical_key {
+                        winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape) => {
+                            console_log!("🚪 Escape key pressed - exiting fullscreen app");
+                            event_loop.exit();
+                        }
+                        winit::keyboard::Key::Character(ref c) if c == "q" => {
+                            console_log!("🚪 Q key pressed - exiting app");
+                            event_loop.exit();
+                        }
+                        _ => {}
+                    }
+                }
             }
             WindowEvent::RedrawRequested => {
                 let now = std::time::Instant::now();
@@ -201,12 +248,17 @@ impl ApplicationHandler for MinimalNativeApp {
                         &lightning_bolts_data,
                     ) {
                         Ok(_) => {
-                            // Render successful
+                            // Render successful - perform smart lightning detection afterwards
                         }
                         Err(e) => {
                             console_log!("❌ Render error: {:?}", e);
                         }
                     }
+                }
+                
+                // Smart lightning detection - only poll when needed (after render borrow ends)
+                if self.renderer.is_some() {
+                    self.update_smart_lightning_detection();
                 }
 
                 // Update FPS display - more frequent on-screen update, less frequent console
@@ -283,6 +335,119 @@ impl ApplicationHandler for MinimalNativeApp {
 }
 
 impl MinimalNativeApp {
+    /// Smart lightning detection with timing-based polling optimization
+    fn update_smart_lightning_detection(&mut self) {
+        let renderer = match &mut self.renderer {
+            Some(r) => r,
+            None => return,
+        };
+        let now = std::time::Instant::now();
+        
+        // Only poll if polling is enabled and it's time to poll
+        if !self.lightning_polling_enabled || now < self.next_poll_time {
+            return;
+        }
+        
+        // If we have communicated lightning and it's been more than 2 seconds since start_time,
+        // re-enable polling for the next lightning
+        if self.lightning_communicated {
+            let time_since_lightning = self.current_time - self.lightning_start_time;
+            if time_since_lightning >= 2.0 {
+                console_log!("🔄 Lightning detection: Re-enabling polling after 2s post-lightning");
+                self.lightning_polling_enabled = true;
+                self.lightning_communicated = false;
+                self.current_flash_id = 0; // Reset to detect new lightning
+                self.next_poll_time = now; // Poll immediately
+            }
+            return;
+        }
+        
+        // Rate limit polling to every 100ms to avoid overwhelming the GPU
+        if now.duration_since(self.last_lightning_poll).as_millis() < 100 {
+            return;
+        }
+        
+        self.last_lightning_poll = now;
+        
+        // Read lightning data from GPU asynchronously (non-blocking)
+        match pollster::block_on(renderer.read_lightning_bolt_data()) {
+            Ok(lightning_bolt) => {
+                console_log!("📡 Lightning buffer read: flash_id={}, start_time={:.3}, super={}, next_time={:.3}", 
+                    lightning_bolt.flash_id, 
+                    lightning_bolt.start_time, 
+                    lightning_bolt.is_super(),
+                    lightning_bolt.next_lightning_time
+                );
+                
+                // Check if we found a new lightning (flash_id changed and start_time is reasonable)
+                if lightning_bolt.flash_id > self.current_flash_id && 
+                   lightning_bolt.start_time > 0.0 && 
+                   lightning_bolt.start_time <= self.current_time + 10.0 {
+                    
+                    console_log!("⚡ NEW LIGHTNING DETECTED! Flash ID: {}, Type: {}, Start Time: {:.3}s", 
+                        lightning_bolt.flash_id,
+                        if lightning_bolt.is_super() { "Super" } else { "Normal" },
+                        lightning_bolt.start_time
+                    );
+                    
+                    // Update our state
+                    self.current_flash_id = lightning_bolt.flash_id;
+                    self.lightning_start_time = lightning_bolt.start_time;
+                    
+                    // Send to ESP32 immediately when lightning starts
+                    self.communicate_lightning_to_esp32(
+                        lightning_bolt.flash_id,
+                        lightning_bolt.is_super(),
+                        lightning_bolt.start_time
+                    );
+                    
+                    // Mark as communicated and disable polling until 2s after start_time
+                    self.lightning_communicated = true;
+                    self.lightning_polling_enabled = false;
+                    
+                    console_log!("⏰ Lightning detection: Pausing polling until 2s after start_time");
+                }
+                
+                // If we have lightning data and know when the next lightning will occur,
+                // schedule next poll for just before that time
+                if lightning_bolt.next_lightning_time > self.current_time {
+                    let wait_time_secs = lightning_bolt.next_lightning_time - self.current_time - 0.1; // Poll 100ms before
+                    if wait_time_secs > 0.5 { // Only pause if we have at least 500ms
+                        let wait_duration = std::time::Duration::from_secs_f32(wait_time_secs);
+                        self.next_poll_time = now + wait_duration;
+                        console_log!("⏰ Smart polling: Next poll in {:.1}s (before expected lightning at {:.1}s)", 
+                            wait_time_secs, lightning_bolt.next_lightning_time);
+                    }
+                }
+            }
+            Err(e) => {
+                console_log!("❌ Failed to read lightning data: {:?}", e);
+                // Continue polling on error, but with longer delay
+                self.next_poll_time = now + std::time::Duration::from_millis(500);
+            }
+        }
+    }
+    
+    /// Communicate lightning event to ESP32 
+    fn communicate_lightning_to_esp32(&self, flash_id: u32, is_super_lightning: bool, start_time: f32) {
+        if let Some(esp32_manager) = &self.esp32_manager {
+            esp32_manager.send_lightning_event(
+                flash_id,
+                if is_super_lightning { 1 } else { 0 },
+                start_time,
+                if is_super_lightning { 1.0 } else { 0.7 } // Intensity based on type
+            );
+            
+            console_log!("📤 ESP32: Lightning event sent! Flash ID: {}, Type: {}, Start: {:.3}s", 
+                flash_id,
+                if is_super_lightning { "Super" } else { "Normal" },
+                start_time
+            );
+        } else {
+            console_log!("⚠️ ESP32 manager not available, lightning event not sent");
+        }
+    }
+
     /// Reset FPS samples to current value (useful after performance stutters)
     fn reset_fps_samples(&mut self, current_fps: f32) {
         self.fps_samples.fill(current_fps);

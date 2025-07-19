@@ -4,10 +4,39 @@
 
 use serde::{Deserialize, Serialize};
 use serialport::{available_ports, SerialPort};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+// Lightning event data structure for ESP32 synchronization
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ESP32LightningEvent {
+    pub flash_id: u32,    // Unique lightning flash identifier
+    pub lightning_type: u8, // 0 = normal, 1 = super
+    pub start_time: f32,  // When the lightning started (simulation time)
+    pub intensity: f32,   // Lightning intensity (0.0 - 1.0)
+    pub timestamp: u64,   // System timestamp when detected (milliseconds)
+}
+
+impl ESP32LightningEvent {
+    pub fn new(flash_id: u32, lightning_type: u8, start_time: f32, intensity: f32) -> Self {
+        Self {
+            flash_id,
+            lightning_type,
+            start_time,
+            intensity,
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        }
+    }
+    
+    pub fn is_super_lightning(&self) -> bool {
+        self.lightning_type == 1
+    }
+}
 
 // ESP32 sensor data structure
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -61,6 +90,8 @@ pub struct ESP32SharedState {
     pub sensor_data: ESP32SensorData,
     pub status: ESP32Status,
     pub last_update: Instant,
+    pub pending_lightning_events: Vec<ESP32LightningEvent>, // Queue of lightning events to send
+    pub last_lightning_sent: Instant,
 }
 
 impl Default for ESP32SharedState {
@@ -69,6 +100,8 @@ impl Default for ESP32SharedState {
             sensor_data: ESP32SensorData::default(),
             status: ESP32Status::Disconnected,
             last_update: Instant::now(),
+            pending_lightning_events: Vec::new(),
+            last_lightning_sent: Instant::now(),
         }
     }
 }
@@ -124,6 +157,39 @@ impl ESP32Manager {
             .ok()
             .map(|state| state.last_update.elapsed())
     }
+
+    // Send a lightning event to ESP32
+    pub fn send_lightning_event(&self, flash_id: u32, lightning_type: u8, start_time: f32, intensity: f32) {
+        let lightning_event = ESP32LightningEvent::new(flash_id, lightning_type, start_time, intensity);
+        
+        if let Ok(mut state) = self.shared_state.lock() {
+            state.pending_lightning_events.push(lightning_event);
+            println!("⚡ ESP32: Queued lightning event (Flash ID: {}, Type: {}, Intensity: {:.2})", 
+                flash_id, 
+                if lightning_type == 1 { "Super" } else { "Normal" },
+                intensity
+            );
+        }
+    }
+
+    // Get and clear pending lightning events (for debugging)
+    pub fn get_pending_lightning_events(&self) -> Vec<ESP32LightningEvent> {
+        if let Ok(mut state) = self.shared_state.lock() {
+            let events = state.pending_lightning_events.clone();
+            state.pending_lightning_events.clear();
+            events
+        } else {
+            Vec::new()
+        }
+    }
+
+    // Check if there are pending lightning events
+    pub fn has_pending_lightning_events(&self) -> bool {
+        self.shared_state
+            .lock()
+            .map(|state| !state.pending_lightning_events.is_empty())
+            .unwrap_or(false)
+    }
 }
 
 // Main communication thread function
@@ -171,6 +237,9 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
                         state.status = ESP32Status::Connected;
                         state.last_update = Instant::now();
                     }
+
+                    // Check for pending lightning events to send
+                    send_pending_lightning_events(serial_port, &shared_state);
 
                     // Small delay to prevent excessive CPU usage
                     thread::sleep(Duration::from_millis(16)); // ~60 FPS polling rate
@@ -760,6 +829,54 @@ fn try_pty_connection(port_name: &str) -> Option<Box<dyn SerialPort>> {
         }
     }
     None
+}
+
+// Send pending lightning events to ESP32
+fn send_pending_lightning_events(port: &mut Box<dyn SerialPort>, shared_state: &Arc<Mutex<ESP32SharedState>>) {
+    let events_to_send = {
+        if let Ok(mut state) = shared_state.lock() {
+            // Only send events if it's been at least 100ms since last send (rate limiting)
+            if state.last_lightning_sent.elapsed() < Duration::from_millis(100) {
+                return;
+            }
+            
+            if state.pending_lightning_events.is_empty() {
+                return;
+            }
+            
+            // Take all pending events and clear the queue
+            let events = state.pending_lightning_events.clone();
+            state.pending_lightning_events.clear();
+            state.last_lightning_sent = Instant::now();
+            events
+        } else {
+            return;
+        }
+    };
+    
+    // Send each lightning event
+    for event in events_to_send {
+        let lightning_command = format!(
+            "LIGHTNING:{},{},{:.2},{:.2}\n",
+            event.flash_id,
+            event.lightning_type,
+            event.start_time,
+            event.intensity
+        );
+        
+        match port.write_all(lightning_command.as_bytes()) {
+            Ok(()) => {
+                println!("📤 ESP32: Sent lightning event (Flash ID: {}, Type: {})", 
+                    event.flash_id,
+                    if event.is_super_lightning() { "Super" } else { "Normal" }
+                );
+            }
+            Err(e) => {
+                println!("❌ ESP32: Failed to send lightning event: {}", e);
+                break; // Stop sending if there's an error
+            }
+        }
+    }
 }
 
 // Test ESP32 communication without actual hardware
