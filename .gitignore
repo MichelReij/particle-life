@@ -61,3 +61,6 @@ yarn-error.log*
 *_old.ts
 *-backup.ts
 *-old.ts
+
+# Audio files (too large for Git)
+brainwaves.mp3
