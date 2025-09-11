@@ -23,6 +23,8 @@ struct MinimalNativeApp {
     // ESP32 communication
     esp32_manager: Option<ESP32Manager>,
     last_esp32_update: std::time::Instant,
+    // Audio system
+    audio_manager: Option<AudioManager>,
     // Native-specific
     last_frame: std::time::Instant,
     current_time: f32,
@@ -94,6 +96,7 @@ impl Default for MinimalNativeApp {
             renderer: None,
             esp32_manager: None, // Will be initialized when ESP32 is detected
             last_esp32_update: std::time::Instant::now(),
+            audio_manager: None, // Will be initialized during setup
             last_frame: std::time::Instant::now(),
             current_time: 0.0,
             fps_last_update: std::time::Instant::now(),
@@ -149,9 +152,11 @@ impl ApplicationHandler for MinimalNativeApp {
         // Display fullscreen instructions for Linux
         #[cfg(target_os = "linux")]
         console_log!("🖥️  FULLSCREEN MODE: Press [Escape] or [Q] to exit the application");
+        console_log!("🎵 AUDIO CONTROLS: [M] toggle music, [+/-] volume ±5 (0-100), volume 0=pause");
         
         #[cfg(not(target_os = "linux"))]
         console_log!("🪟 WINDOWED MODE: Close window or press Alt+F4 to exit");
+        console_log!("🎵 AUDIO CONTROLS: [M] toggle music, [+/-] volume ±5 (0-100), volume 0=pause");
 
         // Initialize shared renderer (only surface creation is platform-specific)
         pollster::block_on(async {
@@ -165,6 +170,18 @@ impl ApplicationHandler for MinimalNativeApp {
                 }
             }
         });
+        
+        // Initialize audio system
+        match AudioManager::new() {
+            Ok(audio_manager) => {
+                console_log!("🎵 Audio system initialized and brainwaves.mp3 playing on loop");
+                self.audio_manager = Some(audio_manager);
+            }
+            Err(e) => {
+                console_log!("❌ Failed to initialize audio: {:?}", e);
+                console_log!("   Continuing without audio...");
+            }
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -174,7 +191,7 @@ impl ApplicationHandler for MinimalNativeApp {
                 event_loop.exit();
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                // Handle keyboard input for fullscreen mode exit
+                // Handle keyboard input for fullscreen mode exit and audio controls
                 if event.state == winit::event::ElementState::Pressed {
                     match event.logical_key {
                         winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape) => {
@@ -184,6 +201,24 @@ impl ApplicationHandler for MinimalNativeApp {
                         winit::keyboard::Key::Character(ref c) if c == "q" => {
                             console_log!("🚪 Q key pressed - exiting app");
                             event_loop.exit();
+                        }
+                        winit::keyboard::Key::Character(ref c) if c == "m" => {
+                            // Toggle background music
+                            if let Some(audio) = &mut self.audio_manager {
+                                audio.toggle_background();
+                            }
+                        }
+                        winit::keyboard::Key::Character(ref c) if c == "+" => {
+                            // Increase volume by 5
+                            if let Some(audio) = &mut self.audio_manager {
+                                audio.volume_up();
+                            }
+                        }
+                        winit::keyboard::Key::Character(ref c) if c == "-" => {
+                            // Decrease volume by 5
+                            if let Some(audio) = &mut self.audio_manager {
+                                audio.volume_down();
+                            }
                         }
                         _ => {}
                     }

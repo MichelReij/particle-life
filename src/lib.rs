@@ -19,6 +19,10 @@ mod webgpu_renderer;
 #[cfg(not(target_arch = "wasm32"))]
 mod esp32_communication;
 
+// Audio system only for native builds
+#[cfg(not(target_arch = "wasm32"))]
+mod audio;
+
 pub use buffer_utils::*;
 pub use config::*;
 pub use interaction_rules::*;
@@ -30,6 +34,9 @@ pub use webgpu_renderer::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use esp32_communication::*;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use audio::*;
 
 // Hook for better error messages in browser console
 #[cfg(target_arch = "wasm32")]
