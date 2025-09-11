@@ -331,6 +331,8 @@ fn find_and_connect_esp32() -> Option<Box<dyn SerialPort>> {
 
     // Look for ESP32-like devices (common USB-to-serial chips used with ESP32)
     let esp32_patterns = [
+        "ttyACM",        // Common ESP32 pattern - prioritize this!
+        "ttyUSB",        // Common ESP32 pattern
         "USB",
         "CH340",
         "CP210",
