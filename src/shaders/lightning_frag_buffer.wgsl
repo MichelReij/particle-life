@@ -182,8 +182,19 @@ fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thic
 
 @fragment
 fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    // UV coordinates are now passed directly from vertex shader (0.0 to 1.0)
-    // No need to calculate or convert - pure UV system!
+    // Convert UV coordinates (0-1) to world coordinates using viewport (like grid shader)
+    // UV coordinates are just fullscreen texture coordinates, not world coordinates!
+    
+    let viewport_left = sim_params.viewport_center_x - sim_params.viewport_width * 0.5;
+    let viewport_top = sim_params.viewport_center_y - sim_params.viewport_height * 0.5;
+    
+    // Convert UV to world coordinates within the current viewport
+    let world_x = viewport_left + uv.x * sim_params.viewport_width;
+    let world_y = viewport_top + uv.y * sim_params.viewport_height;
+    let world_uv = vec2<f32>(world_x, world_y);
+    
+    // Convert world coordinates back to virtual world UV coordinates (0-1)
+    let virtual_uv = vec2<f32>(world_x / sim_params.virtual_world_width, world_y / sim_params.virtual_world_height);
 
     // Early exit if lightning is disabled or no segments
     if (sim_params.lightning_frequency <= 0.0 || lightning_bolt.num_segments == 0u) {
@@ -204,7 +215,7 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
         // Simple white lightning - much cheaper than conditional color logic
         let segmentColor = vec3<f32>(1.0, 1.0, 1.0);
-        let segmentResult = drawSegment(uv, segment.start_pos, segment.end_pos, segment.alpha, segment.thickness, segmentColor);
+        let segmentResult = drawSegment(virtual_uv, segment.start_pos, segment.end_pos, segment.alpha, segment.thickness, segmentColor);
 
         // Accumulate lightning contributions
         finalColor += segmentResult.rgb;

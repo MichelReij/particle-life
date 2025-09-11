@@ -462,13 +462,13 @@ impl SimulationParams {
         // Convert HSLuv to RGB
         let (r, g, b) = hsluv::hsluv_to_rgb(hue as f64, saturation as f64, lightness as f64);
 
-        // Debug info for color mapping consistency
-        #[cfg(debug_assertions)]
-        crate::console_log!(
-            "🎨 Temperature {:.1}°C → HSLuv({:.1}°, {:.1}%, {:.1}%) → RGB({:.3}, {:.3}, {:.3}) [{}]",
-            temp, hue, saturation, lightness, r, g, b,
-            if cfg!(target_arch = "wasm32") { "WASM" } else { "Native" }
-        );
+        // Debug info for color mapping consistency (commented out - too verbose)
+        // #[cfg(debug_assertions)]
+        // crate::console_log!(
+        //     "🎨 Temperature {:.1}°C → HSLuv({:.1}°, {:.1}%, {:.1}%) → RGB({:.3}, {:.3}, {:.3}) [{}]",
+        //     temp, hue, saturation, lightness, r, g, b,
+        //     if cfg!(target_arch = "wasm32") { "WASM" } else { "Native" }
+        // );
 
         (r as f32, g as f32, b as f32)
     }

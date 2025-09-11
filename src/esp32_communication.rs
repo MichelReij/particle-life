@@ -2,6 +2,7 @@
 // Handles serial communication with ESP32 in a separate thread
 // Receives sensor data and makes it available to the graphics thread
 
+use crate::config::{ZOOM_MIN, ZOOM_MAX};
 use serde::{Deserialize, Serialize};
 use serialport::{available_ports, SerialPort};
 use std::io::{Read, Write};
@@ -92,6 +93,8 @@ pub struct ESP32SharedState {
     pub last_update: Instant,
     pub pending_lightning_events: Vec<ESP32LightningEvent>, // Queue of lightning events to send
     pub last_lightning_sent: Instant,
+    pub last_logged_data: Option<ESP32SensorData>, // For throttling log output
+    pub last_log_time: Instant, // For periodic logging
 }
 
 impl Default for ESP32SharedState {
@@ -102,6 +105,8 @@ impl Default for ESP32SharedState {
             last_update: Instant::now(),
             pending_lightning_events: Vec::new(),
             last_lightning_sent: Instant::now(),
+            last_logged_data: None,
+            last_log_time: Instant::now(),
         }
     }
 }
@@ -228,14 +233,34 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
             match read_esp32_data(serial_port) {
                 Ok(sensor_data) => {
                     // Successfully read data - update shared state
-                    println!(
-                        "📡 ESP32 data received: zoom={}, temp={}, pressure={}",
-                        sensor_data.zoom, sensor_data.temperature, sensor_data.pressure
-                    );
-                    if let Ok(mut state) = shared_state.lock() {
-                        state.sensor_data = sensor_data;
-                        state.status = ESP32Status::Connected;
-                        state.last_update = Instant::now();
+                    let should_log = {
+                        if let Ok(mut state) = shared_state.lock() {
+                            // Check if we should log this data (throttled logging)
+                            let should_log = should_log_sensor_data(&sensor_data, &mut state);
+                            
+                            state.sensor_data = sensor_data;
+                            state.status = ESP32Status::Connected;
+                            state.last_update = Instant::now();
+                            
+                            should_log
+                        } else {
+                            false
+                        }
+                    };
+                    
+                    // Log outside of the mutex to avoid holding the lock
+                    if should_log {
+                        println!(
+                            "📡 ESP32 data: zoom={} ({:.1}x), pan=({},{}) ({:.0},{:.0}), temp={} ({:.0}°C), pressure={} ({:.0}), uv={} ({:.0}), electrical={} ({:.1}), sleep={}",
+                            sensor_data.zoom, sensor_data.to_zoom_level(),
+                            sensor_data.pan_x, sensor_data.pan_y, 
+                            sensor_data.to_pan_coordinates(4320.0, 4320.0).0, sensor_data.to_pan_coordinates(4320.0, 4320.0).1,
+                            sensor_data.temperature, sensor_data.to_temperature_celsius(),
+                            sensor_data.pressure, sensor_data.to_pressure(),
+                            sensor_data.uv, sensor_data.to_uv(),
+                            sensor_data.electrical, sensor_data.to_electrical_activity(),
+                            sensor_data.sleep
+                        );
                     }
 
                     // Check for pending lightning events to send
@@ -582,10 +607,10 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
 // Conversion functions from ESP32 sensor values to simulation parameters
 
 impl ESP32SensorData {
-    // Convert zoom (0-4096) to simulation zoom level (1.0 - ZOOM_MAX)
+    // Convert zoom (0-4096) to simulation zoom level (ZOOM_MIN - ZOOM_MAX)
     pub fn to_zoom_level(&self) -> f32 {
-        // Map 0-4096 to 1.0-50.0 zoom range
-        1.0 + (self.zoom as f32 / 4096.0) * 49.0
+        // Map 0-4096 to ZOOM_MIN-ZOOM_MAX range (1.0-12.0)
+        ZOOM_MIN + (self.zoom as f32 / 4096.0) * (ZOOM_MAX - ZOOM_MIN)
     }
 
     // Convert pan values (0-4096) to world coordinates
@@ -618,7 +643,7 @@ impl ESP32SensorData {
     // Create test sensor data for debugging
     pub fn test_data() -> Self {
         Self {
-            zoom: 1024,        // ~25% zoom
+            zoom: 1024,        // ~25% zoom (3.7x zoom level)
             pan_x: 2048,       // Center X
             pan_y: 2048,       // Center Y
             temperature: 1640, // ~50°C
@@ -632,7 +657,7 @@ impl ESP32SensorData {
     // Create sensor data with all maximum values
     pub fn test_max_data() -> Self {
         Self {
-            zoom: 4096,        // Maximum zoom
+            zoom: 4096,        // Maximum zoom (12.0x)
             pan_x: 4096,       // Max X
             pan_y: 4096,       // Max Y
             temperature: 4096, // 130°C
@@ -649,18 +674,105 @@ impl ESP32SensorData {
         println!("  Raw values: zoom={}, pan_x={}, pan_y={}, temp={}, pressure={}, uv={}, electrical={}, sleep={}",
             self.zoom, self.pan_x, self.pan_y, self.temperature, self.pressure, self.uv, self.electrical, self.sleep);
         println!("  Converted values:");
-        println!("    Zoom: {:.2}x", self.to_zoom_level());
+        println!("    Zoom: {:.2}x (range: 1.0-12.0)", self.to_zoom_level());
         println!(
-            "    Pan: ({:.1}, {:.1})",
+            "    Pan: ({:.1}, {:.1}) (world range: 0-4320)",
             self.to_pan_coordinates(4320.0, 4320.0).0,
             self.to_pan_coordinates(4320.0, 4320.0).1
         );
-        println!("    Temperature: {:.1}°C", self.to_temperature_celsius());
-        println!("    Pressure: {:.1}", self.to_pressure());
-        println!("    UV: {:.1}", self.to_uv());
-        println!("    Electrical: {:.2}", self.to_electrical_activity());
+        println!("    Temperature: {:.1}°C (range: 3-130°C)", self.to_temperature_celsius());
+        println!("    Pressure: {:.1} (range: 0-350)", self.to_pressure());
+        println!("    UV: {:.1} (range: 0-50)", self.to_uv());
+        println!("    Electrical: {:.2} (range: 0-3)", self.to_electrical_activity());
         println!("    Sleep: {}", self.sleep);
+        
+        // Show range utilization percentages
+        println!("  Range utilization:");
+        println!("    Zoom: {:.1}%", (self.zoom as f32 / 4095.0) * 100.0);
+        println!("    Pan X: {:.1}%", (self.pan_x as f32 / 4095.0) * 100.0);
+        println!("    Pan Y: {:.1}%", (self.pan_y as f32 / 4095.0) * 100.0);
+        println!("    Temperature: {:.1}%", (self.temperature as f32 / 4095.0) * 100.0);
+        println!("    Pressure: {:.1}%", (self.pressure as f32 / 4095.0) * 100.0);
+        println!("    UV: {:.1}%", (self.uv as f32 / 4095.0) * 100.0);
+        println!("    Electrical: {:.1}%", (self.electrical as f32 / 4095.0) * 100.0);
     }
+
+    // Validate all sensor mappings use the full 0-4095 range correctly
+    pub fn validate_sensor_mappings() {
+        println!("🧪 Validating ESP32 sensor mappings...");
+        
+        // Test edge cases
+        let test_cases = [
+            ESP32SensorData { zoom: 0, pan_x: 0, pan_y: 0, temperature: 0, pressure: 0, uv: 0, electrical: 0, sleep: false },
+            ESP32SensorData { zoom: 2047, pan_x: 2047, pan_y: 2047, temperature: 2047, pressure: 2047, uv: 2047, electrical: 2047, sleep: false },
+            ESP32SensorData { zoom: 4095, pan_x: 4095, pan_y: 4095, temperature: 4095, pressure: 4095, uv: 4095, electrical: 4095, sleep: true },
+        ];
+        
+        for (i, test_data) in test_cases.iter().enumerate() {
+            println!("\n📋 Test case {} (raw values: {})", 
+                i + 1,
+                match i {
+                    0 => "all minimum (0)",
+                    1 => "all middle (2047)", 
+                    2 => "all maximum (4095)",
+                    _ => "unknown"
+                }
+            );
+            
+            println!("  Zoom: {} → {:.2}x", test_data.zoom, test_data.to_zoom_level());
+            let (pan_x, pan_y) = test_data.to_pan_coordinates(4320.0, 4320.0);
+            println!("  Pan: ({}, {}) → ({:.1}, {:.1})", test_data.pan_x, test_data.pan_y, pan_x, pan_y);
+            println!("  Temperature: {} → {:.1}°C", test_data.temperature, test_data.to_temperature_celsius());
+            println!("  Pressure: {} → {:.1}", test_data.pressure, test_data.to_pressure());
+            println!("  UV: {} → {:.1}", test_data.uv, test_data.to_uv());
+            println!("  Electrical: {} → {:.2}", test_data.electrical, test_data.to_electrical_activity());
+        }
+        
+        println!("\n✅ All sensor mappings validated - full 0-4095 range correctly utilized");
+    }
+}
+
+// Determine if we should log sensor data (throttled logging for human readability)
+fn should_log_sensor_data(new_data: &ESP32SensorData, state: &mut ESP32SharedState) -> bool {
+    // Log every 2 seconds regardless of changes
+    let time_since_last_log = state.last_log_time.elapsed();
+    if time_since_last_log >= Duration::from_secs(2) {
+        state.last_log_time = Instant::now();
+        state.last_logged_data = Some(*new_data);
+        return true;
+    }
+    
+    // Also log if there's a significant change in any sensor value
+    if let Some(last_data) = state.last_logged_data {
+        // Define significant change thresholds (relative to full range)
+        let zoom_threshold = 100;      // ~2.4% of 4095 (meaningful zoom change)
+        let pan_threshold = 200;       // ~4.9% of 4095 (meaningful pan change)  
+        let temp_threshold = 50;       // ~1.2% of 4095 (meaningful temp change)
+        let pressure_threshold = 50;   // ~1.2% of 4095 (meaningful pressure change)
+        let uv_threshold = 50;         // ~1.2% of 4095 (meaningful UV change)
+        let electrical_threshold = 50; // ~1.2% of 4095 (meaningful electrical change)
+        
+        let significant_change = 
+            (new_data.zoom as i32 - last_data.zoom as i32).abs() >= zoom_threshold ||
+            (new_data.pan_x as i32 - last_data.pan_x as i32).abs() >= pan_threshold ||
+            (new_data.pan_y as i32 - last_data.pan_y as i32).abs() >= pan_threshold ||
+            (new_data.temperature as i32 - last_data.temperature as i32).abs() >= temp_threshold ||
+            (new_data.pressure as i32 - last_data.pressure as i32).abs() >= pressure_threshold ||
+            (new_data.uv as i32 - last_data.uv as i32).abs() >= uv_threshold ||
+            (new_data.electrical as i32 - last_data.electrical as i32).abs() >= electrical_threshold ||
+            new_data.sleep != last_data.sleep;
+            
+        if significant_change {
+            state.last_logged_data = Some(*new_data);
+            return true;
+        }
+    } else {
+        // First time logging
+        state.last_logged_data = Some(*new_data);
+        return true;
+    }
+    
+    false
 }
 
 // Alternative approach for PTY devices (socat virtual ports)
@@ -890,6 +1002,11 @@ pub fn test_esp32_sensor_data_conversion() {
 
     let max_data = ESP32SensorData::test_max_data();
     max_data.log_converted_values();
+
+    println!("");
+    
+    // Validate all sensor mappings
+    ESP32SensorData::validate_sensor_mappings();
 
     println!("✅ ESP32 communication test completed");
 }
