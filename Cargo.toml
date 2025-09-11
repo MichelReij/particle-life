@@ -92,6 +92,7 @@ winit = "0.30"
 pollster = "0.3"
 env_logger = "0.11"
 serialport = "4.4"
+rodio = "0.19"
 
 # Native binary target - only built for non-WASM targets
 [[bin]]
