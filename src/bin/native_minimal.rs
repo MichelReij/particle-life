@@ -132,9 +132,11 @@ impl ApplicationHandler for MinimalNativeApp {
         let window_attributes = {
             use winit::window::Fullscreen;
             Window::default_attributes()
-                .with_title("Particle Life - Shared Components")
-                .with_fullscreen(Some(Fullscreen::Borderless(None))) // Fullscreen without borders on Linux
+                .with_title("Particle Life - Round Screen")
+                .with_inner_size(winit::dpi::LogicalSize::new(1080, 1080)) // Explicit 1080x1080 for round screen
+                .with_fullscreen(Some(Fullscreen::Borderless(None))) // True fullscreen without borders
                 .with_resizable(false)
+                .with_decorations(false) // Remove window decorations
         };
 
         #[cfg(not(target_os = "linux"))]
@@ -151,7 +153,7 @@ impl ApplicationHandler for MinimalNativeApp {
 
         // Display fullscreen instructions for Linux
         #[cfg(target_os = "linux")]
-        console_log!("🖥️  FULLSCREEN MODE: Press [Escape] or [Q] to exit the application");
+        console_log!("🖥️  FULLSCREEN MODE (1080x1080): Optimized for round display - Press [Escape] or [Q] to exit");
         console_log!("🎵 AUDIO CONTROLS: [M] toggle music, [+/-] volume ±5 (0-100), volume 0=pause");
         
         #[cfg(not(target_os = "linux"))]
