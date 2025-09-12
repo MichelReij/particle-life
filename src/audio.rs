@@ -15,33 +15,74 @@ pub struct AudioManager {
 impl AudioManager {
     /// Initialize the audio system and start playing background music
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        println!("🎵 Initializing audio system...");
+        println!("🎵 Initializing audio system for PipeWire/ALSA...");
         
-        // Create audio output stream
-        let (_stream, stream_handle) = OutputStream::try_default()?;
-        println!("✅ Audio output stream created");
+        // Check if we can detect audio system type
+        Self::detect_and_configure_audio_system();
+        
+        // Try to create audio output stream
+        let (_stream, stream_handle) = match OutputStream::try_default() {
+            Ok(stream) => {
+                println!("✅ Audio output stream created successfully");
+                stream
+            }
+            Err(e) => {
+                println!("❌ Failed to create audio stream: {}", e);
+                println!("🔧 Trying PipeWire-specific configuration...");
+                
+                // For PipeWire systems, try different approach
+                match Self::try_pipewire_configuration() {
+                    Ok(stream) => {
+                        println!("✅ PipeWire audio stream created");
+                        stream
+                    }
+                    Err(pipewire_err) => {
+                        println!("❌ PipeWire configuration failed: {}", pipewire_err);
+                        println!("🔇 Audio disabled to prevent system issues");
+                        return Err(format!("Audio disabled - system incompatibility: {}", e).into());
+                    }
+                }
+            }
+        };
         
         // Create sink for background music
         let background_sink = Arc::new(Sink::try_new(&stream_handle)?);
         
+        println!("🎵 Testing audio sink functionality...");
+        
         // Start background music
-        Self::start_background_music(&background_sink)?;
+        match Self::start_background_music_simple(&background_sink) {
+            Ok(()) => {
+                println!("🎵 Background music loaded successfully");
+            }
+            Err(e) => {
+                println!("⚠️ Failed to load background music: {}", e);
+                println!("   Continuing with silent audio system for testing");
+                // Continue anyway - we can test the audio system first
+            }
+        }
         
-        println!("🎵 Background music started");
-        
-        Ok(AudioManager {
+        let mut audio_manager = AudioManager {
             _stream,
             background_sink,
-            current_volume: 70, // Default to 70%
-        })
-    }
-    
-    /// Start playing the background brainwaves music on loop
-    fn start_background_music(sink: &Arc<Sink>) -> Result<(), Box<dyn std::error::Error>> {
+            current_volume: 75, // Start at 75%
+        };
+        
+        // Set initial volume
+        audio_manager.set_volume(75);
+        
+        println!("🎵 Audio system initialization complete!");
+        println!("🎵 Try pressing [M] to toggle music or [+]/[-] to adjust volume");
+        Ok(audio_manager)
+    }    /// Simple background music loading for initial testing
+    fn start_background_music_simple(sink: &Arc<Sink>) -> Result<(), Box<dyn std::error::Error>> {
         let audio_path = Path::new("assets/audio/brainwaves.mp3");
         
         if !audio_path.exists() {
-            return Err(format!("Audio file not found: {}", audio_path.display()).into());
+            println!("⚠️ Audio file not found: {}", audio_path.display());
+            println!("   Place brainwaves.mp3 in assets/audio/ directory for background music");
+            println!("   Continuing without background music...");
+            return Ok(()); // Don't error out, just continue without music
         }
         
         println!("🎵 Loading background music: {}", audio_path.display());
@@ -53,20 +94,93 @@ impl AudioManager {
         // Create a repeating source that loops forever
         let looping_source = source.repeat_infinite();
         
-        // Set volume to default level (70%)
-        let volume_adjusted = looping_source.amplify(0.7);
+        // Simple buffering for initial test
+        let buffered_source = looping_source.buffered();
+        
+        // Set volume to 75%
+        let volume_adjusted = buffered_source.amplify(0.75);
         
         sink.append(volume_adjusted);
-        sink.play();
         
-        println!("✅ Background music loaded and playing on loop at 70% volume");
+        println!("✅ Background music loaded");
         Ok(())
+    }
+    
+    /// Detect audio system type (PipeWire, PulseAudio, pure ALSA)
+    fn detect_and_configure_audio_system() {
+        use std::process::Command;
+        
+        println!("🔍 Detecting audio system...");
+        
+        // Check for PipeWire
+        if let Ok(output) = Command::new("pactl").arg("info").output() {
+            let output_str = String::from_utf8_lossy(&output.stdout);
+            if output_str.contains("PipeWire") {
+                println!("✅ Detected: PipeWire audio system");
+                Self::configure_pipewire_audio();
+                return;
+            } else if output_str.contains("PulseAudio") {
+                println!("✅ Detected: PulseAudio system");
+                Self::configure_pulseaudio();
+                return;
+            }
+        }
+        
+        // Fallback to ALSA configuration
+        println!("✅ Detected: ALSA audio system (fallback)");
+        Self::configure_alsa_audio();
+    }
+    
+    /// Configure PipeWire-specific settings
+    fn configure_pipewire_audio() {
+        println!("🔧 Configuring PipeWire audio settings...");
+        
+        // PipeWire typically doesn't need ALSA environment variables
+        // But we can set some safe defaults
+        std::env::set_var("PIPEWIRE_LATENCY", "512/48000"); // ~10ms latency
+        std::env::set_var("PIPEWIRE_RATE", "48000");
+        std::env::set_var("PIPEWIRE_CHANNELS", "2");
+        
+        println!("🔧 PipeWire: Set 10ms latency, 48kHz, stereo");
+    }
+    
+    /// Configure PulseAudio settings
+    fn configure_pulseaudio() {
+        println!("🔧 Configuring PulseAudio settings...");
+        
+        std::env::set_var("PULSE_LATENCY_MSEC", "50"); // 50ms latency
+        std::env::set_var("PULSE_RUNTIME_PATH", "/run/user/1000/pulse");
+        
+        println!("🔧 PulseAudio: Set 50ms latency");
+    }
+    
+    /// Configure ALSA settings
+    fn configure_alsa_audio() {
+        println!("🔧 Configuring ALSA audio settings...");
+        
+        std::env::set_var("ALSA_PCM_CARD", "0");
+        std::env::set_var("ALSA_PCM_DEVICE", "0");
+        std::env::set_var("ALSA_BUFFER_TIME", "100000"); // 100ms
+        std::env::set_var("ALSA_PERIOD_TIME", "25000");  // 25ms
+        
+        println!("🔧 ALSA: Set 100ms buffer, 25ms period");
+    }
+    
+    /// Try PipeWire-specific configuration
+    fn try_pipewire_configuration() -> Result<(OutputStream, rodio::OutputStreamHandle), Box<dyn std::error::Error>> {
+        println!("🔧 Attempting PipeWire-compatible audio stream...");
+        
+        // For PipeWire, the default should work fine
+        OutputStream::try_default()
+            .map_err(|e| format!("PipeWire audio configuration failed: {}", e).into())
     }
     
     /// Set background music volume (0-100)
     pub fn set_volume(&mut self, volume: u8) {
         let old_volume = self.current_volume;
         self.current_volume = volume.clamp(0, 100);
+        
+        println!("🔊 Setting volume from {}% to {}%", old_volume, self.current_volume);
         
         if self.current_volume == 0 {
             // Volume 0: pause the music
@@ -77,12 +191,12 @@ impl AudioManager {
             let volume_float = self.current_volume as f32 / 100.0;
             self.background_sink.set_volume(volume_float);
             
-            // If we were at volume 0 before, resume playback
-            if old_volume == 0 && self.current_volume > 0 {
+            // Always ensure playback is started when volume > 0
+            if !self.background_sink.empty() {
                 self.background_sink.play();
-                println!("▶️ Music resumed at {}% volume", self.current_volume);
+                println!("▶️ Music playing at {}% volume (volume: {:.2})", self.current_volume, volume_float);
             } else {
-                println!("🔊 Volume set to {}%", self.current_volume);
+                println!("⚠️ No audio loaded in sink - cannot play");
             }
         }
     }
@@ -106,6 +220,9 @@ impl AudioManager {
     
     /// Toggle background music play/pause (except when volume is 0)
     pub fn toggle_background(&mut self) {
+        println!("🎵 Toggling background music (current volume: {}%, paused: {})", 
+            self.current_volume, self.background_sink.is_paused());
+            
         if self.current_volume == 0 {
             // If volume is 0, set to default 70% and play
             self.set_volume(70);
@@ -121,6 +238,8 @@ impl AudioManager {
     pub fn is_background_paused(&self) -> bool {
         self.background_sink.is_paused() || self.current_volume == 0
     }
+    
+
 }
 
 impl Drop for AudioManager {

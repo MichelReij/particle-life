@@ -1711,14 +1711,10 @@ impl WebGpuRenderer {
             zoom_render_bind_group,
             zoom_uniforms_buffer,
 
-            // Text overlay components (native only)
-            #[cfg(not(target_arch = "wasm32"))]
-            #[cfg(not(target_arch = "wasm32"))]
-            text_overlay_pipeline: Some(text_overlay_pipeline),
-            #[cfg(not(target_arch = "wasm32"))]
-            text_overlay_bind_group: Some(text_overlay_bind_group),
-            #[cfg(not(target_arch = "wasm32"))]
-            fps_data_buffer: Some(fps_data_buffer),
+            // Text overlay components DISABLED for clean screen
+            text_overlay_pipeline: None, // Disabled to remove FPS display
+            text_overlay_bind_group: None, // Disabled to remove FPS display  
+            fps_data_buffer: None, // Disabled to remove FPS display
         })
     }
 

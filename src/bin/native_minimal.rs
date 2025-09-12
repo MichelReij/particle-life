@@ -171,15 +171,19 @@ impl ApplicationHandler for MinimalNativeApp {
             }
         });
         
-        // Initialize audio system
+        // Initialize audio system (with fallback to disable on ALSA issues)
         match AudioManager::new() {
             Ok(audio_manager) => {
-                console_log!("🎵 Audio system initialized and brainwaves.mp3 playing on loop");
+                console_log!("🎵 Audio system initialized successfully");
                 self.audio_manager = Some(audio_manager);
             }
             Err(e) => {
                 console_log!("❌ Failed to initialize audio: {:?}", e);
-                console_log!("   Continuing without audio...");
+                console_log!("   Audio disabled - continuing without background music...");
+                console_log!("   This is normal on Linux systems with ALSA buffer underrun issues");
+                console_log!("   The particle simulation will work perfectly without audio");
+                // Continue without audio - this is non-critical for the particle simulation
+                self.audio_manager = None;
             }
         }
     }
@@ -206,18 +210,24 @@ impl ApplicationHandler for MinimalNativeApp {
                             // Toggle background music
                             if let Some(audio) = &mut self.audio_manager {
                                 audio.toggle_background();
+                            } else {
+                                console_log!("🔇 Audio system is disabled");
                             }
                         }
                         winit::keyboard::Key::Character(ref c) if c == "+" => {
                             // Increase volume by 5
                             if let Some(audio) = &mut self.audio_manager {
                                 audio.volume_up();
+                            } else {
+                                console_log!("🔇 Audio system is disabled");
                             }
                         }
                         winit::keyboard::Key::Character(ref c) if c == "-" => {
                             // Decrease volume by 5
                             if let Some(audio) = &mut self.audio_manager {
                                 audio.volume_down();
+                            } else {
+                                console_log!("🔇 Audio system is disabled");
                             }
                         }
                         _ => {}
@@ -320,17 +330,8 @@ impl ApplicationHandler for MinimalNativeApp {
                     self.current_fps =
                         self.fps_samples.iter().sum::<f32>() / self.fps_samples.len() as f32;
 
-                    // Update FPS data in renderer for on-screen display
-                    if let Some(renderer) = &mut self.renderer {
-                        let active_particles = self.particle_system.get_active_count();
-                        // Show full FPS value with 3 digits for values above 99
-                        renderer.update_fps_data(
-                            self.current_fps,
-                            0, // frame_count reset
-                            active_particles,
-                            self.current_time,
-                        );
-                    }
+                    // FPS display completely disabled - no need to update FPS data at all
+                    // This ensures no text rendering occurs on screen
 
                     self.fps_last_update = fps_now;
                     self.fps_frame_count = 0;
@@ -350,9 +351,9 @@ impl ApplicationHandler for MinimalNativeApp {
                     println!("║  Time: {:<25.1} ║", self.current_time);
                     println!("╚══════════════════════════════════════╝");
                     println!();
-                    println!("✨ On-screen FPS overlay is now active!");
-                    println!("   Check bottom-center of the round screen.");
-                    println!("   (Console output less frequent now)");
+                    println!("✨ FPS counter removed from screen!");
+                    println!("   Only console stats are shown now.");
+                    println!("   Screen should be clean without overlay text.");
                 }
 
                 if let Some(window) = &self.window {
