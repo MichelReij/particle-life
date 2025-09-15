@@ -49,6 +49,7 @@ pub struct ESP32SensorData {
     pub pressure: u16,    // 0-4096
     pub uv: u16,          // 0-4096
     pub electrical: u16,  // 0-4096
+    pub volume: u16,      // 0-4096 (NEW: potentiometer for audio volume)
     pub sleep: bool,      // true/false
 }
 
@@ -62,6 +63,7 @@ impl Default for ESP32SensorData {
             pressure: 0,      // Default 0 pressure
             uv: 0,            // Default 0 UV
             electrical: 0,    // Default 0 electrical activity
+            volume: 2048,     // Default middle volume (50%)
             sleep: false,     // Default awake
         }
     }
@@ -251,7 +253,7 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
                     // Log outside of the mutex to avoid holding the lock
                     if should_log {
                         println!(
-                            "📡 ESP32 data: zoom={} ({:.1}x), pan=({},{}) ({:.0},{:.0}), temp={} ({:.0}°C), pressure={} ({:.0}), uv={} ({:.0}), electrical={} ({:.1}), sleep={}",
+                            "📡 ESP32 data: zoom={} ({:.1}x), pan=({},{}) ({:.0},{:.0}), temp={} ({:.0}°C), pressure={} ({:.0}), uv={} ({:.0}), electrical={} ({:.1}), volume={} ({}%), sleep={}",
                             sensor_data.zoom, sensor_data.to_zoom_level(),
                             sensor_data.pan_x, sensor_data.pan_y, 
                             sensor_data.to_pan_coordinates(4320.0, 4320.0).0, sensor_data.to_pan_coordinates(4320.0, 4320.0).1,
@@ -259,6 +261,7 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
                             sensor_data.pressure, sensor_data.to_pressure(),
                             sensor_data.uv, sensor_data.to_uv(),
                             sensor_data.electrical, sensor_data.to_electrical_activity(),
+                            sensor_data.volume, sensor_data.to_volume_percentage(),
                             sensor_data.sleep
                         );
                     }
@@ -307,46 +310,99 @@ fn find_and_connect_esp32() -> Option<Box<dyn SerialPort>> {
         }
     };
 
-    // Add virtual ports that might not be detected by available_ports()
+    // Add virtual ports that might not be detected by available_ports() (OS-specific)
     let mut virtual_ports = Vec::new();
-
-    // Add specific socat virtual port patterns (ttys020, ttys021, etc.)
-    for i in 20..50 {
-        // Extended range to include ttys043, ttys044
-        virtual_ports.push(format!("/dev/ttys{:03}", i));
+    
+    // Detect operating system
+    let is_macos = cfg!(target_os = "macos");
+    let is_linux = cfg!(target_os = "linux");
+    
+    if is_linux {
+        println!("🐧 Linux detected - checking for ttyUSB/ttyACM and virtual ports");
+        // On Linux, ESP32 devices typically appear as /dev/ttyUSB* or /dev/ttyACM*
+        for i in 0..10 {
+            virtual_ports.push(format!("/dev/ttyUSB{}", i));
+            virtual_ports.push(format!("/dev/ttyACM{}", i));
+        }
+        
+        // Add specific socat virtual port patterns for Linux (ttys020, ttys021, etc.)
+        for i in 20..50 {
+            virtual_ports.push(format!("/dev/ttys{:03}", i));
+        }
+        
+        // Add the specific socat ports we know exist on Linux
+        virtual_ports.push("/dev/ttys030".to_string());
+        virtual_ports.push("/dev/ttys031".to_string());
+        virtual_ports.push("/dev/ttys043".to_string());
+        virtual_ports.push("/dev/ttys044".to_string());
+        
+        // Add more common Linux patterns
+        for i in 0..10 {
+            virtual_ports.push(format!("/dev/pty{}", i));
+            virtual_ports.push(format!("/dev/ttyS{}", i));
+        }
+    } else if is_macos {
+        println!("🍎 macOS detected - focusing on /dev/cu.* devices");
+        // On macOS, ESP32 devices appear as /dev/cu.usbmodem* or /dev/cu.SLAB_USBtoUART*
+        // Skip virtual /dev/ttys* ports as they're not relevant for ESP32 on macOS
+        
+        // Only add macOS-specific patterns that might not be enumerated
+        for i in 0..10 {
+            virtual_ports.push(format!("/dev/cu.usbmodem{}", i));
+            virtual_ports.push(format!("/dev/cu.SLAB_USBtoUART{}", i));
+            virtual_ports.push(format!("/dev/cu.wchusbserial{}", i));
+        }
+    } else {
+        println!("❓ Unknown OS - using generic patterns");
+        // Fallback for other operating systems
+        for i in 0..10 {
+            virtual_ports.push(format!("/dev/ttyUSB{}", i));
+            virtual_ports.push(format!("/dev/ttyACM{}", i));
+        }
     }
-    // Add more common patterns
-    for i in 0..10 {
-        virtual_ports.push(format!("/dev/pty{}", i));
-        virtual_ports.push(format!("/dev/ttyS{}", i));
-        virtual_ports.push(format!("/dev/ttyUSB{}", i));
-        virtual_ports.push(format!("/dev/ttyACM{}", i));
-    }
 
-    // Add the specific socat ports we know exist
-    virtual_ports.push("/dev/ttys030".to_string());
-    virtual_ports.push("/dev/ttys031".to_string());
-    virtual_ports.push("/dev/ttys043".to_string());
-    virtual_ports.push("/dev/ttys044".to_string());
+    // Look for ESP32-like devices (OS-specific patterns)
+    let esp32_patterns = if is_macos {
+        [
+            "lolin-s2-mini", // Exact product match (highest priority)
+            "wemos.cc",      // Exact manufacturer match (highest priority)
+            "cu.usbmodem",   // Primary macOS ESP32 pattern
+            "cu.SLAB_USBtoUART", // Silicon Labs USB-to-UART on macOS
+            "cu.wchusbserial", // WCH USB-to-serial on macOS
+            "USB",
+            "CH340",
+            "CP210",
+            "FTDI",
+            "ESP32",
+            "Silicon Labs",
+            "WEMOS",
+            "LOLIN",
+            "debug-console", // Development console
+        ]
+    } else {
+        [
+            "lolin-s2-mini", // Exact product match (highest priority)
+            "wemos.cc",      // Exact manufacturer match (highest priority)
+            "ttyACM",        // Primary Linux ESP32 pattern
+            "ttyUSB",        // Common Linux ESP32 pattern  
+            "USB",
+            "CH340",
+            "CP210",
+            "FTDI",
+            "ESP32",
+            "Silicon Labs",
+            "ch341",
+            "WEMOS",
+            "LOLIN",
+            "debug-console", // Development console
+        ]
+    };
 
-    // Look for ESP32-like devices (common USB-to-serial chips used with ESP32)
-    let esp32_patterns = [
-        "ttyACM",        // Common ESP32 pattern - prioritize this!
-        "ttyUSB",        // Common ESP32 pattern
-        "USB",
-        "CH340",
-        "CP210",
-        "FTDI",
-        "ESP32",
-        "Silicon Labs",
-        "ch341",
-        "debug-console", // Add debug console for development
-        "ttys",          // Virtual serial ports (e.g. ttys025)
-        "tty",           // Generic tty devices
-        "cu.",           // macOS calling unit devices
-    ];
-
-    // First try ESP32-like devices
+    // First try ESP32-like devices with prioritization
+    // On macOS, prioritize actual USB devices over virtual ports
+    let mut all_candidates = Vec::new();
+    
+    // Collect and prioritize candidates
     for port_info in &ports {
         let port_name = &port_info.port_name;
         let port_description = format!("{:?}", port_info.port_type).to_lowercase();
@@ -358,52 +414,103 @@ fn find_and_connect_esp32() -> Option<Box<dyn SerialPort>> {
         });
 
         if looks_like_esp32 {
+            // Calculate priority score (higher = better)
+            let mut priority = 0;
+            
+            // Highest priority: Exact match for WEMOS LOLIN-S2-MINI board
+            if port_description.contains("wemos.cc") && port_description.contains("lolin-s2-mini") {
+                priority += 1000; // Highest priority for exact board match
+                println!("🎯 Found exact WEMOS LOLIN-S2-MINI board match!");
+            }
+            
+            // High priority: Manufacturer matches
+            if port_description.contains("wemos") || port_description.contains("wemos.cc") {
+                priority += 500; // High priority for WEMOS manufacturer
+            }
+            
+            // High priority: Product name matches
+            if port_description.contains("lolin") || port_description.contains("lolin-s2-mini") {
+                priority += 400; // High priority for LOLIN product line
+            }
+            
+            if is_macos {
+                // macOS: Prioritize /dev/cu.usbmodem* (real USB devices)
+                if port_name.contains("cu.usbmodem") { priority += 100; }
+                if port_description.contains("usb") { priority += 20; }
+                if port_name.contains("cu.") { priority += 10; }  // cu. devices are preferred on macOS
+            } else {
+                // Linux: Prioritize /dev/ttyACM* and /dev/ttyUSB*
+                if port_name.contains("ttyACM") { priority += 100; }
+                if port_name.contains("ttyUSB") { priority += 90; }
+                if port_description.contains("usb") { priority += 20; }
+            }
+            
+            all_candidates.push((priority, port_name.clone(), port_description));
+        }
+    }
+    
+    // Sort by priority (highest first)
+    all_candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    
+    // Try candidates in priority order
+    for (priority, port_name, port_description) in all_candidates {
+        let is_exact_match = port_description.contains("wemos.cc") && port_description.contains("lolin-s2-mini");
+        if is_exact_match {
             println!(
-                "🔍 Trying ESP32 candidate: {} ({})",
-                port_name, port_description
+                "🎯 Trying EXACT WEMOS LOLIN-S2-MINI match: {} (priority: {}, {})",
+                port_name, priority, port_description
             );
+        } else {
+            println!(
+                "🔍 Trying ESP32 candidate: {} (priority: {}, {})",
+                port_name, priority, port_description
+            );
+        }
 
-            // Try to open the port
-            match serialport::new(port_name, 115200)
-                .timeout(Duration::from_millis(500)) // Increase timeout
-                .open()
-            {
-                Ok(mut port) => {
-                    // Test communication by trying to read some data
-                    thread::sleep(Duration::from_millis(100)); // Give ESP32 time to send data
+        // Try to open the port
+        match serialport::new(&port_name, 115200)
+            .timeout(Duration::from_millis(500)) // Increase timeout
+            .open()
+        {
+            Ok(mut port) => {
+                // Test communication by trying to read some data
+                thread::sleep(Duration::from_millis(100)); // Give ESP32 time to send data
 
-                    match test_esp32_communication(&mut port) {
-                        Ok(true) => {
-                            println!("✅ ESP32 found on port: {}", port_name);
-                            return Some(port);
-                        }
-                        Ok(false) => {
-                            println!("❌ Device on {} is not responding as ESP32", port_name);
-                        }
-                        Err(e) => {
-                            println!("❌ Communication test failed on {}: {:?}", port_name, e);
-                        }
+                match test_esp32_communication(&mut port) {
+                    Ok(true) => {
+                        println!("✅ ESP32 found on port: {}", port_name);
+                        return Some(port);
+                    }
+                    Ok(false) => {
+                        println!("❌ Device on {} is not responding as ESP32", port_name);
+                    }
+                    Err(e) => {
+                        println!("❌ Communication test failed on {}: {:?}", port_name, e);
                     }
                 }
-                Err(e) => {
-                    println!("❌ Failed to open port {}: {}", port_name, e);
-                }
+            }
+            Err(e) => {
+                println!("❌ Failed to open port {}: {}", port_name, e);
             }
         }
     }
 
-    // Now try virtual ports that may not be enumerated
-    let mut found_virtual_ports = 0;
-    for port_name in &virtual_ports {
-        // Only check and log ports that actually exist
-        if !std::path::Path::new(port_name).exists() {
-            continue;
-        }
+    // Now try virtual ports that may not be enumerated (OS-specific)
+    let existing_virtual_ports: Vec<_> = virtual_ports.iter()
+        .filter(|p| std::path::Path::new(p).exists())
+        .collect();
         
-        found_virtual_ports += 1;
-        if found_virtual_ports == 1 {
-            println!("🔍 Found {} virtual ports to check...", virtual_ports.iter().filter(|p| std::path::Path::new(p).exists()).count());
+    if !existing_virtual_ports.is_empty() {
+        if is_macos {
+            println!("🔍 Found {} additional macOS USB ports to check...", existing_virtual_ports.len());
+        } else {
+            println!("🔍 Found {} virtual ports to check...", existing_virtual_ports.len());
         }
+    } else if is_macos {
+        println!("✅ macOS: Skipping virtual port scan (no additional USB devices found)");
+    }
+    
+    for port_name in existing_virtual_ports {
 
         // Check if this looks like an ESP32
         let looks_like_esp32 = esp32_patterns
@@ -437,12 +544,14 @@ fn find_and_connect_esp32() -> Option<Box<dyn SerialPort>> {
                 Err(e) => {
                     println!("❌ Failed to open virtual port {}: {}", port_name, e);
 
-                    // If serialport fails and this is a PTY device, try alternative approach
-                    if port_name.contains("ttys") {
+                    // If serialport fails and this is a PTY device on Linux, try alternative approach
+                    if is_linux && port_name.contains("ttys") {
                         println!("🔄 Trying alternative PTY approach for: {}", port_name);
                         if let Some(port) = try_pty_connection(port_name) {
                             return Some(port);
                         }
+                    } else if is_macos && port_name.contains("ttys") {
+                        println!("⚠️ macOS: Skipping PTY attempt for {}", port_name);
                     }
                 }
             }
@@ -546,11 +655,11 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
     // [temp_high] [temp_low] [pressure_high] [pressure_low] [uv_high] [uv_low]
     // [electrical_high] [electrical_low] [sleep] [0x55]
 
-    let mut buffer = [0u8; 17];
+    let mut buffer = [0u8; 19];
     let mut bytes_read = 0;
 
     // Try to read complete packet
-    while bytes_read < 17 {
+    while bytes_read < 19 {
         match port.read(&mut buffer[bytes_read..]) {
             Ok(n) => {
                 bytes_read += n;
@@ -568,7 +677,11 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
     }
 
     // Validate packet format
-    if buffer[0] != 0xAA || buffer[16] != 0x55 {
+    if buffer[0] != 0xAA || buffer[18] != 0x55 {
+        println!("❌ ESP32 InvalidData - Bad packet format:");
+        println!("   Expected: [0xAA, ..., 0x55] (19 bytes)");
+        println!("   Received: {:02X?}", buffer);
+        println!("   Header: 0x{:02X} (expected 0xAA), Footer: 0x{:02X} (expected 0x55)", buffer[0], buffer[18]);
         return Err(ESP32Error::InvalidData);
     }
 
@@ -580,7 +693,14 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
     let pressure = u16::from_be_bytes([buffer[9], buffer[10]]);
     let uv = u16::from_be_bytes([buffer[11], buffer[12]]);
     let electrical = u16::from_be_bytes([buffer[13], buffer[14]]);
-    let sleep = buffer[15] != 0;
+    let volume = u16::from_be_bytes([buffer[15], buffer[16]]);
+    let sleep = buffer[17] != 0;
+
+    // Debug: Show successful parse
+    println!("✅ ESP32 packet parsed successfully:");
+    println!("   Raw buffer: {:02X?}", buffer);
+    println!("   Parsed: zoom={}, pan_x={}, pan_y={}, temp={}, pressure={}, uv={}, electrical={}, volume={}, sleep={}", 
+        zoom, pan_x, pan_y, temperature, pressure, uv, electrical, volume, sleep);
 
     // Validate ranges (all values should be 0-4096)
     if zoom > 4096
@@ -590,7 +710,13 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
         || pressure > 4096
         || uv > 4096
         || electrical > 4096
+        || volume > 4096
     {
+        println!("❌ ESP32 InvalidData - Value out of range:");
+        println!("   Raw buffer: {:02X?}", buffer);
+        println!("   Parsed values: zoom={}, pan_x={}, pan_y={}, temp={}, pressure={}, uv={}, electrical={}, volume={}", 
+            zoom, pan_x, pan_y, temperature, pressure, uv, electrical, volume);
+        println!("   Valid range: 0-4096 for all sensor values");
         return Err(ESP32Error::InvalidData);
     }
 
@@ -602,6 +728,7 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
         pressure,
         uv,
         electrical,
+        volume,
         sleep,
     })
 }
@@ -642,6 +769,21 @@ impl ESP32SensorData {
         (self.electrical as f32 / 4096.0) * 3.0
     }
 
+    // Convert volume (0-4096) to audio volume percentage (0-100)
+    // Values below 10 (raw) will return 0 to pause audio
+    pub fn to_volume_percentage(&self) -> u8 {
+        let volume = self.volume;
+        if volume < 10 {
+            0  // Mute/pause when below threshold
+        } else {
+            let adjusted = volume - 10;
+            let max_adjusted = 4095 - 10;
+            let clamped = adjusted.min(max_adjusted);
+            let scaled = ((clamped as u32) * 100) / max_adjusted as u32;
+            scaled as u8
+        }
+    }
+
     // Create test sensor data for debugging
     pub fn test_data() -> Self {
         Self {
@@ -652,6 +794,7 @@ impl ESP32SensorData {
             pressure: 2048,    // ~175 pressure (50% of range)
             uv: 2048,          // ~25 UV (50% of range)
             electrical: 2048,  // ~1.5 electrical activity (50% of range)
+            volume: 2048,      // ~50% volume
             sleep: false,      // Awake
         }
     }
@@ -666,6 +809,7 @@ impl ESP32SensorData {
             pressure: 4096,    // 350 pressure
             uv: 4096,          // 50 UV
             electrical: 4096,  // 3.0 electrical activity
+            volume: 4096,      // 100% volume
             sleep: true,       // Sleep mode
         }
     }
@@ -673,8 +817,8 @@ impl ESP32SensorData {
     // Log all converted values for debugging
     pub fn log_converted_values(&self) {
         println!("📊 ESP32 Sensor Data Conversion:");
-        println!("  Raw values: zoom={}, pan_x={}, pan_y={}, temp={}, pressure={}, uv={}, electrical={}, sleep={}",
-            self.zoom, self.pan_x, self.pan_y, self.temperature, self.pressure, self.uv, self.electrical, self.sleep);
+        println!("  Raw values: zoom={}, pan_x={}, pan_y={}, temp={}, pressure={}, uv={}, electrical={}, volume={}, sleep={}",
+            self.zoom, self.pan_x, self.pan_y, self.temperature, self.pressure, self.uv, self.electrical, self.volume, self.sleep);
         println!("  Converted values:");
         println!("    Zoom: {:.2}x (range: 1.0-12.0)", self.to_zoom_level());
         println!(
@@ -686,6 +830,7 @@ impl ESP32SensorData {
         println!("    Pressure: {:.1} (range: 0-350)", self.to_pressure());
         println!("    UV: {:.1} (range: 0-50)", self.to_uv());
         println!("    Electrical: {:.2} (range: 0-3)", self.to_electrical_activity());
+        println!("    Volume: {}% (range: 0-100%)", self.to_volume_percentage());
         println!("    Sleep: {}", self.sleep);
         
         // Show range utilization percentages
@@ -697,17 +842,20 @@ impl ESP32SensorData {
         println!("    Pressure: {:.1}%", (self.pressure as f32 / 4095.0) * 100.0);
         println!("    UV: {:.1}%", (self.uv as f32 / 4095.0) * 100.0);
         println!("    Electrical: {:.1}%", (self.electrical as f32 / 4095.0) * 100.0);
+        println!("    Volume: {:.1}%", (self.volume as f32 / 4095.0) * 100.0);
     }
 
     // Validate all sensor mappings use the full 0-4095 range correctly
     pub fn validate_sensor_mappings() {
         println!("🧪 Validating ESP32 sensor mappings...");
         
-        // Test edge cases
+        // Test edge cases including volume threshold
         let test_cases = [
-            ESP32SensorData { zoom: 0, pan_x: 0, pan_y: 0, temperature: 0, pressure: 0, uv: 0, electrical: 0, sleep: false },
-            ESP32SensorData { zoom: 2047, pan_x: 2047, pan_y: 2047, temperature: 2047, pressure: 2047, uv: 2047, electrical: 2047, sleep: false },
-            ESP32SensorData { zoom: 4095, pan_x: 4095, pan_y: 4095, temperature: 4095, pressure: 4095, uv: 4095, electrical: 4095, sleep: true },
+            ESP32SensorData { zoom: 0, pan_x: 0, pan_y: 0, temperature: 0, pressure: 0, uv: 0, electrical: 0, volume: 0, sleep: false },
+            ESP32SensorData { zoom: 1024, pan_x: 1024, pan_y: 1024, temperature: 1024, pressure: 1024, uv: 1024, electrical: 1024, volume: 5, sleep: false },   // Below volume threshold
+            ESP32SensorData { zoom: 1024, pan_x: 1024, pan_y: 1024, temperature: 1024, pressure: 1024, uv: 1024, electrical: 1024, volume: 10, sleep: false },  // At volume threshold
+            ESP32SensorData { zoom: 2047, pan_x: 2047, pan_y: 2047, temperature: 2047, pressure: 2047, uv: 2047, electrical: 2047, volume: 2047, sleep: false },
+            ESP32SensorData { zoom: 4095, pan_x: 4095, pan_y: 4095, temperature: 4095, pressure: 4095, uv: 4095, electrical: 4095, volume: 4095, sleep: true },
         ];
         
         for (i, test_data) in test_cases.iter().enumerate() {
@@ -715,8 +863,10 @@ impl ESP32SensorData {
                 i + 1,
                 match i {
                     0 => "all minimum (0)",
-                    1 => "all middle (2047)", 
-                    2 => "all maximum (4095)",
+                    1 => "volume below threshold (5)", 
+                    2 => "volume at threshold (10)",
+                    3 => "all middle (2047)", 
+                    4 => "all maximum (4095)",
                     _ => "unknown"
                 }
             );
@@ -728,6 +878,11 @@ impl ESP32SensorData {
             println!("  Pressure: {} → {:.1}", test_data.pressure, test_data.to_pressure());
             println!("  UV: {} → {:.1}", test_data.uv, test_data.to_uv());
             println!("  Electrical: {} → {:.2}", test_data.electrical, test_data.to_electrical_activity());
+            println!("  Volume: {} → {}% ({})", 
+                test_data.volume, 
+                test_data.to_volume_percentage(),
+                if test_data.volume < 10 { "PAUSED" } else { "PLAYING" }
+            );
         }
         
         println!("\n✅ All sensor mappings validated - full 0-4095 range correctly utilized");

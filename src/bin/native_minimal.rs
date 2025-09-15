@@ -252,6 +252,12 @@ impl ApplicationHandler for MinimalNativeApp {
                                 // Apply ESP32 sensor data to simulation parameters
                                 self.simulation_params.apply_esp32_sensor_data(&sensor_data);
 
+                                // Update audio volume from ESP32 potentiometer
+                                if let Some(audio) = &mut self.audio_manager {
+                                    let volume_percentage = sensor_data.to_volume_percentage();
+                                    audio.set_volume(volume_percentage);
+                                }
+
                                 // Handle sleep mode
                                 if sensor_data.sleep {
                                     // TODO: Implement sleep mode (screen saver, reduced processing, etc.)
@@ -502,6 +508,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut app = MinimalNativeApp::default();
     event_loop.run_app(&mut app)?;
-
+    
     Ok(())
 }
