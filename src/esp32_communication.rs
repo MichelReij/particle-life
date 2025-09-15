@@ -253,16 +253,10 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
                     // Log outside of the mutex to avoid holding the lock
                     if should_log {
                         println!(
-                            "📡 ESP32 data: zoom={} ({:.1}x), pan=({},{}) ({:.0},{:.0}), temp={} ({:.0}°C), pressure={} ({:.0}), uv={} ({:.0}), electrical={} ({:.1}), volume={} ({}%), sleep={}",
-                            sensor_data.zoom, sensor_data.to_zoom_level(),
-                            sensor_data.pan_x, sensor_data.pan_y, 
-                            sensor_data.to_pan_coordinates(4320.0, 4320.0).0, sensor_data.to_pan_coordinates(4320.0, 4320.0).1,
-                            sensor_data.temperature, sensor_data.to_temperature_celsius(),
-                            sensor_data.pressure, sensor_data.to_pressure(),
-                            sensor_data.uv, sensor_data.to_uv(),
-                            sensor_data.electrical, sensor_data.to_electrical_activity(),
-                            sensor_data.volume, sensor_data.to_volume_percentage(),
-                            sensor_data.sleep
+                            "📡 ESP32: zoom={} pan=({},{}) temp={} pressure={} uv={} electrical={} volume={} sleep={}",
+                            sensor_data.zoom, sensor_data.pan_x, sensor_data.pan_y,
+                            sensor_data.temperature, sensor_data.pressure, sensor_data.uv,
+                            sensor_data.electrical, sensor_data.volume, sensor_data.sleep
                         );
                     }
 
@@ -696,12 +690,6 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
     let volume = u16::from_be_bytes([buffer[15], buffer[16]]);
     let sleep = buffer[17] != 0;
 
-    // Debug: Show successful parse
-    println!("✅ ESP32 packet parsed successfully:");
-    println!("   Raw buffer: {:02X?}", buffer);
-    println!("   Parsed: zoom={}, pan_x={}, pan_y={}, temp={}, pressure={}, uv={}, electrical={}, volume={}, sleep={}", 
-        zoom, pan_x, pan_y, temperature, pressure, uv, electrical, volume, sleep);
-
     // Validate ranges (all values should be 0-4096)
     if zoom > 4096
         || pan_x > 4096
@@ -891,45 +879,15 @@ impl ESP32SensorData {
 
 // Determine if we should log sensor data (throttled logging for human readability)
 fn should_log_sensor_data(new_data: &ESP32SensorData, state: &mut ESP32SharedState) -> bool {
-    // Log every 2 seconds regardless of changes
+    // Log every 1 second regardless of changes
     let time_since_last_log = state.last_log_time.elapsed();
-    if time_since_last_log >= Duration::from_secs(2) {
+    if time_since_last_log >= Duration::from_secs(1) {
         state.last_log_time = Instant::now();
         state.last_logged_data = Some(*new_data);
         return true;
     }
     
-    // Also log if there's a significant change in any sensor value
-    if let Some(last_data) = state.last_logged_data {
-        // Define significant change thresholds (relative to full range)
-        let zoom_threshold = 100;      // ~2.4% of 4095 (meaningful zoom change)
-        let pan_threshold = 200;       // ~4.9% of 4095 (meaningful pan change)  
-        let temp_threshold = 50;       // ~1.2% of 4095 (meaningful temp change)
-        let pressure_threshold = 50;   // ~1.2% of 4095 (meaningful pressure change)
-        let uv_threshold = 50;         // ~1.2% of 4095 (meaningful UV change)
-        let electrical_threshold = 50; // ~1.2% of 4095 (meaningful electrical change)
-        
-        let significant_change = 
-            (new_data.zoom as i32 - last_data.zoom as i32).abs() >= zoom_threshold ||
-            (new_data.pan_x as i32 - last_data.pan_x as i32).abs() >= pan_threshold ||
-            (new_data.pan_y as i32 - last_data.pan_y as i32).abs() >= pan_threshold ||
-            (new_data.temperature as i32 - last_data.temperature as i32).abs() >= temp_threshold ||
-            (new_data.pressure as i32 - last_data.pressure as i32).abs() >= pressure_threshold ||
-            (new_data.uv as i32 - last_data.uv as i32).abs() >= uv_threshold ||
-            (new_data.electrical as i32 - last_data.electrical as i32).abs() >= electrical_threshold ||
-            new_data.sleep != last_data.sleep;
-            
-        if significant_change {
-            state.last_logged_data = Some(*new_data);
-            return true;
-        }
-    } else {
-        // First time logging
-        state.last_logged_data = Some(*new_data);
-        return true;
-    }
-    
-    false
+    false // Remove significant change detection for cleaner output
 }
 
 // Alternative approach for PTY devices (socat virtual ports)

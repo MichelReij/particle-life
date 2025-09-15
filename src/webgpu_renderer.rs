@@ -2322,18 +2322,19 @@ impl WebGpuRenderer {
     pub async fn update_lightning_cache(&mut self) -> Result<(), RendererError> {
         match self.get_lightning_status().await {
             Ok(bolt) => {
-                crate::console_log!(
-                    "📡 Lightning buffer read: flash_id={}, visible={}, next_time={:.1}",
-                    bolt.flash_id,
-                    bolt.is_visible(),
-                    bolt.next_lightning_time
-                );
+                // Removed verbose lightning buffer logging
+                // crate::console_log!(
+                //     "📡 Lightning buffer read: flash_id={}, visible={}, next_time={:.1}",
+                //     bolt.flash_id,
+                //     bolt.is_visible(),
+                //     bolt.next_lightning_time
+                // );
                 self.lightning_detector.process_lightning_bolt(&bolt);
                 Ok(())
             }
             Err(e) => {
                 // Log error but don't crash - lightning detection is not critical
-                crate::console_log!("⚡ Lightning buffer read failed: {:?}", e);
+                // crate::console_log!("⚡ Lightning buffer read failed: {:?}", e);
                 Err(e)
             }
         }

@@ -180,12 +180,13 @@ impl AudioManager {
         let old_volume = self.current_volume;
         self.current_volume = volume.clamp(0, 100);
         
-        println!("🔊 Setting volume from {}% to {}%", old_volume, self.current_volume);
+        // Removed verbose logging for cleaner console output
+        // println!("🔊 Setting volume from {}% to {}%", old_volume, self.current_volume);
         
         if self.current_volume == 0 {
             // Volume 0: pause the music
             self.background_sink.pause();
-            println!("🔇 Volume set to 0% - music paused");
+            // println!("🔇 Volume set to 0% - music paused");
         } else {
             // Convert 0-100 to 0.0-1.0 range
             let volume_float = self.current_volume as f32 / 100.0;
@@ -194,7 +195,7 @@ impl AudioManager {
             // Always ensure playback is started when volume > 0
             if !self.background_sink.empty() {
                 self.background_sink.play();
-                println!("▶️ Music playing at {}% volume (volume: {:.2})", self.current_volume, volume_float);
+                // println!("▶️ Music playing at {}% volume (volume: {:.2})", self.current_volume, volume_float);
             } else {
                 println!("⚠️ No audio loaded in sink - cannot play");
             }

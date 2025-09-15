@@ -416,14 +416,9 @@ impl MinimalNativeApp {
         // Read lightning data from GPU asynchronously (non-blocking)
         match pollster::block_on(renderer.read_lightning_bolt_data()) {
             Ok(lightning_bolt) => {
-                console_log!("📡 Lightning buffer read: flash_id={}, start_time={:.3}, super={}, next_time={:.3}", 
-                    lightning_bolt.flash_id, 
-                    lightning_bolt.start_time, 
-                    lightning_bolt.is_super(),
-                    lightning_bolt.next_lightning_time
-                );
-                
-                // Check if we found a new lightning (flash_id changed and start_time is reasonable)
+                // Removed verbose lightning buffer logging
+                // console_log!("📡 Lightning buffer read: flash_id={}, start_time={:.3}, super={}, next_time={:.3}", 
+                //     lightning_data.flash_id, lightning_data.start_time, lightning_data.is_super_lightning, lightning_data.next_time);                // Check if we found a new lightning (flash_id changed and start_time is reasonable)
                 if lightning_bolt.flash_id > self.current_flash_id && 
                    lightning_bolt.start_time > 0.0 && 
                    lightning_bolt.start_time <= self.current_time + 10.0 {
