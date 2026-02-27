@@ -436,13 +436,13 @@ impl ParticleLifeEngine {
         );
     }
 
-    // Set UV light and update all UV-related simulation parameters
+    // Set pH and update all pH-related simulation parameters
     #[wasm_bindgen]
-    pub fn set_uv_light(&mut self, uv: f32) {
-        self.simulation_params.apply_uv_light(uv);
+    pub fn set_ph(&mut self, ph: f32) {
+        self.simulation_params.apply_ph(ph);
         console_log!(
-            "☀️ UV light set to {:.1} → applied to simulation parameters",
-            uv.max(0.0).min(50.0)
+            "🧪 pH set to {:.1} → applied to simulation parameters (optimum ~10)",
+            ph.max(0.0).min(14.0)
         );
     }
 

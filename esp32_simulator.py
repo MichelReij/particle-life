@@ -6,7 +6,7 @@ Sends sensor data packets to the Rust simulation via serial port
 
 Protocol: 17 bytes per packet
 [0xAA] [zoom_high] [zoom_low] [pan_x_high] [pan_x_low] [pan_y_high] [pan_y_low]
-[temp_high] [temp_low] [pressure_high] [pressure_low] [uv_high] [uv_low]
+[temp_high] [temp_low] [pressure_high] [pressure_low] [ph_high] [ph_low]
 [electrical_high] [electrical_low] [sleep] [0x55]
 
 All sensor values are u16 (0-4096), sleep is bool (0/1)
@@ -32,7 +32,7 @@ class ESP32Simulator:
         self.pan_y = 2048       # 0-4096 (maps to world coordinates)
         self.temperature = 820  # 0-4096 (maps to 3-130°C, 820 ≈ 20°C)
         self.pressure = 0       # 0-4096 (maps to 0-350)
-        self.uv = 0             # 0-4096 (maps to 0-50)
+        self.ph = 2926          # 0-4096 (maps to 0-14; ~pH 10 default)
         self.electrical = 0     # 0-4096 (maps to 0-3.0)
         self.sleep = False      # bool
 
@@ -65,7 +65,7 @@ class ESP32Simulator:
         pan_y = max(0, min(4096, self.pan_y))
         temperature = max(0, min(4096, self.temperature))
         pressure = max(0, min(4096, self.pressure))
-        uv = max(0, min(4096, self.uv))
+        ph = max(0, min(4096, self.ph))
         electrical = max(0, min(4096, self.electrical))
 
         # Build packet: 17 bytes total
@@ -78,7 +78,7 @@ class ESP32Simulator:
         packet.extend(struct.pack('>H', pan_y))
         packet.extend(struct.pack('>H', temperature))
         packet.extend(struct.pack('>H', pressure))
-        packet.extend(struct.pack('>H', uv))
+        packet.extend(struct.pack('>H', ph))
         packet.extend(struct.pack('>H', electrical))
 
         packet.append(1 if self.sleep else 0)  # Sleep flag
@@ -127,7 +127,7 @@ class ESP32Simulator:
         print("  pan <x> <y>         Set pan coordinates (0-4096 each)")
         print("  temp <value>        Set temperature (0-4096)")
         print("  pressure <value>    Set pressure (0-4096)")
-        print("  uv <value>          Set UV (0-4096)")
+        print("  ph <value>          Set pH (0-4096, maps to 0-14; optimum ~2926=pH10)")
         print("  electrical <value>  Set electrical (0-4096)")
         print("  sleep <on/off>      Set sleep mode")
         print("  status              Show current values")
@@ -161,9 +161,9 @@ class ESP32Simulator:
                     elif cmd[0] == 'pressure' and len(cmd) == 2:
                         self.pressure = int(cmd[1])
                         print(f"Pressure set to {self.pressure}")
-                    elif cmd[0] == 'uv' and len(cmd) == 2:
-                        self.uv = int(cmd[1])
-                        print(f"UV set to {self.uv}")
+                    elif cmd[0] == 'ph' and len(cmd) == 2:
+                        self.ph = int(cmd[1])
+                        print(f"pH set to {self.ph} (~pH {(self.ph/4096.0)*14.0:.1f})")
                     elif cmd[0] == 'electrical' and len(cmd) == 2:
                         self.electrical = int(cmd[1])
                         print(f"Electrical set to {self.electrical}")
@@ -188,7 +188,7 @@ class ESP32Simulator:
         print(f"  Pan: ({self.pan_x}, {self.pan_y})")
         print(f"  Temperature: {self.temperature} (maps to {3.0 + (self.temperature/4096.0)*127.0:.1f}°C)")
         print(f"  Pressure: {self.pressure} (maps to {(self.pressure/4096.0)*350.0:.1f})")
-        print(f"  UV: {self.uv} (maps to {(self.uv/4096.0)*50.0:.1f})")
+        print(f"  pH: {self.ph} (maps to pH {(self.ph/4096.0)*14.0:.1f}/14, optimum pH 10)")
         print(f"  Electrical: {self.electrical} (maps to {(self.electrical/4096.0)*3.0:.2f})")
         print(f"  Sleep: {self.sleep}")
         print()

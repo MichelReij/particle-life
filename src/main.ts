@@ -31,7 +31,7 @@ class App {
         try {
             // Get canvas first
             this.canvas = document.getElementById(
-                "canvas"
+                "canvas",
             ) as HTMLCanvasElement;
             if (!this.canvas) {
                 console.error("❌ Canvas element not found");
@@ -47,7 +47,7 @@ class App {
                 "🎨 Canvas configured:",
                 this.canvas.width,
                 "x",
-                this.canvas.height
+                this.canvas.height,
             );
             this.updateStatus("Canvas initialized...");
 
@@ -68,7 +68,7 @@ class App {
                     console.log(`🔍 Trying WASM path: ${wasmPath}`);
                     await init(wasmPath);
                     console.log(
-                        `✅ WASM initialized successfully with path: ${wasmPath}`
+                        `✅ WASM initialized successfully with path: ${wasmPath}`,
                     );
                     initSuccess = true;
                     break;
@@ -100,7 +100,7 @@ class App {
             } catch (error) {
                 console.warn(
                     "⚠️ WebGPU initialization failed, using fallback:",
-                    error
+                    error,
                 );
                 this.updateStatus("WebGPU failed, using CPU fallback");
             }
@@ -248,7 +248,7 @@ class App {
             updateZoom: (level: number, centerX?: number, centerY?: number) => {
                 // Handle zoom functionality (legacy callback - calls setZoom internally)
                 console.log(
-                    `🔍 Legacy updateZoom: ${level}, center: ${centerX}, ${centerY}`
+                    `🔍 Legacy updateZoom: ${level}, center: ${centerX}, ${centerY}`,
                 );
                 if (this.engine) {
                     this.engine.set_zoom(level, centerX, centerY);
@@ -275,9 +275,9 @@ class App {
                     this.engine.set_particle_count_from_pressure(pressure);
                 }
             },
-            setUVLight: (uv: number) => {
+            setPH: (ph: number) => {
                 if (this.engine) {
-                    this.engine.set_uv_light(uv);
+                    this.engine.set_ph(ph);
                 }
             },
             setElectricalActivity: (electrical: number) => {
@@ -287,7 +287,7 @@ class App {
             },
             setZoom: (level: number, centerX?: number, centerY?: number) => {
                 console.log(
-                    `🔍 Main.ts setZoom called: level=${level}, center=(${centerX}, ${centerY})`
+                    `🔍 Main.ts setZoom called: level=${level}, center=(${centerX}, ${centerY})`,
                 );
                 if (this.engine) {
                     this.engine.set_zoom(level, centerX, centerY);
@@ -348,7 +348,7 @@ class App {
     private startRustSimulation() {
         if (!this.engine || !this.canvas) {
             console.error(
-                "❌ Cannot start simulation: engine or canvas missing"
+                "❌ Cannot start simulation: engine or canvas missing",
             );
             return;
         }
@@ -368,7 +368,7 @@ class App {
                 // Update FPS every second
                 this.currentFPS = Math.round(
                     (this.fpsFrameCount * 1000) /
-                        (currentTime - this.fpsLastTime)
+                        (currentTime - this.fpsLastTime),
                 );
                 this.fpsFrameCount = 0;
                 this.fpsLastTime = currentTime;
@@ -484,7 +484,7 @@ class App {
                 // Track electrical activity changes (without logging)
                 if (
                     Math.abs(
-                        currentElectricalActivity - this.lastElectricalActivity
+                        currentElectricalActivity - this.lastElectricalActivity,
                     ) > 0.1
                 ) {
                     this.lastElectricalActivity = currentElectricalActivity;

@@ -64,6 +64,11 @@ pub struct SimulationParams {
 
     // Current zoom level - used for zoom-adjusted drift calculation
     pub current_zoom_level: f32,
+
+    // Environmental control levels (stored for cross-dependency computation)
+    pub ph: f32,                        // pH scale 0-14, optimum for life ~10
+    pub pressure_level: f32,            // bar (0-1000), ~0-10000m depth
+    pub electrical_activity_level: f32, // 0-3
 }
 
 impl SimulationParams {
@@ -123,6 +128,11 @@ impl SimulationParams {
 
             // Default zoom level
             current_zoom_level: 1.0,
+
+            // Environmental control levels (start at non-optimal to encourage exploration)
+            ph: 7.0,             // Neutral pH — optimum is 10
+            pressure_level: 0.0, // Surface — need to find depth
+            electrical_activity_level: 0.0,
         }
     }
 
@@ -311,11 +321,11 @@ impl SimulationParams {
 
     // Set temperature and update all temperature-related simulation parameters
     pub fn apply_temperature(&mut self, temp: f32) {
-        // Clamp temperature to valid range (3°C to 130°C)
-        let clamped_temp = temp.max(3.0).min(130.0);
+        // Clamp temperature to valid range (3°C to 160°C)
+        let clamped_temp = temp.max(3.0).min(160.0);
 
-        // Apply scale factor to maintain same effect as old 40°C max: (40-3)/(130-3) = 37/127 ≈ 0.2913
-        let effective_temp = 3.0 + (clamped_temp - 3.0) * (37.0 / 127.0);
+        // Apply scale factor to maintain same physical effect: (40-3)/(160-3) = 37/157 ≈ 0.2357
+        let effective_temp = 3.0 + (clamped_temp - 3.0) * (37.0 / 157.0);
 
         // 1. Update drift speed: effective_temp [3, 40] → drift [0, -120]
         let drift = -((effective_temp - 3.0) * 120.0) / 37.0;
@@ -335,37 +345,35 @@ impl SimulationParams {
 
     // Set pressure and update all pressure-related simulation parameters
     pub fn apply_pressure(&mut self, pressure: f32) {
-        // Clamp pressure to valid range (0 to 350)
-        let clamped_pressure = pressure.max(0.0).min(350.0);
+        // Clamp pressure to valid range (0 to 1000 bar = ~10,000m depth)
+        let clamped_pressure = pressure.max(0.0).min(1000.0);
+        self.pressure_level = clamped_pressure;
 
-        // 1. Update force scale: pressure [0, 350] → force_scale [100, 500]
-        let force_scale = 100.0 + (clamped_pressure * 400.0) / 350.0;
+        // 1. Update force scale: pressure [0, 1000] → force_scale [100, 500]
+        let force_scale = 100.0 + (clamped_pressure * 400.0) / 1000.0;
         self.force_scale = force_scale;
 
-        // 2. Update rSmooth: exponential mapping pressure [0, 350] → rSmooth [20, 0.1]
-        let normalized_pressure = clamped_pressure / 350.0;
+        // 2. Update rSmooth: exponential mapping pressure [0, 1000] → rSmooth [20, 0.1]
+        let normalized_pressure = clamped_pressure / 1000.0;
         let r_smooth = 20.0 * (-5.3 * normalized_pressure).exp();
         self.r_smooth = r_smooth;
+
+        self.recompute_cross_dependencies();
     }
 
-    // Set UV light and update all UV-related simulation parameters
-    pub fn apply_uv_light(&mut self, uv: f32) {
-        // Clamp UV to valid range (0 to 50)
-        let clamped_uv = uv.max(0.0).min(50.0);
-
-        // Update inter-type radius scale: UV [0, 50] → interTypeRadiusScale [0.1, 2.0]
-        let inter_type_radius_scale = 0.1 + (clamped_uv / 50.0) * (2.0 - 0.1);
-        self.inter_type_radius_scale = inter_type_radius_scale;
-
-        // Update Lenia kernel radius: UV [0, 50] → LeniaKernelRadius [30.0, 100.0]
-        let lenia_kernel_radius = 30.0 + (clamped_uv / 50.0) * (100.0 - 30.0);
-        self.lenia_kernel_radius = lenia_kernel_radius;
+    // Set pH and update all pH-related simulation parameters
+    // pH optimum for life (hydrothermal vent theory): ~10 (basic)
+    // Response curve: asymmetric Gaussian centred on 10, σ=3
+    pub fn apply_ph(&mut self, ph: f32) {
+        self.ph = ph.max(0.0).min(14.0);
+        self.recompute_cross_dependencies();
     }
 
     // Set electrical activity and update all electrical-related simulation parameters
     pub fn apply_electrical_activity(&mut self, electrical_activity: f32) {
         // Clamp electrical activity to valid range (0 to 3)
         let clamped_electrical = electrical_activity.max(0.0).min(3.0);
+        self.electrical_activity_level = clamped_electrical;
 
         // Update inter-type attraction scale: cubic mapping [0, 3] → interTypeAttractionScale [0, 1.5]
         let normalized_electrical = clamped_electrical / 3.0;
@@ -382,6 +390,47 @@ impl SimulationParams {
 
         // Lightning duration: 0.3 at min activity, 0.8 at max activity
         self.lightning_duration = 0.3 + (normalized_electrical * 0.5);
+
+        // Cross-dependency: electrical noise reduces interaction radius
+        self.recompute_cross_dependencies();
+    }
+
+    // Recompute parameters that depend on multiple sliders simultaneously.
+    // Called by apply_ph, apply_pressure, and apply_electrical_activity.
+    //
+    // Cross-dependencies (what makes finding the optimum hard):
+    //   inter_type_radius_scale  ← pH (positive) × electrical penalty (negative)
+    //   lenia_growth_mu          ← pressure (Gaussian peak ~350 bar) × pH quality
+    //   lenia_kernel_radius      ← pH quality only
+    //   lenia_growth_sigma       ← inverse pH quality (tight at pH 10, loose at extremes)
+    fn recompute_cross_dependencies(&mut self) {
+        // pH quality: Gaussian centred on pH 10, σ=3  →  q ∈ [0, 1]
+        // pH  0 → q ≈ 0.004  |  pH  7 → q ≈ 0.61  |  pH 10 → q = 1.0  |  pH 14 → q ≈ 0.41
+        let ph_quality = (-(self.ph - 10.0).powi(2) / 18.0).exp();
+
+        // Electrical noise penalty on long-range interaction radius
+        // Max penalty at electrical=3: radius is reduced by 40 %
+        let elec_normalized = self.electrical_activity_level / 3.0;
+        let elec_radius_penalty = 1.0 - 0.4 * elec_normalized;
+
+        // inter_type_radius_scale: pH drives it up, electrical noise drives it down
+        // Range: [0.1 * 0.6, 2.0 * 1.0]  →  roughly [0.06, 2.0]
+        self.inter_type_radius_scale = (0.1 + ph_quality * 1.9) * elec_radius_penalty;
+
+        // Pressure quality: Gaussian centred on 350 bar (~3500 m depth), σ=200 bar
+        // 0 bar → q ≈ 0.21  |  350 bar → q = 1.0  |  1000 bar → q ≈ 0.14
+        let pressure_quality =
+            (-(self.pressure_level - 350.0).powi(2) / (2.0 * 200.0_f32.powi(2))).exp();
+
+        // lenia_growth_mu: pressure sets the base rate, pH modulates it
+        // Requires BOTH right pressure (~350 bar) AND right pH (~10) for maximum
+        self.lenia_growth_mu = (0.05 + pressure_quality * 0.10) * (0.5 + 0.5 * ph_quality);
+
+        // lenia_kernel_radius: purely from pH — at optimal pH, Lenia interactions reach far
+        self.lenia_kernel_radius = 30.0 + ph_quality * 70.0;
+
+        // lenia_growth_sigma: tight (precise growth) at optimal pH, diffuse at extremes
+        self.lenia_growth_sigma = 0.02 + (1.0 - ph_quality) * 0.06;
     }
 
     // Set zoom level and update viewport parameters
@@ -480,8 +529,8 @@ impl SimulationParams {
         max_particles: u32,
         min_particles: u32,
     ) -> u32 {
-        let clamped_pressure = pressure.max(0.0).min(350.0);
-        let normalized = clamped_pressure / 350.0;
+        let clamped_pressure = pressure.max(0.0).min(1000.0);
+        let normalized = clamped_pressure / 1000.0;
         let range = (max_particles - min_particles) as f32;
         let target = min_particles as f32 + normalized * range;
 
@@ -513,9 +562,9 @@ impl SimulationParams {
         let pressure = sensor_data.to_pressure();
         self.apply_pressure(pressure);
 
-        // Apply UV light
-        let uv = sensor_data.to_uv();
-        self.apply_uv_light(uv);
+        // Apply pH
+        let ph = sensor_data.to_ph();
+        self.apply_ph(ph);
 
         // Apply electrical activity
         let electrical = sensor_data.to_electrical_activity();

@@ -16,7 +16,8 @@ import {
 // Environmental parameters for the UI controls
 let temperature = 20; // Default temperature
 let electricalActivity = 1.02; // Default electrical activity
-let uvLight = 25; // Default UV light
+let uvLight = 25; // Default UV light (kept for backward compat, unused)
+let ph = 7.0; // Default pH (optimum for life is ~10)
 let pressure = 1; // Default pressure
 
 // Zoom center variables for joystick navigation
@@ -38,7 +39,7 @@ let fpsDisplayElement: HTMLElement | null;
 const STORAGE_KEYS = {
     temperature: "particleLife_temperature",
     electricalActivity: "particleLife_electricalActivity",
-    uvLight: "particleLife_uvLight",
+    ph: "particleLife_ph",
     pressure: "particleLife_pressure",
     zoom: "particleLife_zoom",
     drift: "particleLife_drift",
@@ -65,7 +66,7 @@ export function saveToLocalStorage(key: string, value: number): void {
 
 export function loadFromLocalStorage(
     key: string,
-    defaultValue: number
+    defaultValue: number,
 ): number {
     try {
         const stored = localStorage.getItem(key);
@@ -74,7 +75,7 @@ export function loadFromLocalStorage(
             if (!isNaN(parsed)) {
                 if (key === STORAGE_KEYS.zoom) {
                     console.log(
-                        `📖 Loading zoom from localStorage: ${parsed} (default: ${defaultValue})`
+                        `📖 Loading zoom from localStorage: ${parsed} (default: ${defaultValue})`,
                     );
                 }
                 return parsed;
@@ -85,7 +86,7 @@ export function loadFromLocalStorage(
     }
     if (key === STORAGE_KEYS.zoom) {
         console.log(
-            `📖 No zoom in localStorage, using default: ${defaultValue}`
+            `📖 No zoom in localStorage, using default: ${defaultValue}`,
         );
     }
     return defaultValue;
@@ -98,32 +99,32 @@ const MIN_PARTICLES = 1600;
 
 /**
  * Convert pressure value to particle count
- * Pressure range: 1-10 bars -> Particle count: 1600-6400
+ * Pressure range: 0-1000 bar -> Particle count: 1600-6400
  */
 function pressureToParticleCount(pressure: number): number {
-    // Linear mapping from pressure (1-10) to particle count (1600-6400)
-    const normalized = (pressure - 1) / 9; // Normalize to 0-1
+    // Linear mapping from pressure (0-1000 bar) to particle count (1600-6400)
+    const normalized = pressure / 1000; // Normalize to 0-1
     return Math.round(
-        MIN_PARTICLES + normalized * (MAX_PARTICLES - MIN_PARTICLES)
+        MIN_PARTICLES + normalized * (MAX_PARTICLES - MIN_PARTICLES),
     );
 }
 
 // Temperature mapping functions
 function temperatureToDrift(temp: number): number {
-    // Linear mapping: temp [3, 130] → drift [0, -120]
+    // Linear mapping: temp [3, 160] → drift [0, -120]
     // At temp = 3°C: drift = 0 px/s
-    // At temp = 130°C: drift = -120 px/s
-    // Scale factor applied to maintain same effect: (40-3)/(130-3) = 37/127 ≈ 0.2913
-    const effectiveTemp = 3 + (temp - 3) * (37 / 127); // Map [3,130] to [3,40] equivalent
+    // At temp = 160°C: drift = -120 px/s
+    // Scale factor applied to maintain same effect: (40-3)/(160-3) = 37/157 ≈ 0.2357
+    const effectiveTemp = 3 + (temp - 3) * (37 / 157); // Map [3,160] to [3,40] equivalent
     return -((effectiveTemp - 3) * 120) / 37;
 }
 
 function temperatureToFriction(temp: number): number {
-    // Exponential mapping: temp [3, 130] → friction [0.98, 0.05]
+    // Exponential mapping: temp [3, 160] → friction [0.98, 0.05]
     // At temp = 3°C: friction = 0.98 (highest resistance, near total fixation)
-    // At temp = 130°C: friction = 0.05 (lowest resistance)
-    // Scale factor applied to maintain same effect: (40-3)/(130-3) = 37/127 ≈ 0.2913
-    const effectiveTemp = 3 + (temp - 3) * (37 / 127); // Map [3,130] to [3,40] equivalent
+    // At temp = 160°C: friction = 0.05 (lowest resistance)
+    // Scale factor applied to maintain same effect: (40-3)/(160-3) = 37/157 ≈ 0.2357
+    const effectiveTemp = 3 + (temp - 3) * (37 / 157); // Map [3,160] to [3,40] equivalent
     const normalizedTemp = (effectiveTemp - 3) / 37; // Normalize to [0, 1]
     return 0.98 * Math.exp(-3.0 * normalizedTemp); // Exponential decay from 0.98 to 0.05
 }
@@ -136,9 +137,9 @@ function temperatureToBackgroundColor(temp: number): {
     // Temperature mapping to background color
     // Cold (3°C): Deep blue/purple
     // Room temp (20°C): Dark gray/black
-    // Hot (130°C): Red/orange
-    // Scale factor applied to maintain same effect: (40-3)/(130-3) = 37/127 ≈ 0.2913
-    const effectiveTemp = 3 + (temp - 3) * (37 / 127); // Map [3,130] to [3,40] equivalent
+    // Hot (160°C): Red/orange
+    // Scale factor applied to maintain same effect: (40-3)/(160-3) = 37/157 ≈ 0.2357
+    const effectiveTemp = 3 + (temp - 3) * (37 / 157); // Map [3,160] to [3,40] equivalent
     const normalizedTemp = Math.max(0, Math.min(1, (effectiveTemp - 3) / 37)); // Clamp to [0, 1]
 
     if (normalizedTemp < 0.5) {
@@ -162,29 +163,21 @@ function temperatureToBackgroundColor(temp: number): {
 
 // Pressure mapping functions - NOW ONLY CONTROLS rSmooth, forceScale, and particle count
 function pressureToRSmooth(pressure: number): number {
-    // Non-linear exponential mapping: pressure [0, 350] → rSmooth [20, 0.1]
+    // Non-linear exponential mapping: pressure [0, 1000] → rSmooth [20, 0.1]
     // At pressure = 0: rSmooth = 20 (highest resistance)
-    // At pressure = 350: rSmooth = 0.1 (lowest resistance)
-    const normalizedPressure = pressure / 350;
+    // At pressure = 1000 bar: rSmooth = 0.1 (lowest resistance)
+    const normalizedPressure = pressure / 1000;
     return 20 * Math.exp(-5.3 * normalizedPressure);
 }
 
 function pressureToForceScale(pressure: number): number {
-    // Linear mapping: pressure [0, 350] → forceScale [100, 500]
-    return 100 + (pressure * 400) / 350;
-}
-
-// UV Light mapping functions - NOW CONTROLS ONLY RADIUS SCALE
-function uvToInterTypeRadiusScale(uv: number): number {
-    // Linear mapping: UV [0, 50] → interTypeRadiusScale [0.1, 2.0]
-    // At UV = 0: interTypeRadiusScale = 0.1 (minimum radius)
-    // At UV = 50: interTypeRadiusScale = 2.0 (maximum radius)
-    return 0.1 + (uv / 50.0) * (2.0 - 0.1);
+    // Linear mapping: pressure [0, 1000] → forceScale [100, 500]
+    return 100 + (pressure * 400) / 1000;
 }
 
 // Electrical Activity mapping functions - NOW CONTROLS ATTRACTION SCALE
 function electricalActivityToInterTypeAttractionScale(
-    electricalActivity: number
+    electricalActivity: number,
 ): number {
     // Non-linear cubic mapping: Electrical Activity [0, 3] → interTypeAttractionScale [0, 1.5]
     // This creates a very pronounced acceleration curve where:
@@ -213,7 +206,7 @@ let parameterUpdateCallbacks = {
     // New comprehensive parameter methods
     setTemperature: (temp: number) => {},
     setPressure: (pressure: number) => {},
-    setUVLight: (uv: number) => {},
+    setPH: (ph: number) => {},
     setElectricalActivity: (electrical: number) => {},
     setZoom: (level: number, centerX?: number, centerY?: number) => {},
     // Rule regeneration
@@ -233,7 +226,7 @@ export function setParameterUpdateCallbacks(callbacks: {
     // New comprehensive parameter methods
     setTemperature?: (temp: number) => void;
     setPressure?: (pressure: number) => void;
-    setUVLight?: (uv: number) => void;
+    setPH?: (ph: number) => void;
     setElectricalActivity?: (electrical: number) => void;
     setZoom?: (level: number, centerX?: number, centerY?: number) => void;
     // Rule regeneration
@@ -255,7 +248,7 @@ export function setParameterUpdateCallbacks(callbacks: {
             callbacks.setTemperature || parameterUpdateCallbacks.setTemperature,
         setPressure:
             callbacks.setPressure || parameterUpdateCallbacks.setPressure,
-        setUVLight: callbacks.setUVLight || parameterUpdateCallbacks.setUVLight,
+        setPH: callbacks.setPH || parameterUpdateCallbacks.setPH,
         setElectricalActivity:
             callbacks.setElectricalActivity ||
             parameterUpdateCallbacks.setElectricalActivity,
@@ -293,7 +286,7 @@ function updateDriftAndFrictionFromTemperature(temp: number): void {
 
     // Update drift slider and display
     const driftSlider = document.getElementById(
-        "driftSlider"
+        "driftSlider",
     ) as HTMLInputElement;
     const driftValueDisplay = document.getElementById("driftValue");
     if (driftSlider && driftValueDisplay) {
@@ -303,7 +296,7 @@ function updateDriftAndFrictionFromTemperature(temp: number): void {
 
     // Update friction slider and display
     const frictionSlider = document.getElementById(
-        "frictionSlider"
+        "frictionSlider",
     ) as HTMLInputElement;
     const frictionValueDisplay = document.getElementById("frictionValue");
     if (frictionSlider && frictionValueDisplay) {
@@ -331,8 +324,8 @@ function updateParametersFromPressure(pressure: number): void {
     // Add debug logging to track pressure changes
     console.log(
         `🎚️ Pressure slider changed: ${pressure} → particle count will be: ${pressureToParticleCount(
-            pressure
-        )}`
+            pressure,
+        )}`,
     );
 
     // Update particle density based on pressure (new feature!)
@@ -345,7 +338,7 @@ function updateParametersFromPressure(pressure: number): void {
     parameterUpdateCallbacks.updateSimulationParameter("rSmooth", newRSmooth);
     parameterUpdateCallbacks.updateSimulationParameter(
         "forceScale",
-        newForceScale
+        newForceScale,
     );
 
     // Update UI displays (REMOVED inter-type parameter displays)
@@ -354,39 +347,25 @@ function updateParametersFromPressure(pressure: number): void {
         "forceScaleSlider",
         "forceScaleValue",
         newForceScale,
-        2
+        2,
     );
 }
 
-function updateParametersFromUV(uv: number): void {
-    // Use comprehensive UV method if available (Rust engine)
-    if (parameterUpdateCallbacks.setUVLight) {
-        parameterUpdateCallbacks.setUVLight(uv);
+function updateParametersFromPH(phValue: number): void {
+    // Use comprehensive pH method if available (Rust engine)
+    if (parameterUpdateCallbacks.setPH) {
+        parameterUpdateCallbacks.setPH(phValue);
         // Synchronize all parameter displays to reflect changes
         synchronizeAllParameterDisplays();
         return;
     }
 
-    // Fallback to individual parameter updates (TypeScript engine)
-    const newInterTypeRadiusScale = uvToInterTypeRadiusScale(uv);
-
-    // Update inter-type radius scale using callback (UV now only controls radius scale)
-    parameterUpdateCallbacks.updateSimulationParameter(
-        "interTypeRadiusScale",
-        newInterTypeRadiusScale
-    );
-
-    // Update UI display for radius scale
-    updateSliderDisplay(
-        "interTypeRadiusScaleSlider",
-        "interTypeRadiusScaleValue",
-        newInterTypeRadiusScale,
-        2
-    );
+    // Fallback (TypeScript engine): pH effects handled by recompute_cross_dependencies in Rust
+    // No direct TypeScript mapping needed — all pH effects go through Rust
 }
 
 function updateParametersFromElectricalActivity(
-    electricalActivity: number
+    electricalActivity: number,
 ): void {
     // Use comprehensive electrical activity method if available (Rust engine)
     if (parameterUpdateCallbacks.setElectricalActivity) {
@@ -403,7 +382,7 @@ function updateParametersFromElectricalActivity(
     // Update inter-type attraction scale using callback (Electrical Activity now controls attraction scale)
     parameterUpdateCallbacks.updateSimulationParameter(
         "interTypeAttractionScale",
-        newInterTypeAttractionScale
+        newInterTypeAttractionScale,
     );
 
     // Update UI display for attraction scale
@@ -411,7 +390,7 @@ function updateParametersFromElectricalActivity(
         "interTypeAttractionScaleSlider",
         "interTypeAttractionScaleValue",
         newInterTypeAttractionScale,
-        2
+        2,
     );
 }
 
@@ -426,10 +405,10 @@ function synchronizeAllParameterDisplays(): void {
         forceScale: parameterUpdateCallbacks.getParameter("forceScale"),
         rSmooth: parameterUpdateCallbacks.getParameter("rSmooth"),
         interTypeAttractionScale: parameterUpdateCallbacks.getParameter(
-            "interTypeAttractionScale"
+            "interTypeAttractionScale",
         ),
         interTypeRadiusScale: parameterUpdateCallbacks.getParameter(
-            "interTypeRadiusScale"
+            "interTypeRadiusScale",
         ),
         fisheyeStrength:
             parameterUpdateCallbacks.getParameter("fisheyeStrength"),
@@ -459,80 +438,80 @@ function synchronizeAllParameterDisplays(): void {
         "forceScaleSlider",
         "forceScaleValue",
         params.forceScale,
-        2
+        2,
     );
     updateSliderDisplay("rSmoothSlider", "rSmoothValue", params.rSmooth, 2);
     updateSliderDisplay(
         "interTypeAttractionScaleSlider",
         "interTypeAttractionScaleValue",
         params.interTypeAttractionScale,
-        3
+        3,
     );
     updateSliderDisplay(
         "interTypeRadiusScaleSlider",
         "interTypeRadiusScaleValue",
         params.interTypeRadiusScale,
-        3
+        3,
     );
     updateSliderDisplay(
         "fisheyeStrengthSlider",
         "fisheyeStrengthValue",
         params.fisheyeStrength,
-        2
+        2,
     );
     updateSliderDisplay(
         "particleRenderSizeSlider",
         "particleRenderSizeValue",
         params.particleRenderSize,
-        1
+        1,
     );
     updateSliderDisplay(
         "leniaGrowthMuSlider",
         "leniaGrowthMuValue",
         params.leniaGrowthMu,
-        3
+        3,
     );
     updateSliderDisplay(
         "leniaGrowthSigmaSlider",
         "leniaGrowthSigmaValue",
         params.leniaGrowthSigma,
-        3
+        3,
     );
     updateSliderDisplay(
         "leniaKernelRadiusSlider",
         "leniaKernelRadiusValue",
         params.leniaKernelRadius,
-        1
+        1,
     );
     updateSliderDisplay(
         "lightningFrequencySlider",
         "lightningFrequencyValue",
         params.lightningFrequency,
-        2
+        2,
     );
     updateSliderDisplay(
         "lightningIntensitySlider",
         "lightningIntensityValue",
         params.lightningIntensity,
-        2
+        2,
     );
     updateSliderDisplay(
         "lightningDurationSlider",
         "lightningDurationValue",
         params.lightningDuration,
-        2
+        2,
     );
 
     // Update boolean parameter displays
     updateBooleanDisplay(
         "flatForceCheckbox",
         "flatForceStatus",
-        params.flatForce
+        params.flatForce,
     );
     updateBooleanDisplay(
         "leniaEnabledCheckbox",
         "leniaEnabledStatus",
-        params.leniaEnabled
+        params.leniaEnabled,
     );
 }
 
@@ -540,7 +519,7 @@ function synchronizeAllParameterDisplays(): void {
 function updateBooleanDisplay(
     checkboxId: string,
     statusId: string,
-    value: boolean
+    value: boolean,
 ): void {
     const checkbox = document.getElementById(checkboxId) as HTMLInputElement;
     const status = document.getElementById(statusId);
@@ -562,7 +541,7 @@ function updateSliderDisplay(
     sliderId: string,
     displayId: string,
     value: number,
-    precision: number
+    precision: number,
 ): void {
     const slider = document.getElementById(sliderId) as HTMLInputElement;
     const display = document.getElementById(displayId);
@@ -674,14 +653,14 @@ async function initJoyStick(currentZoomLevel: number) {
             function (stickData: JoyStickData) {
                 // Get the current zoom level from the zoom slider to avoid stale captured value
                 const zoomSlider = document.getElementById(
-                    "zoomSlider"
+                    "zoomSlider",
                 ) as HTMLInputElement;
                 const actualCurrentZoomLevel = zoomSlider
                     ? parseFloat(zoomSlider.value)
                     : currentZoomLevel;
 
                 console.log(
-                    `🕹️ Joystick event: captured=${currentZoomLevel}, actual=${actualCurrentZoomLevel}, stick=(${stickData.x}, ${stickData.y})`
+                    `🕹️ Joystick event: captured=${currentZoomLevel}, actual=${actualCurrentZoomLevel}, stick=(${stickData.x}, ${stickData.y})`,
                 );
 
                 // Calculate the size of the viewport (visible area) in virtual world units
@@ -711,7 +690,7 @@ async function initJoyStick(currentZoomLevel: number) {
                 parameterUpdateCallbacks.updateZoom(
                     actualCurrentZoomLevel,
                     zoomCenterX,
-                    zoomCenterY
+                    zoomCenterY,
                 );
 
                 // Update zoom center info display
@@ -719,14 +698,14 @@ async function initJoyStick(currentZoomLevel: number) {
                     document.getElementById("zoomCenterInfo");
                 if (zoomCenterInfo) {
                     zoomCenterInfo.innerHTML = `Center: (${zoomCenterX.toFixed(
-                        0
+                        0,
                     )}, ${zoomCenterY.toFixed(
-                        0
+                        0,
                     )})<br>Viewport: ${viewportWidth.toFixed(
-                        0
+                        0,
                     )}×${viewportHeight.toFixed(0)}`;
                 }
-            }
+            },
         );
 
         console.log("JoyStick initialized successfully");
@@ -751,7 +730,7 @@ export function updateFPS(deltaTime: number): void {
     if (currentTime - lastFPSTime >= 1000) {
         // Update every second
         const fps = Math.round(
-            (frameCount * 1000) / (currentTime - lastFPSTime)
+            (frameCount * 1000) / (currentTime - lastFPSTime),
         );
 
         if (!fpsDisplayElement) {
@@ -771,7 +750,7 @@ export function updateFPS(deltaTime: number): void {
 
 export function initializeUI(
     simParams: SimulationParams,
-    currentZoomLevel: number
+    currentZoomLevel: number,
 ): void {
     console.log("Initializing UI controls...");
 
@@ -803,7 +782,7 @@ export function initializeUI(
 
 function initializeDriftSlider(simParams: SimulationParams): void {
     const driftSlider = document.getElementById(
-        "driftSlider"
+        "driftSlider",
     ) as HTMLInputElement;
     const driftValueDisplay = document.getElementById("driftValue");
 
@@ -814,7 +793,7 @@ function initializeDriftSlider(simParams: SimulationParams): void {
         if (currentValue === 0) {
             currentValue = loadFromLocalStorage(
                 STORAGE_KEYS.drift,
-                simParams.driftXPerSecond
+                simParams.driftXPerSecond,
             );
             parameterUpdateCallbacks.updateDriftAndBackground(currentValue);
         }
@@ -824,7 +803,7 @@ function initializeDriftSlider(simParams: SimulationParams): void {
 
         driftSlider.addEventListener("input", (event) => {
             const newDrift = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             parameterUpdateCallbacks.updateDriftAndBackground(newDrift);
             driftValueDisplay.textContent = newDrift.toFixed(2);
@@ -835,7 +814,7 @@ function initializeDriftSlider(simParams: SimulationParams): void {
 
 function initializeForceScaleSlider(simParams: SimulationParams): void {
     const forceScaleSlider = document.getElementById(
-        "forceScaleSlider"
+        "forceScaleSlider",
     ) as HTMLInputElement;
     const forceScaleValueDisplay = document.getElementById("forceScaleValue");
 
@@ -845,7 +824,7 @@ function initializeForceScaleSlider(simParams: SimulationParams): void {
         if (currentValue === 0) {
             currentValue = loadFromLocalStorage(
                 STORAGE_KEYS.forceScale,
-                simParams.forceScale
+                simParams.forceScale,
             );
         }
 
@@ -854,11 +833,11 @@ function initializeForceScaleSlider(simParams: SimulationParams): void {
 
         forceScaleSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             parameterUpdateCallbacks.updateSimulationParameter(
                 "forceScale",
-                newValue
+                newValue,
             );
             forceScaleValueDisplay.textContent = newValue.toFixed(2);
             saveToLocalStorage(STORAGE_KEYS.forceScale, newValue);
@@ -868,7 +847,7 @@ function initializeForceScaleSlider(simParams: SimulationParams): void {
 
 function initializeFrictionSlider(simParams: SimulationParams): void {
     const frictionSlider = document.getElementById(
-        "frictionSlider"
+        "frictionSlider",
     ) as HTMLInputElement;
     const frictionValueDisplay = document.getElementById("frictionValue");
 
@@ -878,7 +857,7 @@ function initializeFrictionSlider(simParams: SimulationParams): void {
         if (currentValue === 0) {
             currentValue = loadFromLocalStorage(
                 STORAGE_KEYS.friction,
-                simParams.friction
+                simParams.friction,
             );
         }
 
@@ -887,11 +866,11 @@ function initializeFrictionSlider(simParams: SimulationParams): void {
 
         frictionSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             parameterUpdateCallbacks.updateSimulationParameter(
                 "friction",
-                newValue
+                newValue,
             );
             frictionValueDisplay.textContent = newValue.toFixed(3);
             saveToLocalStorage(STORAGE_KEYS.friction, newValue);
@@ -901,7 +880,7 @@ function initializeFrictionSlider(simParams: SimulationParams): void {
 
 function initializeRSmoothSlider(simParams: SimulationParams): void {
     const rSmoothSlider = document.getElementById(
-        "rSmoothSlider"
+        "rSmoothSlider",
     ) as HTMLInputElement;
     const rSmoothValueDisplay = document.getElementById("rSmoothValue");
 
@@ -911,7 +890,7 @@ function initializeRSmoothSlider(simParams: SimulationParams): void {
         if (currentValue === 0) {
             currentValue = loadFromLocalStorage(
                 STORAGE_KEYS.rSmooth,
-                simParams.rSmooth
+                simParams.rSmooth,
             );
         }
 
@@ -920,11 +899,11 @@ function initializeRSmoothSlider(simParams: SimulationParams): void {
 
         rSmoothSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             parameterUpdateCallbacks.updateSimulationParameter(
                 "rSmooth",
-                newValue
+                newValue,
             );
             rSmoothValueDisplay.textContent = newValue.toFixed(2);
             saveToLocalStorage(STORAGE_KEYS.rSmooth, newValue);
@@ -935,10 +914,10 @@ function initializeRSmoothSlider(simParams: SimulationParams): void {
 function initializeInterTypeScaleSliders(simParams: SimulationParams): void {
     // Inter-Type Attraction Scale Slider
     const interTypeAttractionScaleSlider = document.getElementById(
-        "interTypeAttractionScaleSlider"
+        "interTypeAttractionScaleSlider",
     ) as HTMLInputElement;
     const interTypeAttractionScaleValueDisplay = document.getElementById(
-        "interTypeAttractionScaleValue"
+        "interTypeAttractionScaleValue",
     );
 
     if (
@@ -947,12 +926,12 @@ function initializeInterTypeScaleSliders(simParams: SimulationParams): void {
     ) {
         // Get current value from engine, fall back to localStorage or default
         let currentValue = parameterUpdateCallbacks.getParameter(
-            "interTypeAttractionScale"
+            "interTypeAttractionScale",
         );
         if (currentValue === 0) {
             currentValue = loadFromLocalStorage(
                 STORAGE_KEYS.interTypeAttractionScale,
-                simParams.interTypeAttractionScale
+                simParams.interTypeAttractionScale,
             );
         }
 
@@ -962,11 +941,11 @@ function initializeInterTypeScaleSliders(simParams: SimulationParams): void {
 
         interTypeAttractionScaleSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             parameterUpdateCallbacks.updateSimulationParameter(
                 "interTypeAttractionScale",
-                newValue
+                newValue,
             );
             interTypeAttractionScaleValueDisplay.textContent =
                 newValue.toFixed(2);
@@ -976,21 +955,21 @@ function initializeInterTypeScaleSliders(simParams: SimulationParams): void {
 
     // Inter-Type Radius Scale Slider
     const interTypeRadiusScaleSlider = document.getElementById(
-        "interTypeRadiusScaleSlider"
+        "interTypeRadiusScaleSlider",
     ) as HTMLInputElement;
     const interTypeRadiusScaleValueDisplay = document.getElementById(
-        "interTypeRadiusScaleValue"
+        "interTypeRadiusScaleValue",
     );
 
     if (interTypeRadiusScaleSlider && interTypeRadiusScaleValueDisplay) {
         // Get current value from engine, fall back to localStorage or default
         let currentValue = parameterUpdateCallbacks.getParameter(
-            "interTypeRadiusScale"
+            "interTypeRadiusScale",
         );
         if (currentValue === 0) {
             currentValue = loadFromLocalStorage(
                 STORAGE_KEYS.interTypeRadiusScale,
-                simParams.interTypeRadiusScale
+                simParams.interTypeRadiusScale,
             );
         }
 
@@ -999,11 +978,11 @@ function initializeInterTypeScaleSliders(simParams: SimulationParams): void {
 
         interTypeRadiusScaleSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             parameterUpdateCallbacks.updateSimulationParameter(
                 "interTypeRadiusScale",
-                newValue
+                newValue,
             );
             interTypeRadiusScaleValueDisplay.textContent = newValue.toFixed(2);
             saveToLocalStorage(STORAGE_KEYS.interTypeRadiusScale, newValue);
@@ -1013,10 +992,10 @@ function initializeInterTypeScaleSliders(simParams: SimulationParams): void {
 
 function initializeFisheyeSlider(simParams: SimulationParams): void {
     const fisheyeStrengthSlider = document.getElementById(
-        "fisheyeStrengthSlider"
+        "fisheyeStrengthSlider",
     ) as HTMLInputElement;
     const fisheyeStrengthValueDisplay = document.getElementById(
-        "fisheyeStrengthValue"
+        "fisheyeStrengthValue",
     );
 
     if (fisheyeStrengthSlider && fisheyeStrengthValueDisplay) {
@@ -1026,7 +1005,7 @@ function initializeFisheyeSlider(simParams: SimulationParams): void {
         if (currentValue === 0) {
             currentValue = loadFromLocalStorage(
                 STORAGE_KEYS.fisheyeStrength,
-                simParams.fisheyeStrength
+                simParams.fisheyeStrength,
             );
         }
 
@@ -1035,11 +1014,11 @@ function initializeFisheyeSlider(simParams: SimulationParams): void {
 
         fisheyeStrengthSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             parameterUpdateCallbacks.updateSimulationParameter(
                 "fisheyeStrength",
-                newValue
+                newValue,
             );
             fisheyeStrengthValueDisplay.textContent = newValue.toFixed(2);
             saveToLocalStorage(STORAGE_KEYS.fisheyeStrength, newValue);
@@ -1049,10 +1028,10 @@ function initializeFisheyeSlider(simParams: SimulationParams): void {
 
 function initializeParticleRenderSizeSlider(): void {
     const particleRenderSizeSlider = document.getElementById(
-        "particleRenderSizeSlider"
+        "particleRenderSizeSlider",
     ) as HTMLInputElement;
     const particleRenderSizeValueDisplay = document.getElementById(
-        "particleRenderSizeValue"
+        "particleRenderSizeValue",
     );
 
     if (particleRenderSizeSlider && particleRenderSizeValueDisplay) {
@@ -1062,7 +1041,7 @@ function initializeParticleRenderSizeSlider(): void {
         if (currentValue === 0) {
             currentValue = loadFromLocalStorage(
                 STORAGE_KEYS.particleRenderSize,
-                16.0 // Default value matching the HTML and PARTICLE_SIZE config
+                16.0, // Default value matching the HTML and PARTICLE_SIZE config
             );
         }
 
@@ -1071,11 +1050,11 @@ function initializeParticleRenderSizeSlider(): void {
 
         particleRenderSizeSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             parameterUpdateCallbacks.updateSimulationParameter(
                 "particleRenderSize",
-                newValue
+                newValue,
             );
             particleRenderSizeValueDisplay.textContent = newValue.toFixed(1);
             saveToLocalStorage(STORAGE_KEYS.particleRenderSize, newValue);
@@ -1085,7 +1064,7 @@ function initializeParticleRenderSizeSlider(): void {
 
 function initializeZoomSlider(currentZoomLevel: number): void {
     const zoomSlider = document.getElementById(
-        "zoomSlider"
+        "zoomSlider",
     ) as HTMLInputElement;
     const zoomValueDisplay = document.getElementById("zoomValue");
 
@@ -1093,7 +1072,7 @@ function initializeZoomSlider(currentZoomLevel: number): void {
         // Always start at the minimum zoom level (1.0), ignore localStorage
         const initialZoom = Math.max(1.0, currentZoomLevel);
         console.log(
-            `Initializing zoom slider: engine=${currentZoomLevel}, initial=${initialZoom}, HTML default=${zoomSlider.value}`
+            `Initializing zoom slider: engine=${currentZoomLevel}, initial=${initialZoom}, HTML default=${zoomSlider.value}`,
         );
 
         zoomSlider.value = initialZoom.toString();
@@ -1104,13 +1083,13 @@ function initializeZoomSlider(currentZoomLevel: number): void {
             parameterUpdateCallbacks.updateZoom(
                 initialZoom,
                 zoomCenterX,
-                zoomCenterY
+                zoomCenterY,
             );
         }
 
         zoomSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             console.log(`🎚️ Zoom slider input event: ${newValue}`);
             zoomValueDisplay.textContent = newValue.toFixed(1); // Show 1 decimal
@@ -1122,22 +1101,22 @@ function initializeZoomSlider(currentZoomLevel: number): void {
             // Use comprehensive zoom method if available (Rust engine)
             if (parameterUpdateCallbacks.setZoom) {
                 console.log(
-                    `🔍 Calling setZoom(${newValue}, ${zoomCenterX}, ${zoomCenterY})`
+                    `🔍 Calling setZoom(${newValue}, ${zoomCenterX}, ${zoomCenterY})`,
                 );
                 parameterUpdateCallbacks.setZoom(
                     newValue,
                     zoomCenterX,
-                    zoomCenterY
+                    zoomCenterY,
                 );
             } else {
                 console.log(
-                    `🔍 Calling updateZoom fallback(${newValue}, ${zoomCenterX}, ${zoomCenterY})`
+                    `🔍 Calling updateZoom fallback(${newValue}, ${zoomCenterX}, ${zoomCenterY})`,
                 );
                 // Fallback to updateZoom callback (TypeScript engine)
                 parameterUpdateCallbacks.updateZoom(
                     newValue,
                     zoomCenterX,
-                    zoomCenterY
+                    zoomCenterY,
                 );
             }
 
@@ -1147,7 +1126,7 @@ function initializeZoomSlider(currentZoomLevel: number): void {
         // Also add a 'change' event listener to ensure the zoom value persists when dragging ends
         zoomSlider.addEventListener("change", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             console.log(`Zoom slider change event: ${newValue}`);
             zoomValueDisplay.textContent = newValue.toFixed(1); // Show 1 decimal
@@ -1161,14 +1140,14 @@ function initializeZoomSlider(currentZoomLevel: number): void {
                 parameterUpdateCallbacks.setZoom(
                     newValue,
                     zoomCenterX,
-                    zoomCenterY
+                    zoomCenterY,
                 );
             } else {
                 // Fallback to updateZoom callback (TypeScript engine)
                 parameterUpdateCallbacks.updateZoom(
                     newValue,
                     zoomCenterX,
-                    zoomCenterY
+                    zoomCenterY,
                 );
             }
 
@@ -1180,7 +1159,7 @@ function initializeZoomSlider(currentZoomLevel: number): void {
 function initializeLeniaControls(simParams: SimulationParams): void {
     // Lenia Enabled Checkbox
     const leniaEnabledCheckbox = document.getElementById(
-        "leniaEnabledCheckbox"
+        "leniaEnabledCheckbox",
     ) as HTMLInputElement;
     const leniaEnabledStatus = document.getElementById("leniaEnabledStatus");
 
@@ -1200,14 +1179,14 @@ function initializeLeniaControls(simParams: SimulationParams): void {
             leniaEnabledStatus.textContent = newValue ? "On" : "Off";
             parameterUpdateCallbacks.updateBooleanParameter(
                 "leniaEnabled",
-                newValue
+                newValue,
             );
         });
     }
 
     // Lenia Growth Mu Slider
     const leniaGrowthMuSlider = document.getElementById(
-        "leniaGrowthMuSlider"
+        "leniaGrowthMuSlider",
     ) as HTMLInputElement;
     const leniaGrowthMuValue = document.getElementById("leniaGrowthMuValue");
 
@@ -1224,22 +1203,22 @@ function initializeLeniaControls(simParams: SimulationParams): void {
 
         leniaGrowthMuSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             leniaGrowthMuValue.textContent = newValue.toFixed(3);
             parameterUpdateCallbacks.updateSimulationParameter(
                 "leniaGrowthMu",
-                newValue
+                newValue,
             );
         });
     }
 
     // Lenia Growth Sigma Slider
     const leniaGrowthSigmaSlider = document.getElementById(
-        "leniaGrowthSigmaSlider"
+        "leniaGrowthSigmaSlider",
     ) as HTMLInputElement;
     const leniaGrowthSigmaValue = document.getElementById(
-        "leniaGrowthSigmaValue"
+        "leniaGrowthSigmaValue",
     );
 
     if (leniaGrowthSigmaSlider && leniaGrowthSigmaValue) {
@@ -1255,22 +1234,22 @@ function initializeLeniaControls(simParams: SimulationParams): void {
 
         leniaGrowthSigmaSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             leniaGrowthSigmaValue.textContent = newValue.toFixed(3);
             parameterUpdateCallbacks.updateSimulationParameter(
                 "leniaGrowthSigma",
-                newValue
+                newValue,
             );
         });
     }
 
     // Lenia Kernel Radius Slider
     const leniaKernelRadiusSlider = document.getElementById(
-        "leniaKernelRadiusSlider"
+        "leniaKernelRadiusSlider",
     ) as HTMLInputElement;
     const leniaKernelRadiusValue = document.getElementById(
-        "leniaKernelRadiusValue"
+        "leniaKernelRadiusValue",
     );
 
     if (leniaKernelRadiusSlider && leniaKernelRadiusValue) {
@@ -1286,12 +1265,12 @@ function initializeLeniaControls(simParams: SimulationParams): void {
 
         leniaKernelRadiusSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             leniaKernelRadiusValue.textContent = newValue.toFixed(1);
             parameterUpdateCallbacks.updateSimulationParameter(
                 "leniaKernelRadius",
-                newValue
+                newValue,
             );
         });
     }
@@ -1300,14 +1279,14 @@ function initializeLeniaControls(simParams: SimulationParams): void {
 function initializeEnvironmentalSliders(): void {
     // Temperature Slider
     const tempSlider = document.getElementById(
-        "tempSlider"
+        "tempSlider",
     ) as HTMLInputElement;
     const tempValueDisplay = document.getElementById("tempValue");
 
     if (tempSlider && tempValueDisplay) {
         temperature = loadFromLocalStorage(
             STORAGE_KEYS.temperature,
-            temperature
+            temperature,
         );
         tempSlider.value = temperature.toString();
         tempValueDisplay.textContent = temperature.toString();
@@ -1317,7 +1296,7 @@ function initializeEnvironmentalSliders(): void {
 
         tempSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             temperature = newValue;
             tempValueDisplay.textContent = newValue.toString();
@@ -1328,14 +1307,14 @@ function initializeEnvironmentalSliders(): void {
 
     // Electrical Activity Slider
     const elecSlider = document.getElementById(
-        "elecSlider"
+        "elecSlider",
     ) as HTMLInputElement;
     const elecValueDisplay = document.getElementById("elecValue");
 
     if (elecSlider && elecValueDisplay) {
         electricalActivity = loadFromLocalStorage(
             STORAGE_KEYS.electricalActivity,
-            electricalActivity
+            electricalActivity,
         );
         elecSlider.value = electricalActivity.toString();
         elecValueDisplay.textContent = electricalActivity.toFixed(2);
@@ -1345,7 +1324,7 @@ function initializeEnvironmentalSliders(): void {
 
         elecSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             electricalActivity = newValue;
             elecValueDisplay.textContent = newValue.toFixed(2);
@@ -1354,49 +1333,49 @@ function initializeEnvironmentalSliders(): void {
         });
     }
 
-    // UV Light Slider
-    const uvSlider = document.getElementById("uvSlider") as HTMLInputElement;
-    const uvValueDisplay = document.getElementById("uvValue");
+    // pH Slider
+    const phSlider = document.getElementById("phSlider") as HTMLInputElement;
+    const phValueDisplay = document.getElementById("phValue");
 
-    if (uvSlider && uvValueDisplay) {
-        uvLight = loadFromLocalStorage(STORAGE_KEYS.uvLight, uvLight);
-        uvSlider.value = uvLight.toString();
-        uvValueDisplay.textContent = uvLight.toString();
+    if (phSlider && phValueDisplay) {
+        ph = loadFromLocalStorage(STORAGE_KEYS.ph, ph);
+        phSlider.value = ph.toString();
+        phValueDisplay.textContent = ph.toFixed(1);
 
-        // Apply initial UV-based parameters on page load
-        updateParametersFromUV(uvLight);
+        // Apply initial pH-based parameters on page load
+        updateParametersFromPH(ph);
 
-        uvSlider.addEventListener("input", (event) => {
+        phSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
-            uvLight = newValue;
-            uvValueDisplay.textContent = newValue.toString();
-            saveToLocalStorage(STORAGE_KEYS.uvLight, newValue);
-            updateParametersFromUV(newValue);
+            ph = newValue;
+            phValueDisplay.textContent = newValue.toFixed(1);
+            saveToLocalStorage(STORAGE_KEYS.ph, newValue);
+            updateParametersFromPH(newValue);
         });
     }
 
     // Pressure Slider
     const presSlider = document.getElementById(
-        "presSlider"
+        "presSlider",
     ) as HTMLInputElement;
     const presValueDisplay = document.getElementById("presValue");
 
     if (presSlider && presValueDisplay) {
         pressure = loadFromLocalStorage(STORAGE_KEYS.pressure, pressure);
         presSlider.value = pressure.toString();
-        presValueDisplay.textContent = pressure.toString();
+        presValueDisplay.textContent = Math.round(pressure * 10) + "m";
 
         // Apply initial pressure-based parameters on page load
         updateParametersFromPressure(pressure);
 
         presSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
-                (event.target as HTMLInputElement).value
+                (event.target as HTMLInputElement).value,
             );
             pressure = newValue;
-            presValueDisplay.textContent = newValue.toString();
+            presValueDisplay.textContent = Math.round(newValue * 10) + "m";
             saveToLocalStorage(STORAGE_KEYS.pressure, newValue);
             updateParametersFromPressure(newValue);
         });
@@ -1415,10 +1394,10 @@ function updateZoomCenterInfo(currentZoomLevel: number): void {
 
         zoomCenterInfo.innerHTML =
             `Center: (${zoomCenterX.toFixed(0)}, ${zoomCenterY.toFixed(
-                0
+                0,
             )})<br>` +
             `Visible: ${visibleWidth.toFixed(0)}×${visibleHeight.toFixed(
-                0
+                0,
             )}<br>` +
             `Range: ${maxMovementRange.toFixed(0)}`;
     }

@@ -285,12 +285,9 @@ pub struct WebGpuRenderer {
     // Zoom uniforms buffer
     zoom_uniforms_buffer: wgpu::Buffer,
 
-    // Text overlay components (native only)
-    #[cfg(not(target_arch = "wasm32"))]
+    // Text overlay components (native: Some(value), wasm: None)
     text_overlay_pipeline: Option<wgpu::RenderPipeline>,
-    #[cfg(not(target_arch = "wasm32"))]
     text_overlay_bind_group: Option<wgpu::BindGroup>,
-    #[cfg(not(target_arch = "wasm32"))]
     fps_data_buffer: Option<wgpu::Buffer>,
 }
 
@@ -1691,6 +1688,22 @@ impl WebGpuRenderer {
                 cache: None,
             });
 
+        // Wrap native-only fields in Option so they can be used uniformly in struct init
+        #[cfg(not(target_arch = "wasm32"))]
+        let fps_data_buffer = Some(fps_data_buffer);
+        #[cfg(target_arch = "wasm32")]
+        let fps_data_buffer: Option<wgpu::Buffer> = None;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let text_overlay_bind_group = Some(text_overlay_bind_group);
+        #[cfg(target_arch = "wasm32")]
+        let text_overlay_bind_group: Option<wgpu::BindGroup> = None;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let text_overlay_pipeline = Some(text_overlay_pipeline);
+        #[cfg(target_arch = "wasm32")]
+        let text_overlay_pipeline: Option<wgpu::RenderPipeline> = None;
+
         Ok(WebGpuRenderer {
             device,
             queue,
@@ -1726,6 +1739,9 @@ impl WebGpuRenderer {
             fisheye_render_bind_group,
             zoom_render_bind_group,
             zoom_uniforms_buffer,
+            fps_data_buffer,
+            text_overlay_bind_group,
+            text_overlay_pipeline,
         })
     }
 
