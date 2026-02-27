@@ -39,12 +39,12 @@ class RustWasmPlugin {
                             console.log("Rust WASM build complete!");
                             this.lastBuildTime = Date.now();
                             callback();
-                        }
+                        },
                     );
                 } else {
                     callback();
                 }
-            }
+            },
         );
     }
 
@@ -55,7 +55,7 @@ class RustWasmPlugin {
             const srcPath = path.resolve(__dirname, "src");
             const wasmPath = path.resolve(
                 __dirname,
-                "src/pkg/particle_life_wasm_bg.wasm"
+                "src/pkg/particle_life_wasm_bg.wasm",
             );
 
             // If WASM file doesn't exist, we need to build
@@ -100,8 +100,8 @@ class RustWasmPlugin {
                 if (stat.isDirectory() && item !== "pkg") {
                     files.push(
                         ...this.getRustFiles(itemPath).map((f) =>
-                            path.join(item, f)
-                        )
+                            path.join(item, f),
+                        ),
                     );
                 } else if (item.endsWith(".rs")) {
                     files.push(path.relative(__dirname, itemPath));
@@ -204,6 +204,10 @@ module.exports = {
         port: 3000,
         hot: false, // Disable HMR to avoid WebGPU device conflicts
         liveReload: true, // Enable simple live reload instead
+        headers: {
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            Pragma: "no-cache",
+        },
         watchFiles: {
             paths: ["src/**/*"],
             options: {

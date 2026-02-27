@@ -3,6 +3,21 @@ use crate::{InteractionRules, ParticleSystem, SimulationParams};
 use rand::Rng;
 use wgpu::util::DeviceExt;
 
+/// Cross-platform current time in milliseconds
+#[cfg(target_arch = "wasm32")]
+fn current_time_ms() -> f64 {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn current_time_ms() -> f64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as f64
+}
+
 // Lightning bolt struct that matches WGSL layout
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -44,7 +59,7 @@ pub struct LightningEvent {
     pub flash_id: u32,
     pub start_time: f32,
     pub is_super: bool,
-    pub detected_at: std::time::Instant,
+    pub detected_at: f64, // milliseconds from current_time_ms()
 }
 
 /// Lightning detector to track lightning events without blocking GPU operations
@@ -53,10 +68,10 @@ pub struct LightningDetector {
     last_flash_id: u32,
     pending_events: Vec<LightningEvent>,
     cached_lightning_bolt: Option<LightningBolt>,
-    last_gpu_read_time: std::time::Instant,
+    last_gpu_read_time: f64, // milliseconds from current_time_ms()
     frame_counter: u32,
-    next_poll_time: Option<std::time::Instant>, // When to poll again based on start_time
-    polling_paused: bool,                       // Whether we're waiting for the next lightning
+    next_poll_time: Option<f64>, // milliseconds timestamp to poll again
+    polling_paused: bool,        // Whether we're waiting for the next lightning
 }
 
 impl Default for LightningDetector {
@@ -65,7 +80,7 @@ impl Default for LightningDetector {
             last_flash_id: 0,
             pending_events: Vec::new(),
             cached_lightning_bolt: None,
-            last_gpu_read_time: std::time::Instant::now(),
+            last_gpu_read_time: current_time_ms(),
             frame_counter: 0,
             next_poll_time: None,
             polling_paused: false,
@@ -99,7 +114,7 @@ impl LightningDetector {
                     flash_id: bolt.flash_id,
                     start_time: bolt.start_time,
                     is_super: bolt.is_super(),
-                    detected_at: std::time::Instant::now(),
+                    detected_at: current_time_ms(),
                 };
 
                 self.pending_events.push(event);
@@ -117,9 +132,8 @@ impl LightningDetector {
                 // Convert WGSL time (seconds since start) to system time
                 let seconds_until_next = bolt.next_lightning_time - bolt.start_time;
                 if seconds_until_next > 0.0 {
-                    let duration_until_next =
-                        std::time::Duration::from_secs_f32(seconds_until_next);
-                    self.next_poll_time = Some(std::time::Instant::now() + duration_until_next);
+                    self.next_poll_time =
+                        Some(current_time_ms() + seconds_until_next as f64 * 1000.0);
                     self.polling_paused = true;
 
                     crate::console_log!("⏰ Lightning detector: Pausing polling for {:.1}s until next expected lightning",
@@ -141,7 +155,7 @@ impl LightningDetector {
         // If polling is paused, check if it's time to resume
         if self.polling_paused {
             if let Some(next_poll_time) = self.next_poll_time {
-                if std::time::Instant::now() >= next_poll_time {
+                if current_time_ms() >= next_poll_time {
                     // Time to resume polling - lightning should be happening soon
                     self.polling_paused = false;
                     self.next_poll_time = None;
@@ -161,10 +175,10 @@ impl LightningDetector {
 
         // Normal polling logic: read every 5 frames (12Hz at 60fps) when not paused
         if self.frame_counter % 5 == 0 {
-            let elapsed = self.last_gpu_read_time.elapsed();
+            let elapsed = current_time_ms() - self.last_gpu_read_time;
             // Also ensure at least 50ms has passed since last read
-            if elapsed.as_millis() >= 50 {
-                self.last_gpu_read_time = std::time::Instant::now();
+            if elapsed >= 50.0 {
+                self.last_gpu_read_time = current_time_ms();
                 return true;
             }
         }
@@ -182,9 +196,9 @@ impl LightningDetector {
     }
 
     /// Get time until next expected polling (if paused)
-    pub fn time_until_next_poll(&self) -> Option<std::time::Duration> {
+    pub fn time_until_next_poll(&self) -> Option<f64> {
         if let Some(next_poll_time) = self.next_poll_time {
-            let now = std::time::Instant::now();
+            let now = current_time_ms();
             if next_poll_time > now {
                 Some(next_poll_time - now)
             } else {
@@ -529,7 +543,9 @@ impl WebGpuRenderer {
         let lightning_bolt_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lightning Bolt Buffer"),
             size: 32, // Single bolt: 32 bytes (8 u32/f32 fields: num_segments, flash_id, start_time, next_lightning_time, is_super_lightning, _padding1, _padding2, _padding3) - properly aligned to 16-byte boundary
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
 
@@ -1710,11 +1726,6 @@ impl WebGpuRenderer {
             fisheye_render_bind_group,
             zoom_render_bind_group,
             zoom_uniforms_buffer,
-
-            // Text overlay components DISABLED for clean screen
-            text_overlay_pipeline: None, // Disabled to remove FPS display
-            text_overlay_bind_group: None, // Disabled to remove FPS display  
-            fps_data_buffer: None, // Disabled to remove FPS display
         })
     }
 
@@ -2211,7 +2222,7 @@ impl WebGpuRenderer {
 
     /// Read lightning bolt raw data from GPU buffer (returns mixed data with proper types)
     pub async fn read_lightning_bolt_data(&self) -> Result<LightningBolt, RendererError> {
-        // Create a staging buffer to read the data back from GPU  
+        // Create a staging buffer to read the data back from GPU
         let size = std::mem::size_of::<LightningBolt>() as u64;
         let staging_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lightning Bolt Data Staging Buffer"),
@@ -2308,10 +2319,10 @@ impl WebGpuRenderer {
         // Log polling status occasionally for debugging
         if self.lightning_detector.frame_counter % 300 == 0 {
             // Every 5 seconds at 60fps
-            if let Some(time_left) = self.lightning_detector.time_until_next_poll() {
+            if let Some(time_left_ms) = self.lightning_detector.time_until_next_poll() {
                 crate::console_log!(
                     "⏰ Lightning detector: Waiting {:.1}s until next poll",
-                    time_left.as_secs_f32()
+                    time_left_ms / 1000.0
                 );
             }
         }
