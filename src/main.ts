@@ -2,7 +2,11 @@ console.log("🚀 main.ts loading with proper WASM integration...");
 
 // Import WASM module using the standard wasm-bindgen approach
 import init, { ParticleLifeEngine } from "./pkg/particle_life_wasm.js";
-import { setParameterUpdateCallbacks, initializeUI } from "./ui";
+import {
+    setParameterUpdateCallbacks,
+    initializeUI,
+    updateJoystickPan,
+} from "./ui";
 import { SimulationParams } from "./particle-life-types";
 import {
     CANVAS_WIDTH,
@@ -66,7 +70,7 @@ class App {
             for (const wasmPath of wasmPaths) {
                 try {
                     console.log(`🔍 Trying WASM path: ${wasmPath}`);
-                    await init(wasmPath);
+                    await init({ module_or_path: wasmPath });
                     console.log(
                         `✅ WASM initialized successfully with path: ${wasmPath}`,
                     );
@@ -246,14 +250,8 @@ class App {
                 }
             },
             updateZoom: (level: number, centerX?: number, centerY?: number) => {
-                // Handle zoom functionality (legacy callback - calls setZoom internally)
-                console.log(
-                    `🔍 Legacy updateZoom: ${level}, center: ${centerX}, ${centerY}`,
-                );
                 if (this.engine) {
                     this.engine.set_zoom(level, centerX, centerY);
-                } else {
-                    console.warn("🔍 Engine not available for updateZoom");
                 }
             },
             updateParticleCount: (pressure: number) => {
@@ -286,13 +284,8 @@ class App {
                 }
             },
             setZoom: (level: number, centerX?: number, centerY?: number) => {
-                console.log(
-                    `🔍 Main.ts setZoom called: level=${level}, center=(${centerX}, ${centerY})`,
-                );
                 if (this.engine) {
                     this.engine.set_zoom(level, centerX, centerY);
-                } else {
-                    console.warn("🔍 Engine not available for setZoom");
                 }
             },
             // Rule regeneration
@@ -382,6 +375,9 @@ class App {
 
             if (this.engine) {
                 try {
+                    // Apply relative joystick panning before the simulation step
+                    updateJoystickPan(deltaTime);
+
                     // Update the Rust simulation
                     this.engine.update_frame(deltaTime);
 

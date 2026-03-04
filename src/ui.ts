@@ -278,7 +278,7 @@ function updateDriftAndFrictionFromTemperature(temp: number): void {
     // Update drift using callback
     parameterUpdateCallbacks.updateDriftAndBackground(newDrift);
 
-    // Update background color using HSLuv from Rust
+    // Update background color using HSL from Rust
     parameterUpdateCallbacks.updateBackgroundColorFromTemperature(temp);
 
     // Update friction parameter
@@ -651,64 +651,38 @@ async function initJoyStick(currentZoomLevel: number) {
                 autoReturnToCenter: true,
             },
             function (stickData: JoyStickData) {
-                // Get the current zoom level from the zoom slider to avoid stale captured value
-                const zoomSlider = document.getElementById(
-                    "zoomSlider",
-                ) as HTMLInputElement;
-                const actualCurrentZoomLevel = zoomSlider
-                    ? parseFloat(zoomSlider.value)
-                    : currentZoomLevel;
-
-                console.log(
-                    `🕹️ Joystick event: captured=${currentZoomLevel}, actual=${actualCurrentZoomLevel}, stick=(${stickData.x}, ${stickData.y})`,
-                );
-
-                // Calculate the size of the viewport (visible area) in virtual world units
-                const viewportWidth =
-                    VIRTUAL_WORLD_WIDTH / actualCurrentZoomLevel;
-                const viewportHeight =
-                    VIRTUAL_WORLD_HEIGHT / actualCurrentZoomLevel;
-
-                // Calculate the maximum movement range (half the remaining space)
-                const maxMoveX = (VIRTUAL_WORLD_WIDTH - viewportWidth) / 2.0;
-                const maxMoveY = (VIRTUAL_WORLD_HEIGHT - viewportHeight) / 2.0;
-
-                // Convert joystick input (-100 to +100) to movement within the calculated range
-                const moveX = (stickData.x / 100.0) * maxMoveX;
-                const moveY = -(stickData.y / 100.0) * maxMoveY; // Inverted Y-axis
-
-                // Calculate new zoom center positions relative to world center
-                zoomCenterX = VIRTUAL_WORLD_CENTER_X + moveX;
-                zoomCenterY = VIRTUAL_WORLD_CENTER_Y + moveY;
-
-                // Apply constraints to ensure viewport stays within world bounds
-                const constrained = constrainZoomCenter(actualCurrentZoomLevel);
-                zoomCenterX = constrained.x;
-                zoomCenterY = constrained.y;
-
-                // Update zoom uniforms via callback with the actual current zoom level
-                parameterUpdateCallbacks.updateZoom(
-                    actualCurrentZoomLevel,
-                    zoomCenterX,
-                    zoomCenterY,
-                );
-
-                // Update zoom center info display
-                const zoomCenterInfo =
-                    document.getElementById("zoomCenterInfo");
-                if (zoomCenterInfo) {
-                    zoomCenterInfo.innerHTML = `Center: (${zoomCenterX.toFixed(
-                        0,
-                    )}, ${zoomCenterY.toFixed(
-                        0,
-                    )})<br>Viewport: ${viewportWidth.toFixed(
-                        0,
-                    )}×${viewportHeight.toFixed(0)}`;
-                }
+                // Relative mode: store deflection as velocity (-1 to +1), Y-axis inverted
+                joystickForceX = stickData.x / 100.0;
+                joystickForceY = -stickData.y / 100.0;
             },
         );
 
         console.log("JoyStick initialized successfully");
+
+        // Add click detection: a quick tap (< 8px movement, < 400ms) resets pan to center
+        const joyCanvas = document.querySelector(
+            "#joyDiv canvas",
+        ) as HTMLCanvasElement;
+        if (joyCanvas) {
+            let pressX = 0,
+                pressY = 0,
+                pressTime = 0;
+            joyCanvas.addEventListener("pointerdown", (e) => {
+                pressX = e.clientX;
+                pressY = e.clientY;
+                pressTime = Date.now();
+            });
+            joyCanvas.addEventListener("pointerup", (e) => {
+                const dx = e.clientX - pressX;
+                const dy = e.clientY - pressY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const elapsed = Date.now() - pressTime;
+                if (dist < 8 && elapsed < 400) {
+                    resetPanToCenter();
+                    console.log("🕹️ Joystick click → pan reset to center");
+                }
+            });
+        }
     } catch (error) {
         console.error("Failed to initialize JoyStick:", error);
 
@@ -719,6 +693,76 @@ async function initJoyStick(currentZoomLevel: number) {
                 '<div style="color: red; text-align: center; padding: 20px;">JoyStick failed to load</div>';
         }
     }
+}
+
+// === Joystick Pan Update (called every frame from main.ts) ===
+
+/**
+ * Apply relative joystick panning. Call once per animation frame with the
+ * elapsed time in milliseconds. Speed = 50 % of the visible viewport per
+ * second at full deflection, so it feels the same depth regardless of zoom.
+ */
+export function updateJoystickPan(deltaTime: number): void {
+    const deadZone = 0.02;
+    if (
+        Math.abs(joystickForceX) < deadZone &&
+        Math.abs(joystickForceY) < deadZone
+    ) {
+        return;
+    }
+
+    const zoomSlider = document.getElementById(
+        "zoomSlider",
+    ) as HTMLInputElement;
+    const zoom = zoomSlider ? parseFloat(zoomSlider.value) : 1.0;
+
+    // Viewport size in virtual-world units at current zoom
+    const viewportWidth = VIRTUAL_WORLD_WIDTH / zoom;
+    const viewportHeight = VIRTUAL_WORLD_HEIGHT / zoom;
+
+    // 50 % of visible area per second at max deflection
+    const speedFactor = 0.5;
+
+    zoomCenterX += joystickForceX * viewportWidth * speedFactor * deltaTime;
+    zoomCenterY += joystickForceY * viewportHeight * speedFactor * deltaTime;
+
+    const constrained = constrainZoomCenter(zoom);
+    zoomCenterX = constrained.x;
+    zoomCenterY = constrained.y;
+
+    if (parameterUpdateCallbacks.setZoom) {
+        parameterUpdateCallbacks.setZoom(zoom, zoomCenterX, zoomCenterY);
+    } else {
+        parameterUpdateCallbacks.updateZoom(zoom, zoomCenterX, zoomCenterY);
+    }
+
+    updateZoomCenterInfo(zoom);
+}
+
+/**
+ * Snap the pan center back to the middle of the virtual world.
+ * Triggered by a joystick button click (web: tap on stick canvas,
+ * native: joystick button via ESP32).
+ */
+export function resetPanToCenter(): void {
+    zoomCenterX = VIRTUAL_WORLD_CENTER_X;
+    zoomCenterY = VIRTUAL_WORLD_CENTER_Y;
+
+    const zoomSlider = document.getElementById(
+        "zoomSlider",
+    ) as HTMLInputElement;
+    const zoom = zoomSlider ? parseFloat(zoomSlider.value) : 1.0;
+
+    if (parameterUpdateCallbacks.setZoom) {
+        parameterUpdateCallbacks.setZoom(zoom, zoomCenterX, zoomCenterY);
+    } else {
+        parameterUpdateCallbacks.updateZoom(zoom, zoomCenterX, zoomCenterY);
+    }
+
+    updateZoomCenterInfo(zoom);
+    console.log(
+        `\ud83c\udfaf Pan reset to world center (${zoomCenterX}, ${zoomCenterY})`,
+    );
 }
 
 // === FPS Display ===
@@ -1364,16 +1408,19 @@ function initializeEnvironmentalSliders(): void {
 
     if (presSlider && presValueDisplay) {
         pressure = loadFromLocalStorage(STORAGE_KEYS.pressure, pressure);
-        presSlider.value = pressure.toString();
+        // Invert slider position: top = surface (0 bar), bottom = max depth (1000 bar)
+        presSlider.value = (1000 - pressure).toString();
         presValueDisplay.textContent = Math.round(pressure * 10) + "m";
 
         // Apply initial pressure-based parameters on page load
         updateParametersFromPressure(pressure);
 
         presSlider.addEventListener("input", (event) => {
-            const newValue = parseFloat(
+            const sliderValue = parseFloat(
                 (event.target as HTMLInputElement).value,
             );
+            // Invert: slider at top (1000) = 0 bar surface, slider at bottom (0) = 1000 bar depth
+            const newValue = 1000 - sliderValue;
             pressure = newValue;
             presValueDisplay.textContent = Math.round(newValue * 10) + "m";
             saveToLocalStorage(STORAGE_KEYS.pressure, newValue);

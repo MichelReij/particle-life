@@ -42,29 +42,31 @@ impl ESP32LightningEvent {
 // ESP32 sensor data structure
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ESP32SensorData {
-    pub zoom: u16,        // 0-4096
-    pub pan_x: u16,       // 0-4096
-    pub pan_y: u16,       // 0-4096
-    pub temperature: u16, // 0-4096
-    pub pressure: u16,    // 0-4096
-    pub ph: u16,          // 0-4096
-    pub electrical: u16,  // 0-4096
-    pub volume: u16,      // 0-4096 (NEW: potentiometer for audio volume)
-    pub sleep: bool,      // true/false
+    pub zoom: u16,             // 0-4096
+    pub pan_x: u16,            // 0-4096
+    pub pan_y: u16,            // 0-4096
+    pub temperature: u16,      // 0-4096
+    pub pressure: u16,         // 0-4096
+    pub ph: u16,               // 0-4096
+    pub electrical: u16,       // 0-4096
+    pub volume: u16,           // 0-4096 (NEW: potentiometer for audio volume)
+    pub sleep: bool,           // true/false
+    pub joystick_button: bool, // true when joystick button pressed (bit 1 of sleep byte)
 }
 
 impl Default for ESP32SensorData {
     fn default() -> Self {
         Self {
-            zoom: 2048,       // Default middle value
-            pan_x: 2048,      // Default middle value
-            pan_y: 2048,      // Default middle value
-            temperature: 820, // Default ~20°C (mapped from 3-130°C range)
-            pressure: 0,      // Default 0 pressure
-            ph: 2926,         // Default pH 10 (optimal for life: 10/14 * 4096 ≈ 2926)
-            electrical: 0,    // Default 0 electrical activity
-            volume: 2048,     // Default middle volume (50%)
-            sleep: false,     // Default awake
+            zoom: 2048,             // Default middle value
+            pan_x: 2048,            // Default middle value
+            pan_y: 2048,            // Default middle value
+            temperature: 820,       // Default ~20°C (mapped from 3-130°C range)
+            pressure: 0,            // Default 0 pressure
+            ph: 2926,               // Default pH 10 (optimal for life: 10/14 * 4096 ≈ 2926)
+            electrical: 0,          // Default 0 electrical activity
+            volume: 2048,           // Default middle volume (50%)
+            sleep: false,           // Default awake
+            joystick_button: false, // Default not pressed
         }
     }
 }
@@ -725,7 +727,8 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
     let ph = u16::from_be_bytes([buffer[11], buffer[12]]);
     let electrical = u16::from_be_bytes([buffer[13], buffer[14]]);
     let volume = u16::from_be_bytes([buffer[15], buffer[16]]);
-    let sleep = buffer[17] != 0;
+    let sleep = (buffer[17] & 0x01) != 0;
+    let joystick_button = (buffer[17] & 0x02) != 0;
 
     // Validate ranges (all values should be 0-4096)
     if zoom > 4096
@@ -755,6 +758,7 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
         electrical,
         volume,
         sleep,
+        joystick_button,
     })
 }
 
@@ -767,7 +771,23 @@ impl ESP32SensorData {
         ZOOM_MIN + (self.zoom as f32 / 4096.0) * (ZOOM_MAX - ZOOM_MIN)
     }
 
-    // Convert pan values (0-4096) to world coordinates
+    // Convert pan values to normalised velocity (-1..+1) for relative panning.
+    // Dead zone of 5 % around center (2048) to avoid drift.
+    pub fn to_pan_velocity(&self) -> (f32, f32) {
+        const DEAD_ZONE: f32 = 0.05;
+        let mut vel_x = (self.pan_x as f32 - 2048.0) / 2048.0;
+        let mut vel_y = (self.pan_y as f32 - 2048.0) / 2048.0;
+        if vel_x.abs() < DEAD_ZONE {
+            vel_x = 0.0;
+        }
+        if vel_y.abs() < DEAD_ZONE {
+            vel_y = 0.0;
+        }
+        (vel_x, vel_y)
+    }
+
+    // Convert pan values (0-4096) to world coordinates (kept for backward compat / debugging)
+    #[allow(dead_code)]
     pub fn to_pan_coordinates(&self, world_width: f32, world_height: f32) -> (f32, f32) {
         let pan_x = (self.pan_x as f32 / 4096.0) * world_width;
         let pan_y = (self.pan_y as f32 / 4096.0) * world_height;
@@ -822,6 +842,7 @@ impl ESP32SensorData {
             electrical: 2048,  // ~1.5 electrical activity (50% of range)
             volume: 2048,      // ~50% volume
             sleep: false,      // Awake
+            joystick_button: false,
         }
     }
 
@@ -837,6 +858,7 @@ impl ESP32SensorData {
             electrical: 4096,  // 3.0 electrical activity
             volume: 4096,      // 100% volume
             sleep: true,       // Sleep mode
+            joystick_button: false,
         }
     }
 
@@ -908,6 +930,7 @@ impl ESP32SensorData {
                 electrical: 0,
                 volume: 0,
                 sleep: false,
+                joystick_button: false,
             },
             ESP32SensorData {
                 zoom: 1024,
@@ -919,6 +942,7 @@ impl ESP32SensorData {
                 electrical: 1024,
                 volume: 5,
                 sleep: false,
+                joystick_button: false,
             }, // Below volume threshold
             ESP32SensorData {
                 zoom: 1024,
@@ -930,6 +954,7 @@ impl ESP32SensorData {
                 electrical: 1024,
                 volume: 10,
                 sleep: false,
+                joystick_button: false,
             }, // At volume threshold
             ESP32SensorData {
                 zoom: 2047,
@@ -941,6 +966,7 @@ impl ESP32SensorData {
                 electrical: 2047,
                 volume: 2047,
                 sleep: false,
+                joystick_button: false,
             },
             ESP32SensorData {
                 zoom: 4095,
@@ -952,6 +978,7 @@ impl ESP32SensorData {
                 electrical: 4095,
                 volume: 4095,
                 sleep: true,
+                joystick_button: false,
             },
         ];
 

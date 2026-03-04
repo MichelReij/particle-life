@@ -26,7 +26,7 @@ class RustWasmPlugin {
                     this.isBuilding = true;
                     console.log("Building Rust WASM module...");
                     exec(
-                        "wasm-pack build --target web --out-dir src/pkg --out-name particle_life_wasm",
+                        "rm -rf src/pkg && wasm-pack build --target web --out-dir src/pkg --out-name particle_life_wasm --release",
                         (error, stdout, stderr) => {
                             this.isBuilding = false;
                             if (error) {
@@ -204,6 +204,7 @@ module.exports = {
         port: 3000,
         hot: false, // Disable HMR to avoid WebGPU device conflicts
         liveReload: true, // Enable simple live reload instead
+        setupExitSignals: true, // Ensure port is released on SIGTERM/SIGINT
         headers: {
             "Cache-Control": "no-store, no-cache, must-revalidate",
             Pragma: "no-cache",

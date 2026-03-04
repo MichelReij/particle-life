@@ -69,6 +69,9 @@ pub struct SimulationParams {
     pub ph: f32,                        // pH scale 0-14, optimum for life ~10
     pub pressure_level: f32,            // bar (0-1000), ~0-10000m depth
     pub electrical_activity_level: f32, // 0-3
+
+    // Cached base friction from temperature (before pressure modifier is applied)
+    pub base_friction: f32,
 }
 
 impl SimulationParams {
@@ -133,6 +136,8 @@ impl SimulationParams {
             ph: 7.0,             // Neutral pH — optimum is 10
             pressure_level: 0.0, // Surface — need to find depth
             electrical_activity_level: 0.0,
+
+            base_friction: 0.1,
         }
     }
 
@@ -324,20 +329,23 @@ impl SimulationParams {
         // Clamp temperature to valid range (3°C to 160°C)
         let clamped_temp = temp.max(3.0).min(160.0);
 
-        // Apply scale factor to maintain same physical effect: (40-3)/(160-3) = 37/157 ≈ 0.2357
-        let effective_temp = 3.0 + (clamped_temp - 3.0) * (37.0 / 157.0);
-
-        // 1. Update drift speed: effective_temp [3, 40] → drift [0, -120]
-        let drift = -((effective_temp - 3.0) * 120.0) / 37.0;
+        // 1. Update drift speed: temp [3, 160] → drift [0, -120]
+        let drift = -((clamped_temp - 3.0) * 120.0) / 157.0;
         self.drift_x_per_second = drift;
 
-        // 2. Update friction: exponential mapping effective_temp [3, 40] → friction [0.98, 0.05]
-        let normalized_temp = (effective_temp - 3.0) / 37.0;
-        let friction = 0.98 * (-3.0 * normalized_temp).exp();
-        self.friction = friction;
+        // 2. Update friction: stays high until ~80°C, then drops sharply toward max.
+        // Uses normalized_temp² so the curve hangs high and only plunges near the top.
+        // 80°C → ~0.52  |  120°C → ~0.14  |  160°C → ~0.010
+        // At 160°C + extreme pressure (modifier 0.5) → 0.005 (very chaotic)
+        let normalized_temp = (clamped_temp - 3.0) / 157.0;
+        let t = normalized_temp * normalized_temp;
+        let friction = 0.98 * (-4.6 * t).exp();
+        self.base_friction = friction;
+        // Apply pressure modifier so extreme depth also disrupts particle order
+        self.friction = friction * self.pressure_friction_modifier();
 
-        // 3. Update background color using HSLuv: effective_temp [3, 40] → hue [200°, 15°]
-        let (r, g, b) = Self::temperature_to_background_color(effective_temp);
+        // 3. Update background color using HSL: temp [3, 160] → hue [200°, -10°]
+        let (r, g, b) = Self::temperature_to_background_color(clamped_temp);
         self.background_color_r = r;
         self.background_color_g = g;
         self.background_color_b = b;
@@ -357,6 +365,9 @@ impl SimulationParams {
         let normalized_pressure = clamped_pressure / 1000.0;
         let r_smooth = 20.0 * (-5.3 * normalized_pressure).exp();
         self.r_smooth = r_smooth;
+
+        // Pressure also modifies friction — extreme depths drive friction toward chaos
+        self.friction = self.base_friction * self.pressure_friction_modifier();
 
         self.recompute_cross_dependencies();
     }
@@ -395,6 +406,16 @@ impl SimulationParams {
         self.recompute_cross_dependencies();
     }
 
+    // Pressure friction modifier: Gaussian centred at 350 bar (σ=150).
+    // Returns 1.0 at optimal pressure, down to ~0.5 at surface (0 bar) or extreme depth (1000 bar).
+    // Low friction → chaos; this makes pressure a second driver of disorder.
+    fn pressure_friction_modifier(&self) -> f32 {
+        let pressure_quality =
+            (-(self.pressure_level - 350.0).powi(2) / (2.0 * 150.0_f32.powi(2))).exp();
+        // modifier ∈ [0.5, 1.0]: optimal pressure preserves friction, extremes halve it
+        0.5 + 0.5 * pressure_quality
+    }
+
     // Recompute parameters that depend on multiple sliders simultaneously.
     // Called by apply_ph, apply_pressure, and apply_electrical_activity.
     //
@@ -404,33 +425,39 @@ impl SimulationParams {
     //   lenia_kernel_radius      ← pH quality only
     //   lenia_growth_sigma       ← inverse pH quality (tight at pH 10, loose at extremes)
     fn recompute_cross_dependencies(&mut self) {
-        // pH quality: Gaussian centred on pH 10, σ=3  →  q ∈ [0, 1]
-        // pH  0 → q ≈ 0.004  |  pH  7 → q ≈ 0.61  |  pH 10 → q = 1.0  |  pH 14 → q ≈ 0.41
-        let ph_quality = (-(self.ph - 10.0).powi(2) / 18.0).exp();
+        // pH quality: TIGHT Gaussian, σ≈2.83 (variance=8), centred on pH 10
+        // pH 10 → q = 1.0  |  pH 7 → q ≈ 0.32  |  pH 14 → q ≈ 0.14  |  pH 0 → q ≈ 0.000003
+        // Neutral pH (7) is mediocre, extreme pH values are genuinely chaotic
+        let ph_quality = (-(self.ph - 10.0).powi(2) / 8.0).exp();
 
         // Electrical noise penalty on long-range interaction radius
-        // Max penalty at electrical=3: radius is reduced by 40 %
+        // Max penalty at electrical=3: radius is reduced by 65%
         let elec_normalized = self.electrical_activity_level / 3.0;
-        let elec_radius_penalty = 1.0 - 0.4 * elec_normalized;
+        let elec_radius_penalty = 1.0 - 0.65 * elec_normalized;
 
         // inter_type_radius_scale: pH drives it up, electrical noise drives it down
-        // Range: [0.1 * 0.6, 2.0 * 1.0]  →  roughly [0.06, 2.0]
+        // At all-max (pH=14, elec=3): (0.1 + 0.14*1.9) * 0.35 ≈ 0.13  →  near-zero structure
+        // At optimal (pH=10, elec=0): (0.1 + 1.9) * 1.0 = 2.0  →  rich cross-type interaction
         self.inter_type_radius_scale = (0.1 + ph_quality * 1.9) * elec_radius_penalty;
 
-        // Pressure quality: Gaussian centred on 350 bar (~3500 m depth), σ=200 bar
-        // 0 bar → q ≈ 0.21  |  350 bar → q = 1.0  |  1000 bar → q ≈ 0.14
+        // Pressure quality: TIGHT Gaussian, σ=150 bar, centred on 350 bar (~3500 m depth)
+        // 0 bar → q ≈ 0.07  |  350 bar → q = 1.0  |  1000 bar → q ≈ 0.0001
         let pressure_quality =
-            (-(self.pressure_level - 350.0).powi(2) / (2.0 * 200.0_f32.powi(2))).exp();
+            (-(self.pressure_level - 350.0).powi(2) / (2.0 * 150.0_f32.powi(2))).exp();
 
-        // lenia_growth_mu: pressure sets the base rate, pH modulates it
-        // Requires BOTH right pressure (~350 bar) AND right pH (~10) for maximum
+        // lenia_growth_mu: requires BOTH right pressure (~350 bar) AND right pH (~10) for maximum
         self.lenia_growth_mu = (0.05 + pressure_quality * 0.10) * (0.5 + 0.5 * ph_quality);
 
         // lenia_kernel_radius: purely from pH — at optimal pH, Lenia interactions reach far
         self.lenia_kernel_radius = 30.0 + ph_quality * 70.0;
 
-        // lenia_growth_sigma: tight (precise growth) at optimal pH, diffuse at extremes
-        self.lenia_growth_sigma = 0.02 + (1.0 - ph_quality) * 0.06;
+        // lenia_growth_sigma: chaos when EITHER pH OR pressure is off-optimal
+        // Uses max() so that getting one wrong is enough to disrupt Lenia growth
+        let ph_chaos = 1.0 - ph_quality;
+        let pressure_chaos = 1.0 - pressure_quality;
+        let combined_chaos = ph_chaos.max(pressure_chaos);
+        // Range: 0.02 (fully optimal) → 0.16 (fully chaotic)
+        self.lenia_growth_sigma = 0.02 + combined_chaos * 0.14;
     }
 
     // Set zoom level and update viewport parameters
@@ -448,16 +475,6 @@ impl SimulationParams {
         // Center the viewport around world center by default
         let center_x = center_x.unwrap_or(VIRTUAL_WORLD_CENTER_X);
         let center_y = center_y.unwrap_or(VIRTUAL_WORLD_CENTER_Y);
-
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_2(
-            &format!(
-                "🎯 apply_zoom: zoom={:.2}, center=({:.1}, {:.1}), viewport={}x{}",
-                clamped_zoom, center_x, center_y, viewport_width as u32, viewport_height as u32
-            )
-            .into(),
-            &wasm_bindgen::JsValue::UNDEFINED,
-        );
 
         // Calculate offset to center the viewport
         let offset_x = center_x - (viewport_width / 2.0);
@@ -480,46 +497,22 @@ impl SimulationParams {
         // Recalculate the actual center from the clamped offset
         self.viewport_center_x = clamped_offset_x + (viewport_width / 2.0);
         self.viewport_center_y = clamped_offset_y + (viewport_height / 2.0);
-
-        #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_2(
-            &format!(
-                "🎯 viewport updated: offset=({:.1}, {:.1}), center=({:.1}, {:.1})",
-                clamped_offset_x, clamped_offset_y, self.viewport_center_x, self.viewport_center_y
-            )
-            .into(),
-            &wasm_bindgen::JsValue::UNDEFINED,
-        );
     }
 
-    // Temperature-based background color mapping using HSLuv (static helper)
+    // Temperature-based background color mapping using standard HSL (static helper)
     fn temperature_to_background_color(temp: f32) -> (f32, f32, f32) {
-        // Temperature mapping: 3°C to 40°C (effective range) → Hue 200° to 15°
-        // Note: Input temp is already scaled to effective range [3,40] from UI range [3,130]
-        // Clamp temperature to valid range
-        let clamped_temp = temp.max(3.0).min(40.0);
+        // Hue mapping: clamped to [70°C, 140°C] — below 70°C stays max blue, above 140°C stays red-magenta
+        let clamped_temp = temp.max(3.0).min(160.0);
+        let hue_temp = clamped_temp.max(70.0).min(140.0);
+        let normalized_temp = (hue_temp - 70.0) / (140.0 - 70.0);
 
-        // Normalize temperature: 0.0 at 3°C, 1.0 at 40°C
-        let normalized_temp = (clamped_temp - 3.0) / (40.0 - 3.0);
+        // 70°C: blue (200°) → 140°C: warm red-magenta (-10°/350°)
+        let hue = 200.0 - normalized_temp * 210.0;
 
-        // Map to hue range: 200° (cold/blue) to 15° (hot/red)
-        let hue = 200.0 - normalized_temp * 185.0; // 200° to 15°
+        let saturation = 30.0;
+        let lightness = 66.0;
 
-        // Uniform saturation and lightness values for both platforms
-        let (saturation, lightness) = (33.0, 66.0);
-
-        // Convert HSLuv to RGB
-        let (r, g, b) = hsluv::hsluv_to_rgb(hue as f64, saturation as f64, lightness as f64);
-
-        // Debug info for color mapping consistency (commented out - too verbose)
-        // #[cfg(debug_assertions)]
-        // crate::console_log!(
-        //     "🎨 Temperature {:.1}°C → HSLuv({:.1}°, {:.1}%, {:.1}%) → RGB({:.3}, {:.3}, {:.3}) [{}]",
-        //     temp, hue, saturation, lightness, r, g, b,
-        //     if cfg!(target_arch = "wasm32") { "WASM" } else { "Native" }
-        // );
-
-        (r as f32, g as f32, b as f32)
+        crate::buffer_utils::hsl_to_rgb(hue, saturation, lightness)
     }
 
     // Pressure-based particle count mapping
@@ -544,15 +537,28 @@ impl SimulationParams {
     pub fn apply_esp32_sensor_data(
         &mut self,
         sensor_data: &crate::esp32_communication::ESP32SensorData,
+        delta_time: f32,
     ) {
-        // Apply zoom with current viewport center
+        // Apply zoom
         let zoom_level = sensor_data.to_zoom_level();
-        self.apply_zoom(zoom_level, None, None);
 
-        // Apply pan (update viewport center)
-        let (pan_x, pan_y) =
-            sensor_data.to_pan_coordinates(VIRTUAL_WORLD_WIDTH, VIRTUAL_WORLD_HEIGHT);
-        self.apply_zoom(zoom_level, Some(pan_x), Some(pan_y));
+        // Apply relative pan (velocity-based)
+        let (new_center_x, new_center_y) = if sensor_data.joystick_button {
+            // Button pressed: snap viewport back to world center
+            (VIRTUAL_WORLD_CENTER_X, VIRTUAL_WORLD_CENTER_Y)
+        } else {
+            let (vel_x, vel_y) = sensor_data.to_pan_velocity();
+            let viewport_width = VIRTUAL_WORLD_WIDTH / zoom_level;
+            let viewport_height = VIRTUAL_WORLD_HEIGHT / zoom_level;
+            // 50 % of visible viewport per second at max deflection
+            let speed_factor = 0.5_f32;
+            (
+                self.viewport_center_x + vel_x * viewport_width * speed_factor * delta_time,
+                self.viewport_center_y + vel_y * viewport_height * speed_factor * delta_time,
+            )
+        };
+
+        self.apply_zoom(zoom_level, Some(new_center_x), Some(new_center_y));
 
         // Apply temperature
         let temperature = sensor_data.to_temperature_celsius();

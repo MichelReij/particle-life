@@ -18,7 +18,7 @@ default = []
 serde = { version = "1.0", features = ["derive"] }
 bytemuck = { version = "1.0", features = ["derive"] }
 futures = "0.3"
-hsluv = "0.3.1"
+# hsluv removed — replaced with standard HSL (richer, more dramatic colours)
 rand = { version = "0.8", features = ["small_rng"] }
 raw-window-handle = "0.6"
 
@@ -100,6 +100,10 @@ name = "native_minimal"
 path = "src/bin/native_minimal.rs"
 
 
+
+# Disable wasm-opt (not installed; wasm-pack would fail otherwise)
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
 
 [profile.release]
 # Enable maximum optimizations for performance

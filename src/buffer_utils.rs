@@ -40,16 +40,37 @@ pub fn pressure_to_particle_count(pressure: f32, min_particles: u32, max_particl
     ((target / 64.0).round() * 64.0) as u32
 }
 
+/// Standard HSL → linear RGB (no gamma).
+/// h: [0, 360],  s: [0, 100],  l: [0, 100]  →  (r, g, b): [0, 1]
+pub fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
+    // Normalise hue to [0, 360) — handles negative values and values > 360
+    let h = ((h % 360.0) + 360.0) % 360.0;
+    let s = s / 100.0;
+    let l = l / 100.0;
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let h_prime = h / 60.0;
+    let x = c * (1.0 - ((h_prime % 2.0) - 1.0).abs());
+    let (r1, g1, b1) = match h_prime as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    (r1 + m, g1 + m, b1 + m)
+}
+
 // Calculate background color based on drift speed
 pub fn calculate_background_color_from_drift(drift_x_per_second: f32) -> [f32; 3] {
     let normalized_abs_drift = (drift_x_per_second.abs() / 80.0).min(1.0);
 
-    // Hue transitions from blue (200°) at no drift to red (15°) at max drift
-    let hue = 200.0 - normalized_abs_drift * 185.0;
-    let saturation = 33.0;
+    // Hue transitions from blue (200°) at no drift to warm red-magenta (-10°/350°) at max drift
+    let hue = 200.0 - normalized_abs_drift * 210.0;
+    let saturation = 30.0;
     let lightness = 66.0;
 
-    // Use the proper hsluv crate for conversion
-    let (r, g, b) = hsluv::hsluv_to_rgb(hue as f64, saturation as f64, lightness as f64);
-    [r as f32, g as f32, b as f32]
+    let (r, g, b) = hsl_to_rgb(hue, saturation, lightness);
+    [r, g, b]
 }

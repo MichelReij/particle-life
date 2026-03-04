@@ -14,10 +14,9 @@
         "build": "webpack",
         "build:rust": "./build-wasm.sh",
         "start": "webpack serve",
-        "dev": "webpack serve"
+        "dev": "lsof -ti :3000 | xargs kill -9 2>/dev/null; sleep 0.5; webpack serve"
     },
     "dependencies": {
-        "hsluv-ts": "^1.0.1",
         "typescript": "^4.5.0"
     },
     "devDependencies": {

@@ -254,7 +254,8 @@ impl ApplicationHandler for MinimalNativeApp {
                         match esp32_manager.get_sensor_data() {
                             Ok(sensor_data) => {
                                 // Apply ESP32 sensor data to simulation parameters
-                                self.simulation_params.apply_esp32_sensor_data(&sensor_data);
+                                self.simulation_params
+                                    .apply_esp32_sensor_data(&sensor_data, delta_time);
 
                                 // Update audio volume from ESP32 potentiometer
                                 if let Some(audio) = &mut self.audio_manager {

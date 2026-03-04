@@ -24,6 +24,7 @@
 #define PAN_X_POT_PIN A5         // Potentiometer for pan X
 #define PAN_Y_POT_PIN A6         // Potentiometer for pan Y
 #define SLEEP_BUTTON_PIN 2       // Digital pin for sleep button
+#define JOYSTICK_BTN_PIN 3       // Digital pin for joystick push-button (center reset)
 
 // Packet structure
 struct SensorPacket
@@ -54,6 +55,7 @@ void setup()
 
     // Initialize pins
     pinMode(SLEEP_BUTTON_PIN, INPUT_PULLUP);
+    pinMode(JOYSTICK_BTN_PIN, INPUT_PULLUP);
 
     // Initialize analog pins (if using external sensors)
     // pinMode(TEMP_SENSOR_PIN, INPUT);
@@ -181,7 +183,10 @@ void readRealSensors(SensorPacket *packet)
     packet->electrical = map(electrical_raw, 0, 1023, 0, 4096);
 
     // Sleep button (active low with pullup)
-    packet->sleep = !digitalRead(SLEEP_BUTTON_PIN);
+    // Bit 0 = sleep, Bit 1 = joystick button (center reset)
+    uint8_t sleep_bit = !digitalRead(SLEEP_BUTTON_PIN) ? 0x01 : 0x00;
+    uint8_t jsbtn_bit = !digitalRead(JOYSTICK_BTN_PIN) ? 0x02 : 0x00;
+    packet->sleep = sleep_bit | jsbtn_bit;
 }
 
 // Optional: Function to print packet data for debugging
