@@ -129,36 +129,34 @@ function temperatureToFriction(temp: number): number {
     return 0.98 * Math.exp(-3.0 * normalizedTemp); // Exponential decay from 0.98 to 0.05
 }
 
+function hslToRgb(
+    h: number,
+    s: number,
+    l: number,
+): { r: number; g: number; b: number } {
+    // h: 0–360, s: 0–1, l: 0–1 → r/g/b: 0–1
+    const a = s * Math.min(l, 1 - l);
+    const f = (n: number) => {
+        const k = (n + h / 30) % 12;
+        return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    };
+    return { r: f(0), g: f(8), b: f(4) };
+}
+
 function temperatureToBackgroundColor(temp: number): {
     r: number;
     g: number;
     b: number;
 } {
-    // Temperature mapping to background color
-    // Cold (3°C): Deep blue/purple
-    // Room temp (20°C): Dark gray/black
-    // Hot (160°C): Red/orange
-    // Scale factor applied to maintain same effect: (40-3)/(160-3) = 37/157 ≈ 0.2357
-    const effectiveTemp = 3 + (temp - 3) * (37 / 157); // Map [3,160] to [3,40] equivalent
-    const normalizedTemp = Math.max(0, Math.min(1, (effectiveTemp - 3) / 37)); // Clamp to [0, 1]
-
-    if (normalizedTemp < 0.5) {
-        // Cold to neutral: blue/purple to black
-        const factor = normalizedTemp * 2; // 0 to 1
-        return {
-            r: factor * 0.1, // 0 to 0.1
-            g: factor * 0.05, // 0 to 0.05
-            b: (1 - factor) * 0.3 + factor * 0.0, // 0.3 to 0
-        };
-    } else {
-        // Neutral to hot: black to red/orange
-        const factor = (normalizedTemp - 0.5) * 2; // 0 to 1
-        return {
-            r: factor * 0.4, // 0 to 0.4
-            g: factor * 0.1, // 0 to 0.1
-            b: 0.0,
-        };
-    }
+    // Hue: 220 (blauw) → 0 (rood)
+    // Bereikt max blauw al bij 80°C, max rood bij 140°C
+    // Saturation en lightness zijn constant
+    const S = 0.22;
+    const L = 0.66;
+    const hueTempClamped = Math.max(80, Math.min(140, temp));
+    const normalizedHue = (hueTempClamped - 80) / (140 - 80);
+    const hue = 220 + normalizedHue * (0 - 220); // 220 → 0
+    return hslToRgb(hue, S, L);
 }
 
 // Pressure mapping functions - NOW ONLY CONTROLS rSmooth, forceScale, and particle count

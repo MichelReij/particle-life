@@ -501,18 +501,15 @@ impl SimulationParams {
 
     // Temperature-based background color mapping using standard HSL (static helper)
     fn temperature_to_background_color(temp: f32) -> (f32, f32, f32) {
-        // Hue mapping: clamped to [70°C, 140°C] — below 70°C stays max blue, above 140°C stays red-magenta
-        let clamped_temp = temp.max(3.0).min(160.0);
-        let hue_temp = clamped_temp.max(70.0).min(140.0);
-        let normalized_temp = (hue_temp - 70.0) / (140.0 - 70.0);
-
-        // 70°C: blue (200°) → 140°C: warm red-magenta (-10°/350°)
-        let hue = 200.0 - normalized_temp * 210.0;
-
-        let saturation = 30.0;
-        let lightness = 66.0;
-
-        crate::buffer_utils::hsl_to_rgb(hue, saturation, lightness)
+        // Hue: 220 (blauw) → 0 (rood)
+        // Bereikt max blauw al bij 80°C, max rood bij 140°C
+        // Saturation en lightness zijn constant
+        const S: f32 = 22.0;
+        const L: f32 = 66.0;
+        let hue_temp = temp.max(80.0).min(140.0);
+        let normalized_hue = (hue_temp - 80.0) / (140.0 - 80.0);
+        let hue = 220.0 + normalized_hue * (0.0 - 220.0); // 220 → 0
+        crate::buffer_utils::hsl_to_rgb(hue, S, L)
     }
 
     // Pressure-based particle count mapping
@@ -543,7 +540,7 @@ impl SimulationParams {
         let zoom_level = sensor_data.to_zoom_level();
 
         // Apply relative pan (velocity-based)
-        let (new_center_x, new_center_y) = if sensor_data.joystick_button {
+        let (new_center_x, new_center_y) = if sensor_data.joy_click || sensor_data.joystick_button {
             // Button pressed: snap viewport back to world center
             (VIRTUAL_WORLD_CENTER_X, VIRTUAL_WORLD_CENTER_Y)
         } else {

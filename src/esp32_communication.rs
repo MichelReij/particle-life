@@ -52,6 +52,7 @@ pub struct ESP32SensorData {
     pub volume: u16,           // 0-4096 (NEW: potentiometer for audio volume)
     pub sleep: bool,           // true/false
     pub joystick_button: bool, // true when joystick button pressed (bit 1 of sleep byte)
+    pub joy_click: bool,       // true when joystick click detected (byte 18, latched)
 }
 
 impl Default for ESP32SensorData {
@@ -67,6 +68,7 @@ impl Default for ESP32SensorData {
             volume: 2048,           // Default middle volume (50%)
             sleep: false,           // Default awake
             joystick_button: false, // Default not pressed
+            joy_click: false,       // Default no click
         }
     }
 }
@@ -680,16 +682,16 @@ fn test_esp32_communication(port: &mut Box<dyn SerialPort>) -> Result<bool, ESP3
 
 // Read sensor data from ESP32
 fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ESP32Error> {
-    // ESP32 sends data in this format (17 bytes total):
+    // ESP32 sends data in this format (20 bytes total):
     // [0xAA] [zoom_high] [zoom_low] [pan_x_high] [pan_x_low] [pan_y_high] [pan_y_low]
     // [temp_high] [temp_low] [pressure_high] [pressure_low] [ph_high] [ph_low]
-    // [electrical_high] [electrical_low] [sleep] [0x55]
+    // [electrical_high] [electrical_low] [volume_high] [volume_low] [sleep_flags] [joy_click] [0x55]
 
-    let mut buffer = [0u8; 19];
+    let mut buffer = [0u8; 20];
     let mut bytes_read = 0;
 
     // Try to read complete packet
-    while bytes_read < 19 {
+    while bytes_read < 20 {
         match port.read(&mut buffer[bytes_read..]) {
             Ok(n) => {
                 bytes_read += n;
@@ -707,13 +709,13 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
     }
 
     // Validate packet format
-    if buffer[0] != 0xAA || buffer[18] != 0x55 {
+    if buffer[0] != 0xAA || buffer[19] != 0x55 {
         println!("❌ ESP32 InvalidData - Bad packet format:");
-        println!("   Expected: [0xAA, ..., 0x55] (19 bytes)");
+        println!("   Expected: [0xAA, ..., 0x55] (20 bytes)");
         println!("   Received: {:02X?}", buffer);
         println!(
             "   Header: 0x{:02X} (expected 0xAA), Footer: 0x{:02X} (expected 0x55)",
-            buffer[0], buffer[18]
+            buffer[0], buffer[19]
         );
         return Err(ESP32Error::InvalidData);
     }
@@ -729,6 +731,7 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
     let volume = u16::from_be_bytes([buffer[15], buffer[16]]);
     let sleep = (buffer[17] & 0x01) != 0;
     let joystick_button = (buffer[17] & 0x02) != 0;
+    let joy_click = buffer[18] != 0;
 
     // Validate ranges (all values should be 0-4096)
     if zoom > 4096
@@ -759,6 +762,7 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
         volume,
         sleep,
         joystick_button,
+        joy_click,
     })
 }
 
@@ -843,6 +847,7 @@ impl ESP32SensorData {
             volume: 2048,      // ~50% volume
             sleep: false,      // Awake
             joystick_button: false,
+            joy_click: false,
         }
     }
 
@@ -859,6 +864,7 @@ impl ESP32SensorData {
             volume: 4096,      // 100% volume
             sleep: true,       // Sleep mode
             joystick_button: false,
+            joy_click: false,
         }
     }
 
@@ -931,6 +937,7 @@ impl ESP32SensorData {
                 volume: 0,
                 sleep: false,
                 joystick_button: false,
+                joy_click: false,
             },
             ESP32SensorData {
                 zoom: 1024,
@@ -943,6 +950,7 @@ impl ESP32SensorData {
                 volume: 5,
                 sleep: false,
                 joystick_button: false,
+                joy_click: false,
             }, // Below volume threshold
             ESP32SensorData {
                 zoom: 1024,
@@ -955,6 +963,7 @@ impl ESP32SensorData {
                 volume: 10,
                 sleep: false,
                 joystick_button: false,
+                joy_click: false,
             }, // At volume threshold
             ESP32SensorData {
                 zoom: 2047,
@@ -967,6 +976,7 @@ impl ESP32SensorData {
                 volume: 2047,
                 sleep: false,
                 joystick_button: false,
+                joy_click: false,
             },
             ESP32SensorData {
                 zoom: 4095,
@@ -979,6 +989,7 @@ impl ESP32SensorData {
                 volume: 4095,
                 sleep: true,
                 joystick_button: false,
+                joy_click: false,
             },
         ];
 

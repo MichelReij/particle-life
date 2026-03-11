@@ -25,22 +25,19 @@ class RustWasmPlugin {
                 if (this.shouldRebuild()) {
                     this.isBuilding = true;
                     console.log("Building Rust WASM module...");
-                    exec(
-                        "rm -rf src/pkg && wasm-pack build --target web --out-dir src/pkg --out-name particle_life_wasm --release",
-                        (error, stdout, stderr) => {
-                            this.isBuilding = false;
-                            if (error) {
-                                console.error("Rust WASM build failed:", error);
-                                return callback(error);
-                            }
-                            if (stderr) {
-                                console.log("Rust build warnings:", stderr);
-                            }
-                            console.log("Rust WASM build complete!");
-                            this.lastBuildTime = Date.now();
-                            callback();
-                        },
-                    );
+                    exec("bash build-wasm.sh", (error, stdout, stderr) => {
+                        this.isBuilding = false;
+                        if (error) {
+                            console.error("Rust WASM build failed:", error);
+                            return callback(error);
+                        }
+                        if (stderr) {
+                            console.log("Rust build warnings:", stderr);
+                        }
+                        console.log("Rust WASM build complete!");
+                        this.lastBuildTime = Date.now();
+                        callback();
+                    });
                 } else {
                     callback();
                 }
