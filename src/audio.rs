@@ -20,8 +20,8 @@ impl AudioManager {
         // Check if we can detect audio system type
         Self::detect_and_configure_audio_system();
         
-        // Try to create audio output stream
-        let (_stream, stream_handle) = match OutputStream::try_default() {
+        // Try to create audio output stream with PipeWire priority
+        let (_stream, stream_handle) = match Self::try_pipewire_first() {
             Ok(stream) => {
                 println!("✅ Audio output stream created successfully");
                 stream
@@ -135,13 +135,20 @@ impl AudioManager {
     fn configure_pipewire_audio() {
         println!("🔧 Configuring PipeWire audio settings...");
         
-        // PipeWire typically doesn't need ALSA environment variables
-        // But we can set some safe defaults
-        std::env::set_var("PIPEWIRE_LATENCY", "512/48000"); // ~10ms latency
+        // Force Rodio to use PipeWire via PulseAudio compatibility layer
+        std::env::set_var("PULSE_SERVER", "unix:/run/user/1000/pulse/native");
+        std::env::set_var("PULSE_RUNTIME_PATH", "/run/user/1000/pulse");
+        
+        // PipeWire-specific latency settings
+        std::env::set_var("PIPEWIRE_LATENCY", "256/48000"); // ~5ms latency for realtime
         std::env::set_var("PIPEWIRE_RATE", "48000");
         std::env::set_var("PIPEWIRE_CHANNELS", "2");
         
-        println!("🔧 PipeWire: Set 10ms latency, 48kHz, stereo");
+        // Disable ALSA to force PipeWire usage
+        std::env::set_var("ALSA_PCM_CARD", "");
+        std::env::set_var("PULSE_LATENCY_MSEC", "10"); // Very low latency
+        
+        println!("🔧 PipeWire: Set 5ms latency, 48kHz, stereo - ALSA bypass enabled");
     }
     
     /// Configure PulseAudio settings
@@ -166,12 +173,32 @@ impl AudioManager {
         println!("🔧 ALSA: Set 100ms buffer, 25ms period");
     }
     
-    /// Try PipeWire-specific configuration
+    /// Try PipeWire first, then fallback to ALSA
+    fn try_pipewire_first() -> Result<(OutputStream, rodio::OutputStreamHandle), rodio::StreamError> {
+        println!("🔧 Attempting PipeWire audio stream first...");
+        
+        // Set environment to prefer PipeWire
+        std::env::set_var("PULSE_SERVER", "unix:/run/user/1000/pulse/native");
+        
+        // Try default first (should pick up PipeWire via PulseAudio compat)
+        match OutputStream::try_default() {
+            Ok(stream) => {
+                println!("✅ PipeWire audio stream created via default");
+                Ok(stream)
+            }
+            Err(e) => {
+                println!("⚠️ PipeWire via default failed: {}", e);
+                println!("🔧 Falling back to direct ALSA...");
+                OutputStream::try_default()
+            }
+        }
+    }
+    
+    /// Try PipeWire-specific configuration (fallback)
     fn try_pipewire_configuration() -> Result<(OutputStream, rodio::OutputStreamHandle), Box<dyn std::error::Error>> {
         println!("🔧 Attempting PipeWire-compatible audio stream...");
         
-        // For PipeWire, the default should work fine
-        OutputStream::try_default()
+        Self::try_pipewire_first()
             .map_err(|e| format!("PipeWire audio configuration failed: {}", e).into())
     }
     

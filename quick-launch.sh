@@ -11,6 +11,11 @@ if [ ! -f "target/debug/native_minimal" ]; then
     cargo build --bin native_minimal --quiet
 fi
 
+# Set USB audio as default (no internal brom) - PipeWire method
+echo "🔊 Setting USB audio adapter as default (PipeWire)..."
+wpctl set-default 46
+wpctl set-volume 46 65%
+
 # Launch directly in fullscreen for round screen
 echo "🎯 Starting fullscreen on round display..."
 cd /home/michel/particle-life
