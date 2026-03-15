@@ -65,6 +65,9 @@ pub struct SimulationParams {
     // Current zoom level - used for zoom-adjusted drift calculation
     pub current_zoom_level: f32,
 
+    // Smoothed zoom level for ESP32 input (EMA filter against ADC noise)
+    pub smoothed_zoom: f32,
+
     // Environmental control levels (stored for cross-dependency computation)
     pub ph: f32,                        // pH scale 0-14, optimum for life ~10
     pub pressure_level: f32,            // bar (0-1000), ~0-10000m depth
@@ -131,6 +134,7 @@ impl SimulationParams {
 
             // Default zoom level
             current_zoom_level: 1.0,
+            smoothed_zoom: 1.0,
 
             // Environmental control levels (start at non-optimal to encourage exploration)
             ph: 7.0,             // Neutral pH — optimum is 10
@@ -536,8 +540,12 @@ impl SimulationParams {
         sensor_data: &crate::esp32_communication::ESP32SensorData,
         delta_time: f32,
     ) {
-        // Apply zoom
-        let zoom_level = sensor_data.to_zoom_level();
+        // Apply zoom — gebruik een exponential moving average (EMA) om ADC-ruis te dempen.
+        // alpha = 0.05 → tijdconstante ≈ 16 frames (~0.27s bij 60fps): soepel maar responsief.
+        let raw_zoom = sensor_data.to_zoom_level();
+        const ZOOM_ALPHA: f32 = 0.05;
+        self.smoothed_zoom = self.smoothed_zoom + ZOOM_ALPHA * (raw_zoom - self.smoothed_zoom);
+        let zoom_level = self.smoothed_zoom;
 
         // Apply relative pan (velocity-based)
         let (new_center_x, new_center_y) = if sensor_data.joy_click || sensor_data.joystick_button {

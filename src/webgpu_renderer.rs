@@ -1694,13 +1694,14 @@ impl WebGpuRenderer {
         #[cfg(target_arch = "wasm32")]
         let fps_data_buffer: Option<wgpu::Buffer> = None;
 
+        // Text overlay disabled - FPS counter not shown on screen
         #[cfg(not(target_arch = "wasm32"))]
-        let text_overlay_bind_group = Some(text_overlay_bind_group);
+        let text_overlay_bind_group: Option<wgpu::BindGroup> = None;
         #[cfg(target_arch = "wasm32")]
         let text_overlay_bind_group: Option<wgpu::BindGroup> = None;
 
         #[cfg(not(target_arch = "wasm32"))]
-        let text_overlay_pipeline = Some(text_overlay_pipeline);
+        let text_overlay_pipeline: Option<wgpu::RenderPipeline> = None;
         #[cfg(target_arch = "wasm32")]
         let text_overlay_pipeline: Option<wgpu::RenderPipeline> = None;
 

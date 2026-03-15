@@ -133,10 +133,10 @@ impl ApplicationHandler for MinimalNativeApp {
             use winit::window::Fullscreen;
             Window::default_attributes()
                 .with_title("Particle Life - Round Screen")
-                .with_inner_size(winit::dpi::LogicalSize::new(1080, 1080)) // Explicit 1080x1080 for round screen
-                .with_fullscreen(Some(Fullscreen::Borderless(None))) // True fullscreen without borders
+                .with_inner_size(winit::dpi::LogicalSize::new(1080, 1080))
+                .with_fullscreen(Some(Fullscreen::Borderless(None)))
                 .with_resizable(false)
-                .with_decorations(false) // Remove window decorations
+                .with_decorations(false)
         };
 
         #[cfg(not(target_os = "linux"))]
@@ -192,6 +192,18 @@ impl ApplicationHandler for MinimalNativeApp {
                 self.audio_manager = None;
             }
         }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // Drop GPU resources BEFORE the window is destroyed to prevent segfault.
+        // The wgpu Surface holds a reference to the window; if the window is freed
+        // first the Vulkan driver crashes with a segmentation fault.
+        console_log!("🧹 Cleaning up GPU resources before exit...");
+        self.renderer = None;       // drops Surface + all wgpu resources
+        self.audio_manager = None;  // stops audio stream cleanly
+        self.esp32_manager = None;  // stops serial thread cleanly
+        self.window = None;         // window can now be safely destroyed
+        console_log!("✅ Cleanup complete, goodbye!");
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {

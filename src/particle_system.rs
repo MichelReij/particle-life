@@ -25,13 +25,13 @@ const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 5] = [
     1.0, // Type 4: Green  - medium, balanced
 ];
 
-// Custom color palette
+// Custom color palette matching TypeScript version
 const CUSTOM_COLORS: [[f32; 3]; 5] = [
-    [0.5020, 0.1843, 0.3843], // #802f62 - Paars-rood
-    [0.2471, 0.3020, 0.4392], // #3f4d70 - Donkerblauw
-    [0.3843, 0.6784, 0.6667], // #62adaa - Teal
-    [0.7608, 0.6039, 0.3608], // #c29a5c - Zandgeel
-    [0.8824, 0.3255, 0.3725], // #e1535f - Rood
+    [0.0141, 0.4549, 0.6784], // #0374ad - Blue
+    [0.7804, 0.5216, 0.0745], // #c78513 - Yellow
+    [0.7490, 0.1098, 0.1098], // #bf1c1c - Red
+    [0.4275, 0.1882, 0.7412], // #6d30bd - Purple
+    [0.3216, 0.5843, 0.3020], // #52964d - Green
 ];
 
 #[derive(Debug)]
