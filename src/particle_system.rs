@@ -18,10 +18,10 @@ pub struct Particle {
 // Size ranges for each particle type (multipliers of base size)
 // We'll use the middle value of each range with ±20% randomization
 const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 5] = [
-    1.2, // Type 0: Blue   - medium-large
-    1.5, // Type 1: Yellow - large, dominant
-    0.7, // Type 2: Red    - small, agile
-    0.9, // Type 3: Purple - smaller, compact
+    1.4, // Type 0: Blue   - medium-large
+    2.2, // Type 1: Yellow - large, dominant
+    0.4, // Type 2: Red    - small, agile
+    0.7, // Type 3: Purple - smaller, compact
     1.0, // Type 4: Green  - medium, balanced
 ];
 
@@ -58,8 +58,8 @@ impl ParticleSystem {
             let particle_type = (i % num_types) as u32;
             let base_multiplier = PARTICLE_TYPE_SIZE_MULTIPLIERS[particle_type as usize];
 
-            // Add ±20% randomization to the base multiplier
-            let randomization_factor = rng.gen_range(-0.2..0.2);
+            // Add ±40% randomization to the base multiplier
+            let randomization_factor = rng.gen_range(-0.4..0.4);
             let size_multiplier = base_multiplier * (1.0 + randomization_factor);
 
             let particle = Particle {

@@ -508,8 +508,8 @@ impl SimulationParams {
         // Hue: 220 (blauw) → 0 (rood)
         // Bereikt max blauw al bij 80°C, max rood bij 140°C
         // Saturation en lightness zijn constant
-        const S: f32 = 22.0;
-        const L: f32 = 66.0;
+        const S: f32 = 33.0;
+        const L: f32 = 77.0;
         let hue_temp = temp.max(80.0).min(140.0);
         let normalized_hue = (hue_temp - 80.0) / (140.0 - 80.0);
         let hue = 220.0 + normalized_hue * (0.0 - 220.0); // 220 → 0
