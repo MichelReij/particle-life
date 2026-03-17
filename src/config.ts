@@ -10,7 +10,7 @@ export const CANVAS_WIDTH = 1080.0;
 export const CANVAS_HEIGHT = 1080.0;
 
 // Particle rendering size - the diameter of particles in pixels
-export const PARTICLE_SIZE = 10.0;
+export const PARTICLE_SIZE = 9.0;
 export const PARTICLE_SIZE_MIN = 8.0;
 export const PARTICLE_SIZE_MAX = 32.0;
 
@@ -80,19 +80,19 @@ export const DEFAULT_WORLD_CONFIG: WorldConfig = {
 
 // Utility functions
 export function getWorldCenter(
-    config: WorldConfig = DEFAULT_WORLD_CONFIG
+    config: WorldConfig = DEFAULT_WORLD_CONFIG,
 ): [number, number] {
     return [config.virtualWorldWidth / 2.0, config.virtualWorldHeight / 2.0];
 }
 
 export function getScaleFactor(
-    config: WorldConfig = DEFAULT_WORLD_CONFIG
+    config: WorldConfig = DEFAULT_WORLD_CONFIG,
 ): number {
     return config.canvasWidth / config.virtualWorldWidth;
 }
 
 export function getVirtualDimensions(
-    config: WorldConfig = DEFAULT_WORLD_CONFIG
+    config: WorldConfig = DEFAULT_WORLD_CONFIG,
 ): [number, number] {
     return [
         Math.floor(config.virtualWorldWidth),
@@ -101,7 +101,7 @@ export function getVirtualDimensions(
 }
 
 export function getCanvasDimensions(
-    config: WorldConfig = DEFAULT_WORLD_CONFIG
+    config: WorldConfig = DEFAULT_WORLD_CONFIG,
 ): [number, number] {
     return [Math.floor(config.canvasWidth), Math.floor(config.canvasHeight)];
 }

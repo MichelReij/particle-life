@@ -26,12 +26,13 @@ const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 5] = [
 ];
 
 // Custom color palette matching TypeScript version
+// Colors adjusted via OKLCH: +10% lightness, -10% chroma vs originals
 const CUSTOM_COLORS: [[f32; 3]; 5] = [
-    [0.0141, 0.4549, 0.6784], // #0374ad - Blue
-    [0.7804, 0.5216, 0.0745], // #c78513 - Yellow
-    [0.7490, 0.1098, 0.1098], // #bf1c1c - Red
-    [0.4275, 0.1882, 0.7412], // #6d30bd - Purple
-    [0.3216, 0.5843, 0.3020], // #52964d - Green
+    [0.2021, 0.5173, 0.7212], // #3383b7 - Blue
+    [0.8481, 0.6113, 0.2762], // #d89b46 - Yellow
+    [0.7915, 0.2491, 0.2162], // #c93f37 - Red
+    [0.4708, 0.2810, 0.7663], // #7847c3 - Purple
+    [0.4166, 0.6520, 0.3967], // #6aa665 - Green
 ];
 
 #[derive(Debug)]
@@ -184,7 +185,7 @@ impl ParticleSystem {
 
     // Get particle colors buffer in RGBA format
     pub fn get_colors_buffer(&self) -> Vec<u8> {
-        let default_opacity = 0.6f32;
+        let default_opacity = 0.55f32;
         let mut buffer = Vec::with_capacity(self.num_types as usize * 16); // 4 floats per type
 
         for i in 0..self.num_types as usize {

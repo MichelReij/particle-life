@@ -129,6 +129,10 @@ struct VertexOutput {
     @location(0) particle_color: vec4<f32>,
     @location(1) quad_uv: vec2<f32>,
     // UV coordinates for circular particle rendering
+    @location(2) particle_id: f32,
+    // Particle index for unique base shape
+    @location(3) velocity_angle: f32,
+    // Direction of movement (atan2), drives organic shape rotation
 }
 
 // Get color for particle type from precomputed custom colors buffer
@@ -199,13 +203,18 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
     // Scale quad vertex by particle size - scale relative to viewport size for proper zoom behavior
     let viewport_scale_x = 2.0 / sim_params.viewport_width;
     let viewport_scale_y = 2.0 / sim_params.viewport_height;
-    let scaled_quad_pos = vec2<f32>(vertex_attrs.quad_pos.x * particle_radius_pixels * viewport_scale_x, vertex_attrs.quad_pos.y * particle_radius_pixels * viewport_scale_y);
+    // 1.25x margin so wobble protrusions are never clipped at the quad boundary
+    let wobble_margin: f32 = 1.1;
+    let scaled_quad_pos = vec2<f32>(vertex_attrs.quad_pos.x * particle_radius_pixels * wobble_margin * viewport_scale_x, vertex_attrs.quad_pos.y * particle_radius_pixels * wobble_margin * viewport_scale_y);
 
     out.position = vec4<f32>(normalized_particle_pos + scaled_quad_pos, 0.0, 1.0);
     out.particle_color = particle_color;
 
-    // Calculate UV coordinates for the quad (convert from [-1,1] to [0,1])
-    out.quad_uv = (vertex_attrs.quad_pos + 1.0) * 0.5;
+    // UV: scale by wobble_margin so frag uv_centered covers ±0.625 — enough room for max wobble
+    out.quad_uv = vec2<f32>(vertex_attrs.quad_pos.x * 0.5 * wobble_margin + 0.5, vertex_attrs.quad_pos.y * 0.5 * wobble_margin + 0.5);
+    out.particle_id = f32(vertex_attrs.instance_idx);
+    // Shape orientation follows velocity direction (like an amoeba facing its direction of travel)
+    out.velocity_angle = atan2(particle_attrs.particle_vel.y, particle_attrs.particle_vel.x);
 
     return out;
 }

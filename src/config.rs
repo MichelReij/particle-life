@@ -10,7 +10,7 @@ pub const CANVAS_WIDTH: f32 = 1080.0;
 pub const CANVAS_HEIGHT: f32 = 1080.0;
 
 /// Particle rendering size - the diameter of particles in pixels
-pub const PARTICLE_SIZE: f32 = 10.0;
+pub const PARTICLE_SIZE: f32 = 9.0;
 pub const PARTICLE_SIZE_MIN: f32 = 8.0;
 pub const PARTICLE_SIZE_MAX: f32 = 32.0;
 
