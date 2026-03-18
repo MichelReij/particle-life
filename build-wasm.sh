@@ -28,8 +28,7 @@ wasm-pack build \
   --target web \
   --out-dir src/pkg \
   --out-name particle_life_wasm \
-  --release \
-  --scope particle-life
+  --release
 
 # Verify the build was successful
 if [ ! -f "src/pkg/particle_life_wasm_bg.wasm" ]; then
@@ -49,6 +48,11 @@ else
     echo "   brew install binaryen   (on macOS)"
     echo "   apt install binaryen    (on Ubuntu)"
 fi
+
+echo "📋 Syncing shaders to public/shaders/..."
+mkdir -p public/shaders
+cp src/shaders/*.wgsl public/shaders/
+echo "✅ Shaders synced!"
 
 echo "🎉 WASM build complete!"
 echo "Generated files:"

@@ -446,6 +446,21 @@ impl ParticleLifeEngine {
         );
     }
 
+    // Set particle opacity (0.0 = invisible, 1.0 = fully opaque)
+    #[wasm_bindgen]
+    pub fn set_particle_opacity(&mut self, opacity: f32) {
+        self.particle_system.particle_opacity = opacity.clamp(0.0, 1.0);
+    }
+
+    // Set color for a specific particle type (sRGB 0-1 range)
+    #[wasm_bindgen]
+    pub fn set_type_color(&mut self, type_idx: usize, r: f32, g: f32, b: f32) {
+        if type_idx < 5 {
+            self.particle_system.type_colors[type_idx] =
+                [r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0)];
+        }
+    }
+
     // Set electrical activity and update all electrical-related simulation parameters
     #[wasm_bindgen]
     pub fn set_electrical_activity(&mut self, electrical_activity: f32) {

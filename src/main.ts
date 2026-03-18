@@ -1,10 +1,11 @@
 console.log("🚀 main.ts loading with proper WASM integration...");
 
 // Import WASM module using the standard wasm-bindgen approach
-import init, { ParticleLifeEngine } from "./pkg/particle_life_wasm.js";
+import init, { ParticleLifeEngine } from "./pkg/particle_life_wasm";
 import {
     setParameterUpdateCallbacks,
     initializeUI,
+    initColorPanel,
     updateJoystickPan,
 } from "./ui";
 import { SimulationParams } from "./particle-life-types";
@@ -283,6 +284,21 @@ class App {
                     this.engine.set_electrical_activity(electrical);
                 }
             },
+            setParticleOpacity: (opacity: number) => {
+                if (this.engine) {
+                    this.engine.set_particle_opacity(opacity);
+                }
+            },
+            setTypeColor: (
+                typeIdx: number,
+                r: number,
+                g: number,
+                b: number,
+            ) => {
+                if (this.engine) {
+                    this.engine.set_type_color(typeIdx, r, g, b);
+                }
+            },
             setZoom: (level: number, centerX?: number, centerY?: number) => {
                 if (this.engine) {
                     this.engine.set_zoom(level, centerX, centerY);
@@ -334,6 +350,7 @@ class App {
         const defaultZoomLevel = 1.0;
         console.log("🎯 Initializing UI with default parameters...");
         initializeUI(defaultSimParams, defaultZoomLevel);
+        initColorPanel();
 
         console.log("✅ UI controls wired up");
     }

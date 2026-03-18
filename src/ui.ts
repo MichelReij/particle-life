@@ -50,6 +50,7 @@ const STORAGE_KEYS = {
     interTypeRadiusScale: "particleLife_interTypeRadiusScale",
     fisheyeStrength: "particleLife_fisheyeStrength",
     particleRenderSize: "particleLife_particleRenderSize",
+    opacity: "particleLife_opacity",
 };
 
 // === Storage Functions ===
@@ -207,6 +208,8 @@ let parameterUpdateCallbacks = {
     setPH: (ph: number) => {},
     setElectricalActivity: (electrical: number) => {},
     setZoom: (level: number, centerX?: number, centerY?: number) => {},
+    setParticleOpacity: (opacity: number) => {},
+    setTypeColor: (typeIdx: number, r: number, g: number, b: number) => {},
     // Rule regeneration
     regenerateRules: () => {},
 };
@@ -227,6 +230,8 @@ export function setParameterUpdateCallbacks(callbacks: {
     setPH?: (ph: number) => void;
     setElectricalActivity?: (electrical: number) => void;
     setZoom?: (level: number, centerX?: number, centerY?: number) => void;
+    setParticleOpacity?: (opacity: number) => void;
+    setTypeColor?: (typeIdx: number, r: number, g: number, b: number) => void;
     // Rule regeneration
     regenerateRules?: () => void;
 }) {
@@ -251,6 +256,11 @@ export function setParameterUpdateCallbacks(callbacks: {
             callbacks.setElectricalActivity ||
             parameterUpdateCallbacks.setElectricalActivity,
         setZoom: callbacks.setZoom || parameterUpdateCallbacks.setZoom,
+        setParticleOpacity:
+            callbacks.setParticleOpacity ||
+            parameterUpdateCallbacks.setParticleOpacity,
+        setTypeColor:
+            callbacks.setTypeColor || parameterUpdateCallbacks.setTypeColor,
         // Rule regeneration
         regenerateRules:
             callbacks.regenerateRules ||
@@ -1511,4 +1521,322 @@ export function cleanup(): void {
         }
     }
     (window as any).__webgpuDevice = undefined;
+}
+
+// ============================================================
+// OKLCH Color Panel
+// ============================================================
+
+// OKLCH → sRGB conversion
+function oklchToSrgb(
+    l: number,
+    c: number,
+    h: number,
+): [number, number, number] {
+    const hRad = (h * Math.PI) / 180;
+    const a = c * Math.cos(hRad);
+    const b = c * Math.sin(hRad);
+
+    // Oklab → linear RGB
+    const l_ = l + 0.3963377774 * a + 0.2158037573 * b;
+    const m_ = l - 0.1055613458 * a - 0.0638541728 * b;
+    const s_ = l - 0.0894841775 * a - 1.291485548 * b;
+
+    const lc = l_ * l_ * l_;
+    const mc = m_ * m_ * m_;
+    const sc = s_ * s_ * s_;
+
+    const rLin = 4.0767416621 * lc - 3.3077115913 * mc + 0.2309699292 * sc;
+    const gLin = -1.2684380046 * lc + 2.6097574011 * mc - 0.3413193965 * sc;
+    const bLin = -0.0041960863 * lc - 0.7034186147 * mc + 1.6956086723 * sc;
+
+    const toSrgb = (x: number) =>
+        x <= 0.0031308
+            ? 12.92 * x
+            : 1.055 * Math.pow(Math.max(x, 0), 1 / 2.4) - 0.055;
+
+    return [
+        Math.max(0, Math.min(1, toSrgb(rLin))),
+        Math.max(0, Math.min(1, toSrgb(gLin))),
+        Math.max(0, Math.min(1, toSrgb(bLin))),
+    ];
+}
+
+// sRGB → OKLCH (for initializing sliders from hex)
+function srgbToOklch(
+    r: number,
+    g: number,
+    b: number,
+): [number, number, number] {
+    const toLinear = (x: number) =>
+        x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
+
+    const rLin = toLinear(r);
+    const gLin = toLinear(g);
+    const bLin = toLinear(b);
+
+    const l_ = Math.cbrt(
+        0.4122214708 * rLin + 0.5363325363 * gLin + 0.0514459929 * bLin,
+    );
+    const m_ = Math.cbrt(
+        0.2119034982 * rLin + 0.6806995451 * gLin + 0.1073969566 * bLin,
+    );
+    const s_ = Math.cbrt(
+        0.0883024619 * rLin + 0.2817188376 * gLin + 0.6299787005 * bLin,
+    );
+
+    const L = 0.2104542553 * l_ + 0.793617785 * m_ - 0.0040720468 * s_;
+    const a = 1.9779984951 * l_ - 2.428592205 * m_ + 0.4505937099 * s_;
+    const bk = -0.0259040371 * l_ + 0.7827717662 * m_ - 0.7568667852 * s_;
+
+    const C = Math.sqrt(a * a + bk * bk);
+    let H = (Math.atan2(bk, a) * 180) / Math.PI;
+    if (H < 0) H += 360;
+
+    return [L, C, H];
+}
+
+function srgbToHex(r: number, g: number, b: number): string {
+    const toHex = (x: number) =>
+        Math.round(Math.max(0, Math.min(1, x)) * 255)
+            .toString(16)
+            .padStart(2, "0");
+    return "#" + toHex(r) + toHex(g) + toHex(b);
+}
+
+function hexToSrgb(hex: string): [number, number, number] {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    return [r, g, b];
+}
+
+// Current OKLCH state per type [L, C, H]
+const typeOklch: [number, number, number][] = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+];
+
+const PALETTE_STORAGE_KEY = "particle_color_palettes";
+
+function loadPalettes(): { name: string; colors: string[] }[] {
+    try {
+        return JSON.parse(localStorage.getItem(PALETTE_STORAGE_KEY) || "[]");
+    } catch {
+        return [];
+    }
+}
+
+function savePalettes(palettes: { name: string; colors: string[] }[]): void {
+    localStorage.setItem(PALETTE_STORAGE_KEY, JSON.stringify(palettes));
+}
+
+function refreshPaletteSelect(): void {
+    const sel = document.getElementById("palette-select") as HTMLSelectElement;
+    if (!sel) return;
+    const palettes = loadPalettes();
+    sel.innerHTML = '<option value="">— saved palettes —</option>';
+    palettes.forEach((p, i) => {
+        const opt = document.createElement("option");
+        opt.value = String(i);
+        opt.textContent = p.name;
+        sel.appendChild(opt);
+    });
+}
+
+function applyTypeColor(typeIdx: number): void {
+    const [l, c, h] = typeOklch[typeIdx];
+    const [r, g, b] = oklchToSrgb(l, c, h);
+
+    // Update swatch
+    const swatch = document.getElementById(`swatch-${typeIdx}`);
+    if (swatch) swatch.style.backgroundColor = srgbToHex(r, g, b);
+
+    // Send to Rust engine
+    if (parameterUpdateCallbacks.setTypeColor) {
+        parameterUpdateCallbacks.setTypeColor(typeIdx, r, g, b);
+    }
+}
+
+export function initColorPanel(): void {
+    const rows = document.querySelectorAll<HTMLElement>(".color-type-row");
+
+    rows.forEach((row) => {
+        const typeIdx = parseInt(row.dataset.type || "0");
+        const hSlider = row.querySelector<HTMLInputElement>(".oklch-h");
+        const lSlider = row.querySelector<HTMLInputElement>(".oklch-l");
+        const cSlider = row.querySelector<HTMLInputElement>(".oklch-c");
+        const hVal = row.querySelector<HTMLElement>(".oklch-h-val");
+        const lVal = row.querySelector<HTMLElement>(".oklch-l-val");
+        const cVal = row.querySelector<HTMLElement>(".oklch-c-val");
+
+        if (!hSlider || !lSlider || !cSlider) return;
+
+        // Initialize typeOklch from current slider defaults
+        typeOklch[typeIdx] = [
+            parseFloat(lSlider.value),
+            parseFloat(cSlider.value),
+            parseFloat(hSlider.value),
+        ];
+        applyTypeColor(typeIdx);
+
+        const onInput = () => {
+            const h = parseFloat(hSlider.value);
+            const l = parseFloat(lSlider.value);
+            const c = parseFloat(cSlider.value);
+            typeOklch[typeIdx] = [l, c, h];
+            if (hVal) hVal.textContent = h.toFixed(0);
+            if (lVal) lVal.textContent = l.toFixed(2);
+            if (cVal) cVal.textContent = c.toFixed(3);
+            applyTypeColor(typeIdx);
+        };
+
+        hSlider.addEventListener("input", onInput);
+        lSlider.addEventListener("input", onInput);
+        cSlider.addEventListener("input", onInput);
+    });
+
+    // Toggle collapse
+    const toggleBtn = document.getElementById("color-panel-toggle");
+    const body = document.getElementById("color-panel-body");
+    if (toggleBtn && body) {
+        toggleBtn.addEventListener("click", () => {
+            const collapsed = body.style.display === "none";
+            body.style.display = collapsed ? "" : "none";
+            toggleBtn.textContent = collapsed ? "▼" : "▶";
+        });
+    }
+
+    // Save palette
+    document
+        .getElementById("save-palette-btn")
+        ?.addEventListener("click", () => {
+            const palettes = loadPalettes();
+            const name = `palette ${palettes.length + 1}`;
+            const colors = typeOklch.map(([l, c, h]) =>
+                srgbToHex(...oklchToSrgb(l, c, h)),
+            );
+            palettes.push({ name, colors });
+            savePalettes(palettes);
+            refreshPaletteSelect();
+            // Auto-select the newly saved palette
+            const sel = document.getElementById(
+                "palette-select",
+            ) as HTMLSelectElement;
+            if (sel) sel.value = String(palettes.length - 1);
+        });
+
+    // Load palette helper
+    const applySelectedPalette = () => {
+        const sel = document.getElementById(
+            "palette-select",
+        ) as HTMLSelectElement;
+        if (!sel || sel.value === "") return;
+        const palettes = loadPalettes();
+        const palette = palettes[parseInt(sel.value)];
+        if (!palette) return;
+
+        const rows = document.querySelectorAll<HTMLElement>(".color-type-row");
+        palette.colors.forEach((hex, i) => {
+            if (i >= 5) return;
+            const [r, g2, b] = hexToSrgb(hex);
+            const [l, c, h] = srgbToOklch(r, g2, b);
+            typeOklch[i] = [l, c, h];
+
+            const row = rows[i];
+            if (!row) return;
+            const hSlider = row.querySelector<HTMLInputElement>(".oklch-h");
+            const lSlider = row.querySelector<HTMLInputElement>(".oklch-l");
+            const cSlider = row.querySelector<HTMLInputElement>(".oklch-c");
+            const hVal = row.querySelector<HTMLElement>(".oklch-h-val");
+            const lVal = row.querySelector<HTMLElement>(".oklch-l-val");
+            const cVal = row.querySelector<HTMLElement>(".oklch-c-val");
+            if (hSlider) {
+                hSlider.value = h.toFixed(0);
+                if (hVal) hVal.textContent = h.toFixed(0);
+            }
+            if (lSlider) {
+                lSlider.value = String(l);
+                if (lVal) lVal.textContent = l.toFixed(2);
+            }
+            if (cSlider) {
+                cSlider.value = String(c);
+                if (cVal) cVal.textContent = c.toFixed(3);
+            }
+            applyTypeColor(i);
+        });
+    };
+
+    // Auto-load when selecting from dropdown
+    document
+        .getElementById("palette-select")
+        ?.addEventListener("change", applySelectedPalette);
+
+    // Delete palette
+    document
+        .getElementById("delete-palette-btn")
+        ?.addEventListener("click", () => {
+            const sel = document.getElementById(
+                "palette-select",
+            ) as HTMLSelectElement;
+            if (!sel || sel.value === "") return;
+            const palettes = loadPalettes();
+            palettes.splice(parseInt(sel.value), 1);
+            savePalettes(palettes);
+            refreshPaletteSelect();
+        });
+
+    refreshPaletteSelect();
+
+    // Copy current colors as Rust source
+    document
+        .getElementById("copy-palette-btn")
+        ?.addEventListener("click", () => {
+            const typeNames = ["Blue", "Yellow", "Red", "Purple", "Green"];
+            const lines = typeOklch.map(([l, c, h], i) => {
+                const [r, g, b] = oklchToSrgb(l, c, h);
+                const hex = srgbToHex(r, g, b);
+                const fmt = (x: number) => x.toFixed(4);
+                return `    [${fmt(r)}, ${fmt(g)}, ${fmt(b)}], // ${hex} - ${typeNames[i]}`;
+            });
+            const text = `const DEFAULT_COLORS: [[f32; 3]; 5] = [\n${lines.join("\n")}\n];`;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = document.getElementById("copy-palette-btn");
+                if (btn) {
+                    const orig = btn.textContent;
+                    btn.textContent = "Copied!";
+                    setTimeout(() => {
+                        btn.textContent = orig;
+                    }, 1500);
+                }
+            });
+        });
+
+    // Opacity slider (in color panel)
+    const opacitySlider = document.getElementById(
+        "opacitySlider",
+    ) as HTMLInputElement | null;
+    const opacityValueDisplay = document.getElementById("opacityValue");
+
+    if (opacitySlider && opacityValueDisplay) {
+        // Restore from localStorage
+        const stored = loadFromLocalStorage(STORAGE_KEYS.opacity, 0.55);
+        opacitySlider.value = String(stored);
+        opacityValueDisplay.textContent = stored.toFixed(2);
+        if (parameterUpdateCallbacks.setParticleOpacity) {
+            parameterUpdateCallbacks.setParticleOpacity(stored);
+        }
+
+        opacitySlider.addEventListener("input", () => {
+            const val = parseFloat(opacitySlider.value);
+            opacityValueDisplay.textContent = val.toFixed(2);
+            saveToLocalStorage(STORAGE_KEYS.opacity, val);
+            if (parameterUpdateCallbacks.setParticleOpacity) {
+                parameterUpdateCallbacks.setParticleOpacity(val);
+            }
+        });
+    }
 }

@@ -25,14 +25,13 @@ const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 5] = [
     1.0, // Type 4: Green  - medium, balanced
 ];
 
-// Custom color palette matching TypeScript version
-// Colors adjusted via OKLCH: +10% lightness, -10% chroma vs originals
-const CUSTOM_COLORS: [[f32; 3]; 5] = [
-    [0.2021, 0.5173, 0.7212], // #3383b7 - Blue
-    [0.8481, 0.6113, 0.2762], // #d89b46 - Yellow
-    [0.7915, 0.2491, 0.2162], // #c93f37 - Red
-    [0.4708, 0.2810, 0.7663], // #7847c3 - Purple
-    [0.4166, 0.6520, 0.3967], // #6aa665 - Green
+// Default color palette (sRGB 0-1), OKLCH-adjusted
+const DEFAULT_COLORS: [[f32; 3]; 5] = [
+    [0.3978, 0.6212, 0.7898], // #659ec9 - Blue
+    [0.9462, 0.8414, 0.4323], // #f1d76e - Yellow
+    [0.7394, 0.4472, 0.5444], // #bd728b - Red
+    [0.6307, 0.5487, 0.9415], // #a18cf0 - Purple
+    [0.4216, 0.6984, 0.4047], // #6cb267 - Green
 ];
 
 #[derive(Debug)]
@@ -43,6 +42,8 @@ pub struct ParticleSystem {
     active_count: u32,
     num_types: u32,
     base_particle_size: f32,
+    pub particle_opacity: f32,
+    pub type_colors: [[f32; 3]; 5],
     spatial_grid: SpatialGrid,
 }
 
@@ -93,7 +94,9 @@ impl ParticleSystem {
             min_particles,
             active_count: params.num_particles,
             num_types,
-            base_particle_size: params.particle_render_size, // Store the base size from params
+            base_particle_size: params.particle_render_size,
+            particle_opacity: 0.9,
+            type_colors: DEFAULT_COLORS,
             spatial_grid,
         }
     }
@@ -185,11 +188,11 @@ impl ParticleSystem {
 
     // Get particle colors buffer in RGBA format
     pub fn get_colors_buffer(&self) -> Vec<u8> {
-        let default_opacity = 0.55f32;
+        let default_opacity = self.particle_opacity;
         let mut buffer = Vec::with_capacity(self.num_types as usize * 16); // 4 floats per type
 
         for i in 0..self.num_types as usize {
-            let color = CUSTOM_COLORS[i % CUSTOM_COLORS.len()];
+            let color = self.type_colors[i % 5];
 
             // Store RGBA values as little-endian f32
             buffer.extend_from_slice(&color[0].to_le_bytes()); // Red
