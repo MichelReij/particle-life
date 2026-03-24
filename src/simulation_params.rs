@@ -83,7 +83,7 @@ impl SimulationParams {
             delta_time: 1.0 / 60.0,
             friction: 0.1,
             num_particles: DEFAULT_NUM_PARTICLES, // Initialize with all particles active to prevent GPU buffer hiccups
-            num_types: 5,
+            num_types: 6,
             virtual_world_width: VIRTUAL_WORLD_WIDTH,
             virtual_world_height: VIRTUAL_WORLD_HEIGHT,
             canvas_render_width: CANVAS_WIDTH,

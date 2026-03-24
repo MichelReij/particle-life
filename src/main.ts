@@ -299,6 +299,12 @@ class App {
                     this.engine.set_type_color(typeIdx, r, g, b);
                 }
             },
+            getTypeColorsRgb: (): Float32Array | null => {
+                if (this.engine) {
+                    return this.engine.get_type_colors_rgb() as unknown as Float32Array;
+                }
+                return null;
+            },
             setZoom: (level: number, centerX?: number, centerY?: number) => {
                 if (this.engine) {
                     this.engine.set_zoom(level, centerX, centerY);

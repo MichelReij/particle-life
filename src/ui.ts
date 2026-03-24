@@ -210,6 +210,7 @@ let parameterUpdateCallbacks = {
     setZoom: (level: number, centerX?: number, centerY?: number) => {},
     setParticleOpacity: (opacity: number) => {},
     setTypeColor: (typeIdx: number, r: number, g: number, b: number) => {},
+    getTypeColorsRgb: (): Float32Array | null => null,
     // Rule regeneration
     regenerateRules: () => {},
 };
@@ -232,6 +233,7 @@ export function setParameterUpdateCallbacks(callbacks: {
     setZoom?: (level: number, centerX?: number, centerY?: number) => void;
     setParticleOpacity?: (opacity: number) => void;
     setTypeColor?: (typeIdx: number, r: number, g: number, b: number) => void;
+    getTypeColorsRgb?: () => Float32Array | null;
     // Rule regeneration
     regenerateRules?: () => void;
 }) {
@@ -261,6 +263,9 @@ export function setParameterUpdateCallbacks(callbacks: {
             parameterUpdateCallbacks.setParticleOpacity,
         setTypeColor:
             callbacks.setTypeColor || parameterUpdateCallbacks.setTypeColor,
+        getTypeColorsRgb:
+            callbacks.getTypeColorsRgb ||
+            parameterUpdateCallbacks.getTypeColorsRgb,
         // Rule regeneration
         regenerateRules:
             callbacks.regenerateRules ||
@@ -748,29 +753,52 @@ export function updateJoystickPan(deltaTime: number): void {
 }
 
 /**
- * Snap the pan center back to the middle of the virtual world.
+ * Smoothly animate the pan center back to the middle of the virtual world.
  * Triggered by a joystick button click (web: tap on stick canvas,
  * native: joystick button via ESP32).
  */
 export function resetPanToCenter(): void {
-    zoomCenterX = VIRTUAL_WORLD_CENTER_X;
-    zoomCenterY = VIRTUAL_WORLD_CENTER_Y;
+    const startX = zoomCenterX;
+    const startY = zoomCenterY;
+    const targetX = VIRTUAL_WORLD_CENTER_X;
+    const targetY = VIRTUAL_WORLD_CENTER_Y;
+
+    if (startX === targetX && startY === targetY) return;
+
+    const duration = 500; // ms
+    const startTime = performance.now();
 
     const zoomSlider = document.getElementById(
         "zoomSlider",
     ) as HTMLInputElement;
     const zoom = zoomSlider ? parseFloat(zoomSlider.value) : 1.0;
 
-    if (parameterUpdateCallbacks.setZoom) {
-        parameterUpdateCallbacks.setZoom(zoom, zoomCenterX, zoomCenterY);
-    } else {
-        parameterUpdateCallbacks.updateZoom(zoom, zoomCenterX, zoomCenterY);
-    }
+    const tick = (now: number) => {
+        const elapsed = now - startTime;
+        const t = Math.min(elapsed / duration, 1);
+        // ease-in-out cubic
+        const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
-    updateZoomCenterInfo(zoom);
-    console.log(
-        `\ud83c\udfaf Pan reset to world center (${zoomCenterX}, ${zoomCenterY})`,
-    );
+        zoomCenterX = startX + (targetX - startX) * ease;
+        zoomCenterY = startY + (targetY - startY) * ease;
+
+        if (parameterUpdateCallbacks.setZoom) {
+            parameterUpdateCallbacks.setZoom(zoom, zoomCenterX, zoomCenterY);
+        } else {
+            parameterUpdateCallbacks.updateZoom(zoom, zoomCenterX, zoomCenterY);
+        }
+        updateZoomCenterInfo(zoom);
+
+        if (t < 1) {
+            requestAnimationFrame(tick);
+        } else {
+            console.log(
+                `🎯 Pan reset to world center (${zoomCenterX}, ${zoomCenterY})`,
+            );
+        }
+    };
+
+    requestAnimationFrame(tick);
 }
 
 // === FPS Display ===
@@ -1618,6 +1646,17 @@ const typeOklch: [number, number, number][] = [
     [0, 0, 0],
     [0, 0, 0],
     [0, 0, 0],
+    [0, 0, 0],
+];
+
+// Built-in defaults captured at startup from HTML slider values
+const builtinTypeOklch: [number, number, number][] = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
 ];
 
 const PALETTE_STORAGE_KEY = "particle_color_palettes";
@@ -1638,13 +1677,24 @@ function refreshPaletteSelect(): void {
     const sel = document.getElementById("palette-select") as HTMLSelectElement;
     if (!sel) return;
     const palettes = loadPalettes();
-    sel.innerHTML = '<option value="">— saved palettes —</option>';
+    const current = sel.value;
+    sel.innerHTML = '<option value="__builtin__">In-built colors</option>';
     palettes.forEach((p, i) => {
         const opt = document.createElement("option");
         opt.value = String(i);
         opt.textContent = p.name;
         sel.appendChild(opt);
     });
+    // Restore previous selection if still valid, otherwise keep In-built colors
+    if (
+        current !== "" &&
+        current !== "__builtin__" &&
+        palettes[parseInt(current)]
+    ) {
+        sel.value = current;
+    } else {
+        sel.value = "__builtin__";
+    }
 }
 
 function applyTypeColor(typeIdx: number): void {
@@ -1664,6 +1714,11 @@ function applyTypeColor(typeIdx: number): void {
 export function initColorPanel(): void {
     const rows = document.querySelectorAll<HTMLElement>(".color-type-row");
 
+    // Try to read initial colors from the engine (sRGB 0-1), convert to OKLCH
+    const engineColors = parameterUpdateCallbacks.getTypeColorsRgb
+        ? parameterUpdateCallbacks.getTypeColorsRgb()
+        : null;
+
     rows.forEach((row) => {
         const typeIdx = parseInt(row.dataset.type || "0");
         const hSlider = row.querySelector<HTMLInputElement>(".oklch-h");
@@ -1675,12 +1730,33 @@ export function initColorPanel(): void {
 
         if (!hSlider || !lSlider || !cSlider) return;
 
-        // Initialize typeOklch from current slider defaults
-        typeOklch[typeIdx] = [
-            parseFloat(lSlider.value),
-            parseFloat(cSlider.value),
-            parseFloat(hSlider.value),
-        ];
+        let l: number, c: number, h: number;
+
+        if (engineColors && typeIdx * 3 + 2 < engineColors.length) {
+            // Derive OKLCH from the engine's compiled-in RGB values
+            const r = engineColors[typeIdx * 3];
+            const g = engineColors[typeIdx * 3 + 1];
+            const b = engineColors[typeIdx * 3 + 2];
+            [l, c, h] = srgbToOklch(r, g, b);
+        } else {
+            // Fallback: use HTML slider defaults
+            l = parseFloat(lSlider.defaultValue);
+            c = parseFloat(cSlider.defaultValue);
+            h = parseFloat(hSlider.defaultValue);
+        }
+
+        // Update sliders to reflect derived values
+        hSlider.value = h.toFixed(0);
+        lSlider.value = String(l);
+        cSlider.value = String(c);
+        if (hVal) hVal.textContent = h.toFixed(0);
+        if (lVal) lVal.textContent = l.toFixed(2);
+        if (cVal) cVal.textContent = c.toFixed(3);
+
+        // Initialize typeOklch from the engine's built-in values
+        typeOklch[typeIdx] = [l, c, h];
+        // Capture built-in defaults for the "In-built colors" option
+        builtinTypeOklch[typeIdx] = [l, c, h];
         applyTypeColor(typeIdx);
 
         const onInput = () => {
@@ -1735,13 +1811,45 @@ export function initColorPanel(): void {
             "palette-select",
         ) as HTMLSelectElement;
         if (!sel || sel.value === "") return;
+
+        // Restore built-in (hardcoded) colors
+        if (sel.value === "__builtin__") {
+            const rows =
+                document.querySelectorAll<HTMLElement>(".color-type-row");
+            builtinTypeOklch.forEach(([l, c, h], i) => {
+                typeOklch[i] = [l, c, h];
+                const row = rows[i];
+                if (!row) return;
+                const hSlider = row.querySelector<HTMLInputElement>(".oklch-h");
+                const lSlider = row.querySelector<HTMLInputElement>(".oklch-l");
+                const cSlider = row.querySelector<HTMLInputElement>(".oklch-c");
+                const hVal = row.querySelector<HTMLElement>(".oklch-h-val");
+                const lVal = row.querySelector<HTMLElement>(".oklch-l-val");
+                const cVal = row.querySelector<HTMLElement>(".oklch-c-val");
+                if (hSlider) {
+                    hSlider.value = h.toFixed(0);
+                    if (hVal) hVal.textContent = h.toFixed(0);
+                }
+                if (lSlider) {
+                    lSlider.value = String(l);
+                    if (lVal) lVal.textContent = l.toFixed(2);
+                }
+                if (cSlider) {
+                    cSlider.value = String(c);
+                    if (cVal) cVal.textContent = c.toFixed(3);
+                }
+                applyTypeColor(i);
+            });
+            return;
+        }
+
         const palettes = loadPalettes();
         const palette = palettes[parseInt(sel.value)];
         if (!palette) return;
 
         const rows = document.querySelectorAll<HTMLElement>(".color-type-row");
         palette.colors.forEach((hex, i) => {
-            if (i >= 5) return;
+            if (i >= 6) return;
             const [r, g2, b] = hexToSrgb(hex);
             const [l, c, h] = srgbToOklch(r, g2, b);
             typeOklch[i] = [l, c, h];
@@ -1782,11 +1890,30 @@ export function initColorPanel(): void {
             const sel = document.getElementById(
                 "palette-select",
             ) as HTMLSelectElement;
-            if (!sel || sel.value === "") return;
+            if (!sel || sel.value === "" || sel.value === "__builtin__") return;
             const palettes = loadPalettes();
             palettes.splice(parseInt(sel.value), 1);
             savePalettes(palettes);
             refreshPaletteSelect();
+        });
+
+    // Rename palette
+    document
+        .getElementById("rename-palette-btn")
+        ?.addEventListener("click", () => {
+            const sel = document.getElementById(
+                "palette-select",
+            ) as HTMLSelectElement;
+            if (!sel || sel.value === "" || sel.value === "__builtin__") return;
+            const palettes = loadPalettes();
+            const idx = parseInt(sel.value);
+            const current = palettes[idx]?.name ?? "";
+            const newName = prompt("Rename palette:", current);
+            if (newName === null || newName.trim() === "") return;
+            palettes[idx].name = newName.trim();
+            savePalettes(palettes);
+            refreshPaletteSelect();
+            sel.value = String(idx);
         });
 
     refreshPaletteSelect();
@@ -1795,14 +1922,21 @@ export function initColorPanel(): void {
     document
         .getElementById("copy-palette-btn")
         ?.addEventListener("click", () => {
-            const typeNames = ["Blue", "Yellow", "Red", "Purple", "Green"];
+            const typeNames = [
+                "Blue",
+                "Yellow",
+                "Red",
+                "Purple",
+                "Green",
+                "Cyan",
+            ];
             const lines = typeOklch.map(([l, c, h], i) => {
                 const [r, g, b] = oklchToSrgb(l, c, h);
                 const hex = srgbToHex(r, g, b);
                 const fmt = (x: number) => x.toFixed(4);
                 return `    [${fmt(r)}, ${fmt(g)}, ${fmt(b)}], // ${hex} - ${typeNames[i]}`;
             });
-            const text = `const DEFAULT_COLORS: [[f32; 3]; 5] = [\n${lines.join("\n")}\n];`;
+            const text = `const DEFAULT_COLORS: [[f32; 3]; 6] = [\n${lines.join("\n")}\n];`;
             navigator.clipboard.writeText(text).then(() => {
                 const btn = document.getElementById("copy-palette-btn");
                 if (btn) {

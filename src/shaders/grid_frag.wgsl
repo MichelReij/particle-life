@@ -150,7 +150,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let dist_to_center_horizontal = abs(world_y - world_center_y);
 
     let line_color_rgb = vec3<f32>(1.0, 1.0, 1.0);
-    let line_alpha: f32 = 0.1;
+    let line_alpha: f32 = 0.2;
 
     // Anti-aliasing falloff in world coordinates
     let falloff = 0.5 / zoom_level;

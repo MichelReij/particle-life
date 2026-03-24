@@ -455,10 +455,20 @@ impl ParticleLifeEngine {
     // Set color for a specific particle type (sRGB 0-1 range)
     #[wasm_bindgen]
     pub fn set_type_color(&mut self, type_idx: usize, r: f32, g: f32, b: f32) {
-        if type_idx < 5 {
+        if type_idx < 6 {
             self.particle_system.type_colors[type_idx] =
                 [r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0)];
         }
+    }
+
+    // Get all type colors as flat [r0,g0,b0, r1,g1,b1, ...] sRGB 0-1
+    #[wasm_bindgen]
+    pub fn get_type_colors_rgb(&self) -> Vec<f32> {
+        self.particle_system
+            .type_colors
+            .iter()
+            .flat_map(|c| c.iter().copied())
+            .collect()
     }
 
     // Set electrical activity and update all electrical-related simulation parameters

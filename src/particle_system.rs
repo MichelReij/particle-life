@@ -17,21 +17,23 @@ pub struct Particle {
 
 // Size ranges for each particle type (multipliers of base size)
 // We'll use the middle value of each range with ±20% randomization
-const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 5] = [
+const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 6] = [
     1.4, // Type 0: Blue   - medium-large
     2.2, // Type 1: Yellow - large, dominant
     0.4, // Type 2: Red    - small, agile
     0.7, // Type 3: Purple - smaller, compact
     1.0, // Type 4: Green  - medium, balanced
+    1.8, // Type 5: Cyan   - medium-large
 ];
 
 // Default color palette (sRGB 0-1), OKLCH-adjusted
-const DEFAULT_COLORS: [[f32; 3]; 5] = [
-    [0.3978, 0.6212, 0.7898], // #659ec9 - Blue
-    [0.9462, 0.8414, 0.4323], // #f1d76e - Yellow
-    [0.7394, 0.4472, 0.5444], // #bd728b - Red
-    [0.6307, 0.5487, 0.9415], // #a18cf0 - Purple
-    [0.4216, 0.6984, 0.4047], // #6cb267 - Green
+const DEFAULT_COLORS: [[f32; 3]; 6] = [
+    [0.3902, 0.6096, 0.7892], // #639bc9 - Blue
+    [0.9924, 0.8014, 0.5757], // #fdcc93 - Yellow
+    [0.7957, 0.3700, 0.4336], // #cb5e6f - Red
+    [0.6415, 0.3928, 0.6636], // #a464a9 - Purple
+    [0.3768, 0.6433, 0.4193], // #60a46b - Green
+    [0.2000, 0.8000, 0.7500], // #33ccbf - Cyan
 ];
 
 #[derive(Debug)]
@@ -43,7 +45,7 @@ pub struct ParticleSystem {
     num_types: u32,
     base_particle_size: f32,
     pub particle_opacity: f32,
-    pub type_colors: [[f32; 3]; 5],
+    pub type_colors: [[f32; 3]; 6],
     spatial_grid: SpatialGrid,
 }
 
@@ -51,7 +53,7 @@ impl ParticleSystem {
     pub fn new(params: &SimulationParams, _rules: &InteractionRules, rng: &mut SmallRng) -> Self {
         let max_particles = MAX_PARTICLES;
         let min_particles = MIN_PARTICLES;
-        let num_types = 5;
+        let num_types = 6;
 
         let mut particles = Vec::with_capacity(max_particles as usize);
 
@@ -192,7 +194,7 @@ impl ParticleSystem {
         let mut buffer = Vec::with_capacity(self.num_types as usize * 16); // 4 floats per type
 
         for i in 0..self.num_types as usize {
-            let color = self.type_colors[i % 5];
+            let color = self.type_colors[i % 6];
 
             // Store RGBA values as little-endian f32
             buffer.extend_from_slice(&color[0].to_le_bytes()); // Red

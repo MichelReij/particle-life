@@ -433,7 +433,7 @@ impl WebGpuRenderer {
         // Create initial particle data (similar to TypeScript createInitialParticles)
         let max_particles = 6400; // Reduced from 32768 - supports up to 8K particles efficiently
         let active_particles = 6400; // Initialize all particles that the engine uses
-        let num_types = 5;
+        let num_types = 6;
         let virtual_world_width = VIRTUAL_WORLD_WIDTH;
         let virtual_world_height = VIRTUAL_WORLD_HEIGHT;
         let particle_render_size = PARTICLE_SIZE;
@@ -1877,7 +1877,29 @@ impl WebGpuRenderer {
             background_pass.draw(0..6, 0..1); // Fullscreen quad (6 vertices for 2 triangles)
         }
 
-        // Pass 2: Particle render to scene texture (additive blend)
+        // Pass 2: Grid render to scene texture (drawn before particles)
+        {
+            let mut grid_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Grid Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_texture_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load, // Keep background
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            grid_pass.set_pipeline(&self.grid_render_pipeline);
+            grid_pass.set_bind_group(0, &self.grid_render_bind_group, &[]);
+            grid_pass.draw(0..6, 0..1); // Fullscreen quad
+        }
+
+        // Pass 3: Particle render to scene texture (drawn on top of grid)
         {
             let mut particle_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Particle Render Pass"),
@@ -1885,7 +1907,7 @@ impl WebGpuRenderer {
                     view: &self.scene_texture_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load, // Keep background
+                        load: wgpu::LoadOp::Load, // Keep existing content
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -1902,28 +1924,6 @@ impl WebGpuRenderer {
 
             let particle_count = particle_system.get_active_count();
             particle_pass.draw(0..4, 0..particle_count);
-        }
-
-        // Pass 3: Grid render to scene texture (additive blend)
-        {
-            let mut grid_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Grid Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.scene_texture_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load, // Keep existing content
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            grid_pass.set_pipeline(&self.grid_render_pipeline);
-            grid_pass.set_bind_group(0, &self.grid_render_bind_group, &[]);
-            grid_pass.draw(0..6, 0..1); // Fullscreen quad
         }
 
         // Pass 4: Lightning render to scene texture (additive blend)
