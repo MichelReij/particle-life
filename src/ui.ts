@@ -178,16 +178,13 @@ function pressureToForceScale(pressure: number): number {
 function electricalActivityToInterTypeAttractionScale(
     electricalActivity: number,
 ): number {
-    // Non-linear cubic mapping: Electrical Activity [0, 3] → interTypeAttractionScale [0, 1.5]
-    // This creates a very pronounced acceleration curve where:
-    // - Low electrical activity has very minimal effect on attraction
-    // - Medium electrical activity has moderate effect
-    // - High electrical activity has dramatic effect on attraction
-    // Formula: ITAS = (electricalActivity/3)³ × 1.5
-    const normalizedElectrical = electricalActivity / 3.0; // Normalize to [0, 1]
-    const cubicValue =
-        normalizedElectrical * normalizedElectrical * normalizedElectrical; // Cube for strong non-linearity
-    return cubicValue * 1.5; // Scale back to [0, 1.5]
+    // Non-linear cubic mapping: Electrical Activity [0, 3] → interTypeAttractionScale [-1.0, 3.0]
+    // At zero electrical activity particles repel (scale = -1.0).
+    // As activity rises the curve accelerates toward full attraction (scale = 3.0).
+    // Formula: lerp(-1, 3, t³)  where t = electricalActivity / 3
+    const t = electricalActivity / 3.0; // Normalize to [0, 1]
+    const cubic = t * t * t; // Cubic ease-in for strong non-linearity
+    return -1.0 + cubic * 4.0; // Map [0, 1] → [-1.0, 3.0]
 }
 
 // === Parameter Update Callbacks ===

@@ -390,10 +390,10 @@ impl SimulationParams {
         let clamped_electrical = electrical_activity.max(0.0).min(3.0);
         self.electrical_activity_level = clamped_electrical;
 
-        // Update inter-type attraction scale: cubic mapping [0, 3] → interTypeAttractionScale [0, 1.5]
+        // Update inter-type attraction scale: cubic mapping [0, 3] → interTypeAttractionScale [-1.0, 3.0]
         let normalized_electrical = clamped_electrical / 3.0;
         let cubic_value = normalized_electrical * normalized_electrical * normalized_electrical;
-        let inter_type_attraction_scale = cubic_value * 1.5;
+        let inter_type_attraction_scale = -1.0 + cubic_value * 4.0;
         self.inter_type_attraction_scale = inter_type_attraction_scale;
 
         // Update lightning parameters based on electrical activity
