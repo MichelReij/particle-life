@@ -46,7 +46,7 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Faint specular - organic matter isn't shiny
     let reflect_dir = reflect(- light_dir, normal);
-    let specular = pow(max(0.0, dot(reflect_dir, view_dir)), 18.0) * 0.08;
+    let specular = pow(max(0.0, dot(reflect_dir, view_dir)), 30.0) * 0.03;
 
     // Dark cell-wall rim: membrane effect - darkens edge like a real cell
     let rim = 1.0 - max(0.0, dot(normal, view_dir));

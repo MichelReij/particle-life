@@ -140,6 +140,9 @@ fn getColorForType(ptype: u32, num_types: u32) -> vec4<f32> {
     return particle_colors[ptype];
 }
 
+// Pipeline-overridable: 1.1 for normal rendering, larger values for the glow pass
+override wobble_margin: f32 = 1.1;
+
 @vertex
 fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> VertexOutput {
     var out: VertexOutput;
@@ -203,14 +206,13 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
     // Scale quad vertex by particle size - scale relative to viewport size for proper zoom behavior
     let viewport_scale_x = 2.0 / sim_params.viewport_width;
     let viewport_scale_y = 2.0 / sim_params.viewport_height;
-    // 1.25x margin so wobble protrusions are never clipped at the quad boundary
-    let wobble_margin: f32 = 1.1;
+    // wobble_margin is a pipeline override constant (default 1.1, overridden in glow pass)
     let scaled_quad_pos = vec2<f32>(vertex_attrs.quad_pos.x * particle_radius_pixels * wobble_margin * viewport_scale_x, vertex_attrs.quad_pos.y * particle_radius_pixels * wobble_margin * viewport_scale_y);
 
     out.position = vec4<f32>(normalized_particle_pos + scaled_quad_pos, 0.0, 1.0);
     out.particle_color = particle_color;
 
-    // UV: scale by wobble_margin so frag uv_centered covers ±0.625 — enough room for max wobble
+    // UV: scale by wobble_margin so frag uv_centered covers ±(wobble_margin*0.5) — enough room for max wobble
     out.quad_uv = vec2<f32>(vertex_attrs.quad_pos.x * 0.5 * wobble_margin + 0.5, vertex_attrs.quad_pos.y * 0.5 * wobble_margin + 0.5);
     out.particle_id = f32(vertex_attrs.instance_idx);
     // Shape orientation follows velocity direction (like an amoeba facing its direction of travel)

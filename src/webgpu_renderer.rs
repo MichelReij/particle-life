@@ -266,6 +266,7 @@ pub struct WebGpuRenderer {
     background_render_pipeline: wgpu::RenderPipeline,
     grid_render_pipeline: wgpu::RenderPipeline,
     render_pipeline: wgpu::RenderPipeline,
+    glow_render_pipeline: wgpu::RenderPipeline,
     compute_pipeline: wgpu::ComputePipeline,
     lightning_compute_pipeline: wgpu::ComputePipeline,
     lightning_render_pipeline: wgpu::RenderPipeline,
@@ -823,6 +824,11 @@ impl WebGpuRenderer {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/frag.wgsl").into()),
         });
 
+        let glow_fragment_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Glow Fragment Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/glow_frag.wgsl").into()),
+        });
+
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Compute Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/compute.wgsl").into()),
@@ -934,6 +940,105 @@ impl WebGpuRenderer {
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip, // Use triangle strip like original
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        // Glow render pipeline: uses same vertex shader with wobble_margin=3.0 override
+        // and a simple Gaussian fragment shader. Renders behind particles as a soft halo.
+        let glow_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Glow Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &vertex_shader,
+                entry_point: Some("main"),
+                buffers: &[
+                    wgpu::VertexBufferLayout {
+                        array_stride: 48,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                shader_location: 0,
+                                offset: 0,
+                                format: wgpu::VertexFormat::Float32x2,
+                            },
+                            wgpu::VertexAttribute {
+                                shader_location: 1,
+                                offset: 8,
+                                format: wgpu::VertexFormat::Float32x2,
+                            },
+                            wgpu::VertexAttribute {
+                                shader_location: 2,
+                                offset: 16,
+                                format: wgpu::VertexFormat::Uint32,
+                            },
+                            wgpu::VertexAttribute {
+                                shader_location: 3,
+                                offset: 20,
+                                format: wgpu::VertexFormat::Float32,
+                            },
+                            wgpu::VertexAttribute {
+                                shader_location: 5,
+                                offset: 24,
+                                format: wgpu::VertexFormat::Float32,
+                            },
+                            wgpu::VertexAttribute {
+                                shader_location: 6,
+                                offset: 28,
+                                format: wgpu::VertexFormat::Float32,
+                            },
+                            wgpu::VertexAttribute {
+                                shader_location: 7,
+                                offset: 32,
+                                format: wgpu::VertexFormat::Uint32,
+                            },
+                            wgpu::VertexAttribute {
+                                shader_location: 8,
+                                offset: 36,
+                                format: wgpu::VertexFormat::Uint32,
+                            },
+                        ],
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: 8,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[wgpu::VertexAttribute {
+                            shader_location: 4,
+                            offset: 0,
+                            format: wgpu::VertexFormat::Float32x2,
+                        }],
+                    },
+                ],
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &[("wobble_margin", 3.0)],
+                    ..wgpu::PipelineCompilationOptions::default()
+                },
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &glow_fragment_shader,
+                entry_point: Some("main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: None,
@@ -1726,6 +1831,7 @@ impl WebGpuRenderer {
             background_render_pipeline,
             grid_render_pipeline,
             render_pipeline,
+            glow_render_pipeline,
             compute_pipeline,
             lightning_compute_pipeline,
             lightning_render_pipeline,
@@ -1897,6 +2003,32 @@ impl WebGpuRenderer {
             grid_pass.set_pipeline(&self.grid_render_pipeline);
             grid_pass.set_bind_group(0, &self.grid_render_bind_group, &[]);
             grid_pass.draw(0..6, 0..1); // Fullscreen quad
+        }
+
+        // Pass 2b: Glow render to scene texture (rendered before particles so glow appears behind)
+        {
+            let mut glow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Particle Glow Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_texture_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            glow_pass.set_pipeline(&self.glow_render_pipeline);
+            glow_pass.set_bind_group(0, &self.render_bind_groups[output_buffer_index], &[]);
+            glow_pass.set_vertex_buffer(0, self.particle_buffers[output_buffer_index].slice(..));
+            glow_pass.set_vertex_buffer(1, self.quad_vertex_buffer.slice(..));
+
+            let particle_count = particle_system.get_active_count();
+            glow_pass.draw(0..4, 0..particle_count);
         }
 
         // Pass 3: Particle render to scene texture (drawn on top of grid)
