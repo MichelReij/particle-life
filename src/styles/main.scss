@@ -236,9 +236,30 @@ input[type="button"] {
     left            : 10px;
     color           : white;
     font-family     : Arial, sans-serif;
-    background-color: rgba(0, 0, 0, 0.5);
+    background-color: rgba(0, 0, 0, 0.7);
     padding         : 10px;
     border-radius   : 5px;
+    min-width       : 260px;
+    max-height      : 90vh;
+    overflow-y      : auto;
+    font-size       : 12px;
+
+    #controls-header {
+        display        : flex;
+        justify-content: space-between;
+        align-items    : center;
+        margin-bottom  : 8px;
+        font-weight    : bold;
+        font-size      : 13px;
+
+        button {
+            background: transparent;
+            border    : none;
+            color     : white;
+            cursor    : pointer;
+            font-size : 14px;
+        }
+    }
 }
 
 #color-panel {

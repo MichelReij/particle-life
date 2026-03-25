@@ -1772,7 +1772,7 @@ export function initColorPanel(): void {
         cSlider.addEventListener("input", onInput);
     });
 
-    // Toggle collapse
+    // Toggle collapse - color panel
     const toggleBtn = document.getElementById("color-panel-toggle");
     const body = document.getElementById("color-panel-body");
     if (toggleBtn && body) {
@@ -1780,6 +1780,17 @@ export function initColorPanel(): void {
             const collapsed = body.style.display === "none";
             body.style.display = collapsed ? "" : "none";
             toggleBtn.textContent = collapsed ? "▼" : "▶";
+        });
+    }
+
+    // Toggle collapse - controls panel
+    const controlsToggleBtn = document.getElementById("controls-toggle");
+    const controlsBody = document.getElementById("controls-body");
+    if (controlsToggleBtn && controlsBody) {
+        controlsToggleBtn.addEventListener("click", () => {
+            const collapsed = controlsBody.style.display === "none";
+            controlsBody.style.display = collapsed ? "" : "none";
+            controlsToggleBtn.textContent = collapsed ? "▼" : "▶";
         });
     }
 

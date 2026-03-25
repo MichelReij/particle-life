@@ -111,83 +111,88 @@
         </div>
 
         <div id="controls">
-            <div>
-                <label for="driftSlider">Drift Speed:</label>
-                <input
-                    type="range"
-                    id="driftSlider"
-                    min="-120"
-                    max="120"
-                    value="-20"
-                    step="1"
-                />
-                <span id="driftValue">-20</span> px/s
+            <div id="controls-header">
+                <span>Technical parameters</span>
+                <button id="controls-toggle">▼</button>
             </div>
-            <div>
-                <label for="forceScaleSlider">Force Scale:</label>
-                <input
-                    type="range"
-                    id="forceScaleSlider"
-                    min="100"
-                    max="800"
-                    value="400"
-                    step="1"
-                />
-                <span id="forceScaleValue">400</span>
-            </div>
-            <div>
-                <label for="frictionSlider">Friction:</label>
-                <input
-                    type="range"
-                    id="frictionSlider"
-                    min="0.01"
-                    max="1.0"
-                    value="0.10"
-                    step="0.01"
-                />
-                <span id="frictionValue">0.10</span>
-            </div>
-            <div>
-                <label for="rSmoothSlider">R Smooth:</label>
-                <input
-                    type="range"
-                    id="rSmoothSlider"
-                    min="0.1"
-                    max="20"
-                    value="5.0"
-                    step="0.1"
-                />
-                <span id="rSmoothValue">5.0</span>
-            </div>
-            <div>
-                <label for="interTypeAttractionScaleSlider"
-                    >Inter-Type Attraction Scale:</label
-                >
-                <input
-                    type="range"
-                    id="interTypeAttractionScaleSlider"
-                    min="0"
-                    max="3"
-                    value="1.0"
-                    step="0.1"
-                />
-                <span id="interTypeAttractionScaleValue">1.0</span>
-            </div>
-            <div>
-                <label for="interTypeRadiusScaleSlider"
-                    >Inter-Type Radius Scale:</label
-                >
-                <input
-                    type="range"
-                    id="interTypeRadiusScaleSlider"
-                    min="0"
-                    max="4.0"
-                    value="1.0"
-                    step="0.05"
-                />
-                <span id="interTypeRadiusScaleValue">1.0</span>
-            </div>
-            <!-- Fisheye slider removed - fisheye strength is now fixed at 1.5
+            <div id="controls-body">
+                <div>
+                    <label for="driftSlider">Drift Speed:</label>
+                    <input
+                        type="range"
+                        id="driftSlider"
+                        min="-120"
+                        max="120"
+                        value="-20"
+                        step="1"
+                    />
+                    <span id="driftValue">-20</span> px/s
+                </div>
+                <div>
+                    <label for="forceScaleSlider">Force Scale:</label>
+                    <input
+                        type="range"
+                        id="forceScaleSlider"
+                        min="100"
+                        max="800"
+                        value="400"
+                        step="1"
+                    />
+                    <span id="forceScaleValue">400</span>
+                </div>
+                <div>
+                    <label for="frictionSlider">Friction:</label>
+                    <input
+                        type="range"
+                        id="frictionSlider"
+                        min="0.01"
+                        max="1.0"
+                        value="0.10"
+                        step="0.01"
+                    />
+                    <span id="frictionValue">0.10</span>
+                </div>
+                <div>
+                    <label for="rSmoothSlider">R Smooth:</label>
+                    <input
+                        type="range"
+                        id="rSmoothSlider"
+                        min="0.1"
+                        max="20"
+                        value="5.0"
+                        step="0.1"
+                    />
+                    <span id="rSmoothValue">5.0</span>
+                </div>
+                <div>
+                    <label for="interTypeAttractionScaleSlider"
+                        >Inter-Type Attraction Scale:</label
+                    >
+                    <input
+                        type="range"
+                        id="interTypeAttractionScaleSlider"
+                        min="-3"
+                        max="3"
+                        value="1.0"
+                        step="0.1"
+                    />
+                    <span id="interTypeAttractionScaleValue">1.0</span>
+                </div>
+                <div>
+                    <label for="interTypeRadiusScaleSlider"
+                        >Inter-Type Radius Scale:</label
+                    >
+                    <input
+                        type="range"
+                        id="interTypeRadiusScaleSlider"
+                        min="0"
+                        max="4.0"
+                        value="1.0"
+                        step="0.05"
+                    />
+                    <span id="interTypeRadiusScaleValue">1.0</span>
+                </div>
+                <!-- Fisheye slider removed - fisheye strength is now fixed at 1.5
             <div>
                 <label for="fisheyeStrengthSlider">Fisheye Strength:</label>
                 <input
@@ -201,62 +206,63 @@
                 <span id="fisheyeStrengthValue">1.90</span>
             </div>
             -->
-            <div>
-                <label for="particleRenderSizeSlider">Particle Size:</label>
-                <input
-                    type="range"
-                    id="particleRenderSizeSlider"
-                    min="8.0"
-                    max="32.0"
-                    value="16.0"
-                    step="1.0"
-                />
-                <span id="particleRenderSizeValue">16.0</span>
-            </div>
+                <div>
+                    <label for="particleRenderSizeSlider">Particle Size:</label>
+                    <input
+                        type="range"
+                        id="particleRenderSizeSlider"
+                        min="8.0"
+                        max="32.0"
+                        value="16.0"
+                        step="1.0"
+                    />
+                    <span id="particleRenderSizeValue">16.0</span>
+                </div>
 
-            <!-- Lenia Controls -->
-            <div>
-                <label for="leniaEnabledCheckbox">Enable Lenia:</label>
-                <input type="checkbox" id="leniaEnabledCheckbox" checked />
-                <span id="leniaEnabledStatus">On</span>
-            </div>
-            <div>
-                <label for="leniaGrowthMuSlider">Lenia Growth μ:</label>
-                <input
-                    type="range"
-                    id="leniaGrowthMuSlider"
-                    min="0.01"
-                    max="0.6"
-                    value="0.15"
-                    step="0.01"
-                />
-                <span id="leniaGrowthMuValue">0.15</span>
-            </div>
-            <div>
-                <label for="leniaGrowthSigmaSlider">Lenia Growth σ:</label>
-                <input
-                    type="range"
-                    id="leniaGrowthSigmaSlider"
-                    min="0.001"
-                    max="0.2"
-                    value="0.020"
-                    step="0.001"
-                />
-                <span id="leniaGrowthSigmaValue">0.017</span>
-            </div>
-            <div>
-                <label for="leniaKernelRadiusSlider"
-                    >Lenia Kernel Radius:</label
-                >
-                <input
-                    type="range"
-                    id="leniaKernelRadiusSlider"
-                    min="20.0"
-                    max="100.0"
-                    value="50.0"
-                    step="5.0"
-                />
-                <span id="leniaKernelRadiusValue">60.0</span>
+                <!-- Lenia Controls -->
+                <div>
+                    <label for="leniaEnabledCheckbox">Enable Lenia:</label>
+                    <input type="checkbox" id="leniaEnabledCheckbox" checked />
+                    <span id="leniaEnabledStatus">On</span>
+                </div>
+                <div>
+                    <label for="leniaGrowthMuSlider">Lenia Growth μ:</label>
+                    <input
+                        type="range"
+                        id="leniaGrowthMuSlider"
+                        min="0.01"
+                        max="0.6"
+                        value="0.15"
+                        step="0.01"
+                    />
+                    <span id="leniaGrowthMuValue">0.15</span>
+                </div>
+                <div>
+                    <label for="leniaGrowthSigmaSlider">Lenia Growth σ:</label>
+                    <input
+                        type="range"
+                        id="leniaGrowthSigmaSlider"
+                        min="0.001"
+                        max="0.2"
+                        value="0.020"
+                        step="0.001"
+                    />
+                    <span id="leniaGrowthSigmaValue">0.017</span>
+                </div>
+                <div>
+                    <label for="leniaKernelRadiusSlider"
+                        >Lenia Kernel Radius:</label
+                    >
+                    <input
+                        type="range"
+                        id="leniaKernelRadiusSlider"
+                        min="20.0"
+                        max="100.0"
+                        value="50.0"
+                        step="5.0"
+                    />
+                    <span id="leniaKernelRadiusValue">60.0</span>
+                </div>
             </div>
         </div>
         <div id="color-panel">
