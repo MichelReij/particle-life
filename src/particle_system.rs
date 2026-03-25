@@ -17,23 +17,25 @@ pub struct Particle {
 
 // Size ranges for each particle type (multipliers of base size)
 // We'll use the middle value of each range with ±20% randomization
-const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 6] = [
+const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 7] = [
     1.4, // Type 0: Blue   - medium-large
     2.2, // Type 1: Yellow - large, dominant
     0.4, // Type 2: Red    - small, agile
     0.7, // Type 3: Purple - smaller, compact
     1.0, // Type 4: Green  - medium, balanced
-    1.8, // Type 5: Cyan   - medium-large
+    1.8, // Type 5: Olive  - medium-large
+    0.6, // Type 6: Orange - small-medium
 ];
 
 // Default color palette (sRGB 0-1), OKLCH-adjusted
-const DEFAULT_COLORS: [[f32; 3]; 6] = [
-    [0.4113, 0.6127, 0.7310], // #699cba - Blue
-    [0.9742, 0.8048, 0.6321], // #f8cda1 - Yellow
-    [0.7848, 0.3734, 0.4691], // #c85f78 - Red
-    [0.6487, 0.3925, 0.6346], // #a564a2 - Purple
-    [0.3655, 0.6433, 0.4299], // #5da46e - Green
-    [0.6230, 0.6992, 0.3355], // #9fb256 - Olive green
+const DEFAULT_COLORS: [[f32; 3]; 7] = [
+    [0.4223, 0.6315, 0.6031], // #6ca19a - Cyan
+    [0.9781, 0.7736, 0.6171], // #f9c59d - Yellow
+    [0.7871, 0.3861, 0.3940], // #c96264 - Red
+    [0.5871, 0.4282, 0.6584], // #966da8 - Purple
+    [0.3385, 0.6432, 0.4365], // #56a46f - Green
+    [0.7102, 0.6640, 0.3765], // #b5a960 - Olive green
+    [0.4024, 0.5188, 0.6764], // #6784ac - Blue
 ];
 
 #[derive(Debug)]
@@ -45,7 +47,7 @@ pub struct ParticleSystem {
     num_types: u32,
     base_particle_size: f32,
     pub particle_opacity: f32,
-    pub type_colors: [[f32; 3]; 6],
+    pub type_colors: [[f32; 3]; 7],
     spatial_grid: SpatialGrid,
 }
 
@@ -53,7 +55,7 @@ impl ParticleSystem {
     pub fn new(params: &SimulationParams, _rules: &InteractionRules, rng: &mut SmallRng) -> Self {
         let max_particles = MAX_PARTICLES;
         let min_particles = MIN_PARTICLES;
-        let num_types = 6;
+        let num_types = 7;
 
         let mut particles = Vec::with_capacity(max_particles as usize);
 
@@ -194,7 +196,7 @@ impl ParticleSystem {
         let mut buffer = Vec::with_capacity(self.num_types as usize * 16); // 4 floats per type
 
         for i in 0..self.num_types as usize {
-            let color = self.type_colors[i % 6];
+            let color = self.type_colors[i % 7];
 
             // Store RGBA values as little-endian f32
             buffer.extend_from_slice(&color[0].to_le_bytes()); // Red

@@ -465,7 +465,7 @@ impl ParticleLifeEngine {
     // Set color for a specific particle type (sRGB 0-1 range)
     #[wasm_bindgen]
     pub fn set_type_color(&mut self, type_idx: usize, r: f32, g: f32, b: f32) {
-        if type_idx < 6 {
+        if type_idx < 7 {
             self.particle_system.type_colors[type_idx] =
                 [r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0)];
         }

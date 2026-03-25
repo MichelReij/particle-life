@@ -16,7 +16,7 @@ pub struct InteractionRules {
 
 impl InteractionRules {
     pub fn new_random(rng: &mut SmallRng) -> Self {
-        let num_types = 6;
+        let num_types = 7;
         let mut rules = Vec::with_capacity(num_types);
 
         for i in 0..num_types {

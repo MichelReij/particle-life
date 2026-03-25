@@ -1644,10 +1644,12 @@ const typeOklch: [number, number, number][] = [
     [0, 0, 0],
     [0, 0, 0],
     [0, 0, 0],
+    [0, 0, 0],
 ];
 
 // Built-in defaults captured at startup from HTML slider values
 const builtinTypeOklch: [number, number, number][] = [
+    [0, 0, 0],
     [0, 0, 0],
     [0, 0, 0],
     [0, 0, 0],
@@ -1892,7 +1894,7 @@ export function initColorPanel(): void {
 
         const rows = document.querySelectorAll<HTMLElement>(".color-type-row");
         palette.colors.forEach((hex, i) => {
-            if (i >= 6) return;
+            if (i >= 7) return;
             const [r, g2, b] = hexToSrgb(hex);
             const [l, c, h] = srgbToOklch(r, g2, b);
             typeOklch[i] = [l, c, h];
@@ -1971,7 +1973,8 @@ export function initColorPanel(): void {
                 "Red",
                 "Purple",
                 "Green",
-                "Cyan",
+                "Olive green",
+                "Orange",
             ];
             const lines = typeOklch.map(([l, c, h], i) => {
                 const [r, g, b] = oklchToSrgb(l, c, h);
@@ -1979,7 +1982,7 @@ export function initColorPanel(): void {
                 const fmt = (x: number) => x.toFixed(4);
                 return `    [${fmt(r)}, ${fmt(g)}, ${fmt(b)}], // ${hex} - ${typeNames[i]}`;
             });
-            const text = `const DEFAULT_COLORS: [[f32; 3]; 6] = [\n${lines.join("\n")}\n];`;
+            const text = `const DEFAULT_COLORS: [[f32; 3]; 7] = [\n${lines.join("\n")}\n];`;
             navigator.clipboard.writeText(text).then(() => {
                 const btn = document.getElementById("copy-palette-btn");
                 if (btn) {

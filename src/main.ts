@@ -175,37 +175,37 @@ class App {
         setParameterUpdateCallbacks({
             updateDriftAndBackground: (value: number) => {
                 // Update drift parameter in the engine
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.update_parameter("driftXPerSecond", value);
                 }
             },
             updateBackgroundColor: (r: number, g: number, b: number) => {
                 // Update background color parameters in the engine
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.update_background_color(r, g, b);
                 }
             },
             updateBackgroundColorFromTemperature: (temp: number) => {
                 // Update all temperature-related parameters using comprehensive method
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.set_temperature(temp);
                 }
             },
             updateSimulationParameter: (paramName: string, value: number) => {
                 // Update any simulation parameter
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.update_parameter(paramName, value);
                 }
             },
             updateBooleanParameter: (paramName: string, value: boolean) => {
                 // Update any boolean simulation parameter
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.update_boolean_parameter(paramName, value);
                 }
             },
             getParameter: (paramName: string) => {
                 // Get any simulation parameter value
-                if (!this.engine) return 0;
+                if (!this.engine || this.engineBusy) return 0;
 
                 switch (paramName) {
                     case "driftXPerSecond":
@@ -243,7 +243,7 @@ class App {
             },
             getBooleanParameter: (paramName: string) => {
                 // Get any boolean simulation parameter value
-                if (!this.engine) return false;
+                if (!this.engine || this.engineBusy) return false;
 
                 switch (paramName) {
                     case "flatForce":

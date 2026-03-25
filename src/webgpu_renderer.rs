@@ -434,7 +434,7 @@ impl WebGpuRenderer {
         // Create initial particle data (similar to TypeScript createInitialParticles)
         let max_particles = 6400; // Reduced from 32768 - supports up to 8K particles efficiently
         let active_particles = 6400; // Initialize all particles that the engine uses
-        let num_types = 6;
+        let num_types = 7;
         let virtual_world_width = VIRTUAL_WORLD_WIDTH;
         let virtual_world_height = VIRTUAL_WORLD_HEIGHT;
         let particle_render_size = PARTICLE_SIZE;
