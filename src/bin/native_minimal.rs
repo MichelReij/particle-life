@@ -13,13 +13,26 @@ use winit::{
     window::{Window, WindowId},
 };
 
-struct MinimalNativeApp {
-    window: Option<Arc<Window>>,
+/// Convert temperature (°C) to the lerp cycle duration (seconds).
+/// 3°C  → 1800s (30 min), 160°C → 180s (3 min), linear interpolation.
+fn temperature_to_lerp_duration(temp_celsius: f32) -> f32 {
+    const MIN_TEMP: f32 = 3.0;
+    const MAX_TEMP: f32 = 160.0;
+    const MAX_DURATION: f32 = 1800.0;
+    const MIN_DURATION: f32 = 180.0;
+    let t = ((temp_celsius - MIN_TEMP) / (MAX_TEMP - MIN_TEMP)).clamp(0.0, 1.0);
+    MAX_DURATION - t * (MAX_DURATION - MIN_DURATION)
+}
+
+struct MinimalNativeApp {    window: Option<Arc<Window>>,
     // Same shared components as WASM
     particle_system: ParticleSystem,
     simulation_params: SimulationParams,
     interaction_rules: InteractionRules,
+    rng: SmallRng,
     renderer: Option<WebGpuRenderer>,
+    // Continuous rule evolution (shared logic, lives in interaction_rules.rs)
+    rule_evolution: RuleEvolution,
     // ESP32 communication
     esp32_manager: Option<ESP32Manager>,
     last_esp32_update: std::time::Instant,
@@ -88,12 +101,18 @@ impl Default for MinimalNativeApp {
         let interaction_rules = InteractionRules::new_random(&mut rng);
         let particle_system = ParticleSystem::new(&simulation_params, &interaction_rules, &mut rng);
 
+        // Rule evolution — duration based on default temperature (20°C)
+        let mut rule_evolution = RuleEvolution::new(interaction_rules.clone(), &mut rng);
+        rule_evolution.set_duration(temperature_to_lerp_duration(20.0));
+
         Self {
             window: None,
             particle_system,
             simulation_params,
             interaction_rules,
+            rng,
             renderer: None,
+            rule_evolution,
             esp32_manager: None, // Will be initialized when ESP32 is detected
             last_esp32_update: std::time::Instant::now(),
             audio_manager: None, // Will be initialized during setup
@@ -269,6 +288,10 @@ impl ApplicationHandler for MinimalNativeApp {
                                 self.simulation_params
                                     .apply_esp32_sensor_data(&sensor_data, delta_time);
 
+                                // Keep rule evolution duration in sync with temperature
+                                let temp = sensor_data.to_temperature_celsius();
+                                self.rule_evolution.set_duration(temperature_to_lerp_duration(temp));
+
                                 // Update audio volume from ESP32 potentiometer
                                 if let Some(audio) = &mut self.audio_manager {
                                     let volume_percentage = sensor_data.to_volume_percentage();
@@ -304,6 +327,12 @@ impl ApplicationHandler for MinimalNativeApp {
                 self.current_time += delta_time;
                 self.simulation_params.set_time(self.current_time);
                 self.simulation_params.set_delta_time(delta_time);
+
+                // Advance rule evolution and update active interaction rules
+                self.interaction_rules = self
+                    .rule_evolution
+                    .tick(delta_time, &mut self.rng)
+                    .clone();
 
                 // Render
                 if let Some(renderer) = &mut self.renderer {
@@ -454,6 +483,12 @@ impl MinimalNativeApp {
                     // Update our state
                     self.current_flash_id = lightning_bolt.flash_id;
                     self.lightning_start_time = lightning_bolt.start_time;
+
+                    // On super-lightning: immediately snap to new rules
+                    if lightning_bolt.is_super() {
+                        self.rule_evolution.snap_to_new(&mut self.rng);
+                        console_log!("⚡ Super-lightning: rules snapped immediately, new lerp started");
+                    }
 
                     // Send to ESP32 immediately when lightning starts
                     self.communicate_lightning_to_esp32(

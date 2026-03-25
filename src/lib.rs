@@ -75,6 +75,9 @@ pub struct ParticleLifeEngine {
     current_time: f32,
     frame_count: u32,
     renderer: Option<WebGpuRenderer>,
+    // Continuous rule evolution (shared logic, lives in interaction_rules.rs)
+    rule_evolution: RuleEvolution,
+    last_seen_flash_id: u32,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -114,6 +117,8 @@ impl ParticleLifeEngine {
         let interaction_rules = InteractionRules::new_random(&mut rng);
         let particle_system = ParticleSystem::new(&simulation_params, &interaction_rules, &mut rng);
 
+        let rule_evolution = RuleEvolution::new(interaction_rules.clone(), &mut rng);
+
         Self {
             particle_system,
             simulation_params,
@@ -122,6 +127,8 @@ impl ParticleLifeEngine {
             current_time: 0.0,
             frame_count: 0,
             renderer: None,
+            rule_evolution,
+            last_seen_flash_id: 0,
         }
     }
 
@@ -279,6 +286,9 @@ impl ParticleLifeEngine {
 
         // Lightning generation is now handled by the GPU compute shader
         // (Rust lightning_system.update() removed to avoid conflicts)
+
+        // === Continuous rule evolution (lerp) ===
+        self.interaction_rules = self.rule_evolution.tick(delta_time, &mut self.rng).clone();
 
         self.frame_count += 1;
 
@@ -509,6 +519,29 @@ impl ParticleLifeEngine {
         console_log!("🎲 Generated new interaction rules");
     }
 
+    // === Rule evolution API ===
+
+    /// Set how many seconds a full lerp cycle from one rule set to the next takes.
+    /// Called by JS whenever the temperature changes.
+    #[wasm_bindgen]
+    pub fn set_rules_lerp_duration(&mut self, seconds: f32) {
+        self.rule_evolution.set_duration(seconds);
+    }
+
+    /// Immediately snap to the current target rules and start a fresh lerp toward
+    /// a newly generated set. Used when super-lightning is detected.
+    #[wasm_bindgen]
+    pub fn snap_to_new_rules(&mut self) {
+        self.rule_evolution.snap_to_new(&mut self.rng);
+        console_log!("⚡ Super-lightning: rules snapped immediately, new lerp started");
+    }
+
+    /// Get current lerp progress (0.0–1.0), useful for UI display.
+    #[wasm_bindgen]
+    pub fn get_rules_lerp_progress(&self) -> f32 {
+        self.rule_evolution.progress()
+    }
+
     // Get various constants needed by TypeScript
     #[wasm_bindgen]
     pub fn get_max_particles(&self) -> u32 {
@@ -697,6 +730,48 @@ impl ParticleLifeEngine {
                 Err(e)
             }
         }
+    }
+
+    /// Read the lightning bolt buffer from GPU and return whether a new super-lightning
+    /// event has occurred since the last call.
+    /// Returns 1 = new super-lightning (and snaps rules), 0 = nothing new.
+    #[wasm_bindgen]
+    pub async fn check_super_lightning(&mut self) -> u32 {
+        // Take renderer out temporarily so we can hold it across the await point
+        let mut renderer = match self.renderer.take() {
+            Some(r) => r,
+            None => return 0,
+        };
+
+        let result = match renderer.update_lightning_cache().await {
+            Ok(()) => {
+                if let Some(bolt) = renderer.get_cached_lightning_bolt() {
+                    if bolt.flash_id > self.last_seen_flash_id {
+                        self.last_seen_flash_id = bolt.flash_id;
+                        if bolt.is_super() {
+                            1
+                        } else {
+                            0
+                        }
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                }
+            }
+            Err(_) => 0,
+        };
+
+        self.renderer = Some(renderer);
+
+        // Snap rules immediately in Rust when super-lightning is detected
+        if result == 1 {
+            self.rule_evolution.snap_to_new(&mut self.rng);
+            console_log!("⚡ Super-lightning: rules snapped immediately, new lerp started");
+        }
+
+        result
     }
 
     // Render using WebGPU (preferred) or fallback to Canvas 2D

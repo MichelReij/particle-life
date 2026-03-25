@@ -2425,12 +2425,9 @@ impl WebGpuRenderer {
         self.lightning_detector.poll_events()
     }
 
-    /// Try to read lightning status immediately (non-blocking)
-    /// This uses a very fast approach by keeping a cached copy and only updating when needed
-    pub fn try_get_lightning_status(&mut self) -> Option<LightningBolt> {
-        // For now, we'll return None to indicate we need the async version
-        // This could be enhanced with a cached lightning bolt that gets updated periodically
-        None
+    /// Return the most-recently cached lightning bolt (non-blocking).
+    pub fn get_cached_lightning_bolt(&self) -> Option<LightningBolt> {
+        self.lightning_detector.get_cached_lightning_bolt()
     }
 
     /// Update lightning detector with current bolt status

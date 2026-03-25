@@ -26,6 +26,11 @@ class App {
     private fpsFrameCount = 0;
     private fpsLastTime = 0;
     private currentFPS = 0;
+    private pendingScreenshot = false;
+    // Guard against wasm-bindgen re-entrancy: async check_super_lightning holds a
+    // &mut self borrow for the GPU readback; all other &mut self calls must be
+    // deferred until it completes.
+    private engineBusy = false;
 
     async init() {
         console.log("🔧 App.init() called");
@@ -251,41 +256,46 @@ class App {
                 }
             },
             updateZoom: (level: number, centerX?: number, centerY?: number) => {
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.set_zoom(level, centerX, centerY);
                 }
             },
             updateParticleCount: (pressure: number) => {
                 // Update particle count based on pressure
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.set_particle_count_from_pressure(pressure);
                 }
             },
             // Comprehensive parameter methods that handle all effects internally in Rust
             setTemperature: (temp: number) => {
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.set_temperature(temp);
+                    // Update rule-evolution speed based on temperature
+                    // 3°C → 1800s (30 min), 160°C → 180s (3 min), linear
+                    const duration = 1800 - (1620 * (temp - 3)) / 157;
+                    this.engine.set_rules_lerp_duration(Math.round(duration));
+                    this.currentTemperature = temp;
                 }
             },
             setPressure: (pressure: number) => {
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.set_pressure(pressure);
                     // Also update particle count
                     this.engine.set_particle_count_from_pressure(pressure);
                 }
             },
             setPH: (ph: number) => {
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.set_ph(ph);
                 }
             },
             setElectricalActivity: (electrical: number) => {
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.set_electrical_activity(electrical);
                 }
             },
             setParticleOpacity: (opacity: number) => {
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.set_particle_opacity(opacity);
                 }
             },
@@ -295,7 +305,7 @@ class App {
                 g: number,
                 b: number,
             ) => {
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.set_type_color(typeIdx, r, g, b);
                 }
             },
@@ -306,16 +316,16 @@ class App {
                 return null;
             },
             setZoom: (level: number, centerX?: number, centerY?: number) => {
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.set_zoom(level, centerX, centerY);
                 }
             },
             // Rule regeneration
             regenerateRules: () => {
-                if (this.engine) {
+                if (this.engine && !this.engineBusy) {
                     this.engine.regenerate_interaction_rules();
                     console.log("🎲 Interaction rules regenerated via UI");
-                } else {
+                } else if (!this.engine) {
                     console.warn("Engine not available for rule regeneration");
                 }
             },
@@ -358,6 +368,24 @@ class App {
         initializeUI(defaultSimParams, defaultZoomLevel);
         initColorPanel();
 
+        // Screenshot button
+        document
+            .getElementById("screenshot-btn")
+            ?.addEventListener("click", () => this.triggerScreenshot());
+
+        // Screenshot keyboard shortcut: S
+        document.addEventListener("keydown", (e: KeyboardEvent) => {
+            if (e.key === "s" || e.key === "S") {
+                // Ignore if focus is on an input/textarea
+                if (
+                    document.activeElement instanceof HTMLInputElement ||
+                    document.activeElement instanceof HTMLTextAreaElement
+                )
+                    return;
+                this.triggerScreenshot();
+            }
+        });
+
         console.log("✅ UI controls wired up");
     }
 
@@ -396,7 +424,7 @@ class App {
                 this.checkLightningStatus();
             }
 
-            if (this.engine) {
+            if (this.engine && !this.engineBusy) {
                 try {
                     // Apply relative joystick panning before the simulation step
                     updateJoystickPan(deltaTime);
@@ -406,6 +434,12 @@ class App {
 
                     // Render using WebGPU (Rust handles this automatically)
                     this.engine.render();
+
+                    // Capture screenshot right after render (same RAF frame)
+                    if (this.pendingScreenshot) {
+                        this.pendingScreenshot = false;
+                        this.captureScreenshot();
+                    }
                 } catch (error) {
                     console.error("💥 Error in Rust simulation:", error);
                     // Don't stop the animation, just log the error
@@ -420,6 +454,39 @@ class App {
 
         this.animationId = requestAnimationFrame(animate);
         console.log("✅ Rust simulation animation loop started");
+    }
+
+    private triggerScreenshot() {
+        this.pendingScreenshot = true;
+    }
+
+    private captureScreenshot() {
+        if (!this.canvas) return;
+
+        // Flash feedback
+        const flash = document.getElementById("screenshot-flash");
+        if (flash) {
+            flash.classList.add("flash");
+            requestAnimationFrame(() => {
+                flash.classList.remove("flash");
+            });
+        }
+
+        const now = new Date();
+        const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}-${String(now.getSeconds()).padStart(2, "0")}`;
+
+        this.canvas.toBlob((blob) => {
+            if (!blob) {
+                console.warn("Screenshot failed: canvas.toBlob returned null");
+                return;
+            }
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `particle-life-${ts}.png`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }, "image/png");
     }
 
     private updateFPSDisplay() {
@@ -492,30 +559,43 @@ class App {
 
     private lastElectricalActivity = 0;
     private lastLightningCheck = 0;
+    private currentTemperature = 20; // default matches HTML slider
 
     private async checkLightningStatus() {
-        if (this.engine) {
-            try {
-                const currentTime = performance.now();
-                const currentElectricalActivity =
-                    this.engine.get_electrical_activity();
+        if (!this.engine || this.engineBusy) return;
+        try {
+            const currentTime = performance.now();
+            const currentElectricalActivity =
+                this.engine.get_electrical_activity();
 
-                // Track electrical activity changes (without logging)
-                if (
-                    Math.abs(
-                        currentElectricalActivity - this.lastElectricalActivity,
-                    ) > 0.1
-                ) {
-                    this.lastElectricalActivity = currentElectricalActivity;
-                }
-
-                // Update lightning check timestamp
-                if (currentTime - this.lastLightningCheck > 5000) {
-                    this.lastLightningCheck = currentTime;
-                }
-            } catch (error) {
-                // Silently fail - lightning status checking is non-critical
+            // Track electrical activity changes
+            if (
+                Math.abs(
+                    currentElectricalActivity - this.lastElectricalActivity,
+                ) > 0.1
+            ) {
+                this.lastElectricalActivity = currentElectricalActivity;
             }
+
+            // Check for super-lightning events (async GPU readback).
+            // Lock the engine for the duration to prevent wasm re-entrancy panics:
+            // check_super_lightning is async &mut self and holds the borrow during await.
+            if (currentTime - this.lastLightningCheck > 1000) {
+                this.lastLightningCheck = currentTime;
+                this.engineBusy = true;
+                try {
+                    const isSuper = await this.engine.check_super_lightning();
+                    if (isSuper) {
+                        console.log(
+                            "⚡ Super-lightning detected! Rules snapped (handled in Rust).",
+                        );
+                    }
+                } finally {
+                    this.engineBusy = false;
+                }
+            }
+        } catch (error) {
+            this.engineBusy = false; // ensure lock is released on unexpected error
         }
     }
 }

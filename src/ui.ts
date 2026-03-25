@@ -1772,14 +1772,35 @@ export function initColorPanel(): void {
         cSlider.addEventListener("input", onInput);
     });
 
+    // Helper: set panel collapsed state + persist to localStorage
+    function applyPanelState(
+        bodyEl: HTMLElement,
+        btnEl: HTMLElement,
+        collapsed: boolean,
+        storageKey: string,
+    ) {
+        bodyEl.style.display = collapsed ? "none" : "";
+        btnEl.textContent = collapsed ? "▶" : "▼";
+        localStorage.setItem(storageKey, collapsed ? "1" : "0");
+    }
+
     // Toggle collapse - color panel
     const toggleBtn = document.getElementById("color-panel-toggle");
     const body = document.getElementById("color-panel-body");
     if (toggleBtn && body) {
+        // Restore saved state
+        const savedColor = localStorage.getItem("panel_color_collapsed");
+        if (savedColor === "1")
+            applyPanelState(body, toggleBtn, true, "panel_color_collapsed");
+
         toggleBtn.addEventListener("click", () => {
             const collapsed = body.style.display === "none";
-            body.style.display = collapsed ? "" : "none";
-            toggleBtn.textContent = collapsed ? "▼" : "▶";
+            applyPanelState(
+                body,
+                toggleBtn,
+                !collapsed,
+                "panel_color_collapsed",
+            );
         });
     }
 
@@ -1787,10 +1808,24 @@ export function initColorPanel(): void {
     const controlsToggleBtn = document.getElementById("controls-toggle");
     const controlsBody = document.getElementById("controls-body");
     if (controlsToggleBtn && controlsBody) {
+        // Restore saved state
+        const savedControls = localStorage.getItem("panel_controls_collapsed");
+        if (savedControls === "1")
+            applyPanelState(
+                controlsBody,
+                controlsToggleBtn,
+                true,
+                "panel_controls_collapsed",
+            );
+
         controlsToggleBtn.addEventListener("click", () => {
             const collapsed = controlsBody.style.display === "none";
-            controlsBody.style.display = collapsed ? "" : "none";
-            controlsToggleBtn.textContent = collapsed ? "▼" : "▶";
+            applyPanelState(
+                controlsBody,
+                controlsToggleBtn,
+                !collapsed,
+                "panel_controls_collapsed",
+            );
         });
     }
 
