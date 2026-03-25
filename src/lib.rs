@@ -948,7 +948,7 @@ impl ParticleLifeEngine {
 
     #[wasm_bindgen]
     pub fn set_inter_type_attraction_scale(&mut self, value: f32) {
-        self.simulation_params.inter_type_attraction_scale = value.max(0.0).min(3.0);
+        self.simulation_params.inter_type_attraction_scale = value.max(-3.0).min(3.0);
         console_log!(
             "🔧 Individual parameter: inter_type_attraction_scale = {:.2}",
             self.simulation_params.inter_type_attraction_scale
