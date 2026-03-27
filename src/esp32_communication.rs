@@ -98,7 +98,6 @@ pub struct ESP32SharedState {
     pub status: ESP32Status,
     pub last_update: Instant,
     pub pending_lightning_events: Vec<ESP32LightningEvent>, // Queue of lightning events to send
-    pub last_lightning_sent: Instant,
     pub last_logged_data: Option<ESP32SensorData>, // For throttling log output
     pub last_log_time: Instant,                    // For periodic logging
 }
@@ -110,7 +109,6 @@ impl Default for ESP32SharedState {
             status: ESP32Status::Disconnected,
             last_update: Instant::now(),
             pending_lightning_events: Vec::new(),
-            last_lightning_sent: Instant::now(),
             last_logged_data: None,
             last_log_time: Instant::now(),
         }
@@ -1241,11 +1239,6 @@ fn send_pending_lightning_events(
 ) {
     let events_to_send = {
         if let Ok(mut state) = shared_state.lock() {
-            // Only send events if it's been at least 100ms since last send (rate limiting)
-            if state.last_lightning_sent.elapsed() < Duration::from_millis(100) {
-                return;
-            }
-
             if state.pending_lightning_events.is_empty() {
                 return;
             }
@@ -1253,7 +1246,6 @@ fn send_pending_lightning_events(
             // Take all pending events and clear the queue
             let events = state.pending_lightning_events.clone();
             state.pending_lightning_events.clear();
-            state.last_lightning_sent = Instant::now();
             events
         } else {
             return;
