@@ -2003,7 +2003,7 @@ export function initColorPanel(): void {
 
     if (opacitySlider && opacityValueDisplay) {
         // Restore from localStorage
-        const stored = loadFromLocalStorage(STORAGE_KEYS.opacity, 0.55);
+        const stored = loadFromLocalStorage(STORAGE_KEYS.opacity, 0.9);
         opacitySlider.value = String(stored);
         opacityValueDisplay.textContent = stored.toFixed(2);
         if (parameterUpdateCallbacks.setParticleOpacity) {

@@ -27,6 +27,9 @@ class App {
     private fpsLastTime = 0;
     private currentFPS = 0;
     private pendingScreenshot = false;
+    private mediaRecorder: MediaRecorder | null = null;
+    private recordedChunks: Blob[] = [];
+    private isRecording = false;
     // Guard against wasm-bindgen re-entrancy: async check_super_lightning holds a
     // &mut self borrow for the GPU readback; all other &mut self calls must be
     // deferred until it completes.
@@ -373,17 +376,20 @@ class App {
             .getElementById("screenshot-btn")
             ?.addEventListener("click", () => this.triggerScreenshot());
 
-        // Screenshot keyboard shortcut: S
+        // Video record button
+        document
+            .getElementById("record-btn")
+            ?.addEventListener("click", () => this.toggleRecording());
+
+        // Keyboard shortcuts: S = screenshot, V = toggle video recording
         document.addEventListener("keydown", (e: KeyboardEvent) => {
-            if (e.key === "s" || e.key === "S") {
-                // Ignore if focus is on an input/textarea
-                if (
-                    document.activeElement instanceof HTMLInputElement ||
-                    document.activeElement instanceof HTMLTextAreaElement
-                )
-                    return;
-                this.triggerScreenshot();
-            }
+            if (
+                document.activeElement instanceof HTMLInputElement ||
+                document.activeElement instanceof HTMLTextAreaElement
+            )
+                return;
+            if (e.key === "s" || e.key === "S") this.triggerScreenshot();
+            if (e.key === "v" || e.key === "V") this.toggleRecording();
         });
 
         console.log("✅ UI controls wired up");
@@ -458,6 +464,60 @@ class App {
 
     private triggerScreenshot() {
         this.pendingScreenshot = true;
+    }
+
+    private toggleRecording() {
+        if (this.isRecording) {
+            this.stopRecording();
+        } else {
+            this.startRecording();
+        }
+    }
+
+    private startRecording() {
+        if (!this.canvas) return;
+
+        const stream = this.canvas.captureStream(60);
+        const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+            ? "video/webm;codecs=vp9"
+            : "video/webm";
+
+        this.recordedChunks = [];
+        this.mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+        this.mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) this.recordedChunks.push(e.data);
+        };
+
+        this.mediaRecorder.onstop = () => {
+            const blob = new Blob(this.recordedChunks, { type: mimeType });
+            const now = new Date();
+            const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}-${String(now.getSeconds()).padStart(2, "0")}`;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `particle-life-${ts}.webm`;
+            a.click();
+            URL.revokeObjectURL(url);
+            this.recordedChunks = [];
+        };
+
+        this.mediaRecorder.start(100); // collect data every 100ms
+        this.isRecording = true;
+
+        document.getElementById("record-btn")?.classList.add("recording");
+        document.getElementById("rec-indicator")?.classList.add("visible");
+        console.log("🎥 Video recording started");
+    }
+
+    private stopRecording() {
+        if (!this.mediaRecorder || !this.isRecording) return;
+        this.mediaRecorder.stop();
+        this.isRecording = false;
+
+        document.getElementById("record-btn")?.classList.remove("recording");
+        document.getElementById("rec-indicator")?.classList.remove("visible");
+        console.log("⏹ Video recording stopped, preparing download...");
     }
 
     private captureScreenshot() {

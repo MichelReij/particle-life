@@ -263,30 +263,104 @@ input[type="button"] {
     }
 }
 
-#screenshot-btn {
+#record-btn {
     position       : absolute;
-    bottom         : 12px;
-    right          : 12px;
-    background     : rgba(0, 0, 0, 0.55);
-    border         : 1px solid rgba(255, 255, 255, 0.25);
-    border-radius  : 6px;
-    color          : white;
-    font-size      : 20px;
+    bottom         : 10px;
+    right          : 58px;
+    background     : none;
+    border         : none;
+    color          : var(--accent-color);
+    font-size      : 0;
     width          : 40px;
     height         : 40px;
     cursor         : pointer;
     display        : flex;
     align-items    : center;
     justify-content: center;
-    transition     : background 0.15s;
+    transition     : opacity 0.15s, transform 0.1s;
     z-index        : 10;
+    opacity        : 0.85;
+
+    .material-symbols-outlined {
+        font-size  : 32px;
+        line-height: 1;
+    }
 
     &:hover {
-        background: rgba(255, 255, 255, 0.2);
+        opacity: 1;
     }
 
     &:active {
-        transform: scale(0.92);
+        transform: scale(0.88);
+    }
+
+    &.recording {
+        color  : #ff5555;
+        opacity: 1;
+    }
+}
+
+#rec-indicator {
+    position      : absolute;
+    top           : 12px;
+    left          : 12px;
+    background    : rgba(180, 0, 0, 0.8);
+    color         : white;
+    font-size     : 12px;
+    font-weight   : bold;
+    padding       : 3px 8px;
+    border-radius : 4px;
+    z-index       : 10;
+    display       : none;
+    pointer-events: none;
+
+    &.visible {
+        display  : block;
+        animation: rec-pulse 1s ease-in-out infinite;
+    }
+}
+
+@keyframes rec-pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.4;
+    }
+}
+
+#screenshot-btn {
+    position       : absolute;
+    bottom         : 10px;
+    right          : 10px;
+    background     : none;
+    border         : none;
+    color          : var(--accent-color);
+    font-size      : 0;
+    width          : 40px;
+    height         : 40px;
+    cursor         : pointer;
+    display        : flex;
+    align-items    : center;
+    justify-content: center;
+    transition     : opacity 0.15s, transform 0.1s;
+    z-index        : 10;
+    opacity        : 0.85;
+
+    .material-symbols-outlined {
+        font-size  : 32px;
+        line-height: 1;
+    }
+
+    &:hover {
+        opacity: 1;
+    }
+
+    &:active {
+        transform: scale(0.88);
     }
 }
 

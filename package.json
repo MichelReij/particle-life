@@ -12,6 +12,7 @@
     "main": "src/main.ts",
     "scripts": {
         "build": "webpack",
+        "build:prod": "webpack --mode production",
         "build:rust": "./build-wasm.sh",
         "start": "webpack serve",
         "dev": "lsof -ti :3000 | xargs kill -9 2>/dev/null; sleep 0.5; webpack serve"

@@ -7,6 +7,10 @@
             content="width=device-width, initial-scale=1, shrink-to-fit=no"
         />
         <title>Origin of Life Simulation</title>
+        <link
+            rel="stylesheet"
+            href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
+        />
         <!-- JoyStick Library -->
         <script src="joy.js"></script>
         . `
@@ -33,7 +37,13 @@
             </div>
             <div id="canvasContainer">
                 <canvas id="canvas"></canvas>
-                <button id="screenshot-btn" title="Screenshot (S)">📷</button>
+                <button id="screenshot-btn" title="Screenshot (S)">
+                    <span class="material-symbols-outlined">photo_camera</span>
+                </button>
+                <button id="record-btn" title="Start/stop video recording (V)">
+                    <span class="material-symbols-outlined">videocam</span>
+                </button>
+                <div id="rec-indicator">● REC</div>
                 <div id="screenshot-flash"></div>
             </div>
             <div id="Joystick">
@@ -555,7 +565,7 @@
                         id="opacitySlider"
                         min="0.1"
                         max="1.0"
-                        value="0.55"
+                        value="0.9"
                         step="0.01"
                     />
                     <span id="opacityValue">0.90</span>
