@@ -29,13 +29,13 @@ const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 7] = [
 
 // Default color palette (sRGB 0-1), OKLCH-adjusted
 const DEFAULT_COLORS: [[f32; 3]; 7] = [
-    [0.4223, 0.6315, 0.6031], // #6ca19a - Cyan
-    [0.9781, 0.7736, 0.6171], // #f9c59d - Yellow
+    [0.4223, 0.6315, 0.6031], // #6ca19a - Blue
+    [1.0000, 0.8455, 0.5607], // #ffd88f - Yellow
     [0.7871, 0.3861, 0.3940], // #c96264 - Red
     [0.5871, 0.4282, 0.6584], // #966da8 - Purple
     [0.3385, 0.6432, 0.4365], // #56a46f - Green
     [0.7102, 0.6640, 0.3765], // #b5a960 - Olive green
-    [0.4024, 0.5188, 0.6764], // #6784ac - Blue
+    [0.4024, 0.5188, 0.6764], // #6784ac - Orange
 ];
 
 #[derive(Debug)]
