@@ -13,28 +13,30 @@ class RustWasmPlugin {
     }
 
     apply(compiler) {
+        // Alleen bouwen als WASM-bestand helemaal ontbreekt (eerste keer of na rm -rf src/pkg).
+        // Bij normale ontwikkeling: ./build-wasm.sh handmatig aanroepen na Rust-wijzigingen,
+        // daarna pikt de dev server de nieuwe pkg-bestanden automatisch op via CopyWebpackPlugin.
+        // De automatische shouldRebuild-logica blokkeerde de dev server (~30s per .rs wijziging).
         compiler.hooks.beforeCompile.tapAsync(
             "RustWasmPlugin",
             (params, callback) => {
-                // Avoid building if we're already building
                 if (this.isBuilding) {
                     return callback();
                 }
 
-                // Check if we need to rebuild by comparing timestamps
-                if (this.shouldRebuild()) {
+                const wasmPath = path.resolve(
+                    __dirname,
+                    "src/pkg/particle_life_wasm_bg.wasm",
+                );
+                if (!fs.existsSync(wasmPath)) {
                     this.isBuilding = true;
-                    console.log("Building Rust WASM module...");
+                    console.log("⚠️  WASM ontbreekt — eerste build starten...");
                     exec("bash build-wasm.sh", (error, stdout, stderr) => {
                         this.isBuilding = false;
                         if (error) {
                             console.error("Rust WASM build failed:", error);
                             return callback(error);
                         }
-                        if (stderr) {
-                            console.log("Rust build warnings:", stderr);
-                        }
-                        console.log("Rust WASM build complete!");
                         this.lastBuildTime = Date.now();
                         callback();
                     });

@@ -12,27 +12,21 @@ pkill -f "node.*webpack" 2>/dev/null || true
 lsof -ti:3001 | xargs kill -9 2>/dev/null || true
 sleep 2
 
-# Clean build artifacts
-echo "🧹 Cleaning build artifacts..."
+# Clean build artifacts (geen cargo clean — incrementele Rust builds)
+echo "🧹 Cleaning webpack output en pkg..."
 rm -rf public/*.wasm public/*.js public/*.css public/*.html 2>/dev/null || true
 rm -rf src/pkg 2>/dev/null || true
-rm -rf target/wasm32-unknown-unknown 2>/dev/null || true
-
-# Clean Rust cache for WASM target
-echo "🗑️ Cleaning Rust WASM cache..."
-cargo clean --target wasm32-unknown-unknown
 
 # Ensure WASM target is installed
-echo "🔧 Ensuring WASM target is installed..."
-rustup target add wasm32-unknown-unknown
+rustup target add wasm32-unknown-unknown --quiet
 
-# Rebuild WASM module with explicit target
-echo "🦀 Rebuilding WASM module for wasm32-unknown-unknown target..."
+# Rebuild WASM module (incrementeel)
+echo "🦀 Rebuilding WASM module..."
 wasm-pack build \
   --target web \
   --out-dir src/pkg \
-  --release \
-  --scope particle-life
+  --out-name particle_life_wasm \
+  --release
 
 # Verify WASM compilation was successful
 if [ ! -f "src/pkg/particle_life_wasm_bg.wasm" ]; then

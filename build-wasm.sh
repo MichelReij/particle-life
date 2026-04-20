@@ -14,16 +14,10 @@ if ! command -v wasm-pack &> /dev/null; then
 fi
 
 # Ensure WASM target is installed
-echo "🔧 Ensuring WASM target is installed..."
-rustup target add wasm32-unknown-unknown
+rustup target add wasm32-unknown-unknown --quiet
 
-# Clean previous builds for WASM target
-echo "🧹 Cleaning previous WASM builds..."
-cargo clean --target wasm32-unknown-unknown
-rm -rf src/pkg
-
-# Build the WASM module with explicit target
-echo "🎯 Compiling Rust to WASM for wasm32-unknown-unknown target..."
+# Build the WASM module with explicit target (incrementeel — geen cargo clean)
+echo "🎯 Compiling Rust to WASM..."
 wasm-pack build \
   --target web \
   --out-dir src/pkg \
