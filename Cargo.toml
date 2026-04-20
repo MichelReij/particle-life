@@ -83,6 +83,15 @@ features = [
   "GpuRequestAdapterOptions",
   "GpuDeviceDescriptor",
   "GpuCanvasConfiguration",
+  # Web Audio API — voor de WASM supersaw synthesizer (audio_engine_wasm.rs)
+  "AudioContext",
+  "AudioDestinationNode",
+  "AudioNode",
+  "AudioProcessingEvent",
+  "AudioBuffer",
+  "ScriptProcessorNode",
+  "MediaStreamAudioDestinationNode",
+  "MediaStream",
 ]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
