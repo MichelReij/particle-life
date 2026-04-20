@@ -1,162 +1,168 @@
 // src/audio_engine_wasm.rs
-// WASM audio engine: supersaw synthesizer via Web Audio API (ScriptProcessorNode).
-// DSP-primitieven (SawOscillator, BiquadLPF, NoiseGen, Stem) leven in dsp.rs.
+// WASM audio engine: supersaw synthesizer via Web Audio API (AudioWorkletNode).
+// DSP-code (StemGraph, fundsp) draait in de AudioWorklet-thread (audio_worklet_exports.rs).
+// De AudioWorklet-processor is gedefinieerd in public/audio-processor.js.
 //
 // Gebruik:
 //   WasmAudioEngine::new() aanroepen bij opstart. De AudioContext start in 'suspended'
 //   state. Roep set_paused(false) aan vanuit een user-gesture (knopklik) om te starten.
-//
-// Noot: ScriptProcessorNode is deprecated maar werkt in alle browsers en is de
-// simpelste manier om WASM-DSP-code direct audio te laten genereren zonder een
-// aparte AudioWorklet-module. Geschikt voor testen en schaven.
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use js_sys::Float32Array;
 use wasm_bindgen::prelude::*;
-use web_sys::{AudioContext, AudioProcessingEvent, MediaStream, MediaStreamAudioDestinationNode};
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{
+    AudioContext, AudioWorkletNode, MediaStream, MediaStreamAudioDestinationNode,
+};
 
-use crate::dsp::{Stem, BASE_FREQS, BLOCK_SIZE, NUM_STEMS};
+use crate::dsp::NUM_STEMS;
 use crate::sonification::SonificationState;
-
-// ─── Interne synthesizer-toestand ────────────────────────────────────────────
-
-struct WasmSynth {
-    stems:      Vec<Stem>,
-    master_amp: f32,
-}
-
-impl WasmSynth {
-    fn new() -> Self {
-        let stems = BASE_FREQS.iter().enumerate()
-            .map(|(i, &f)| Stem::new(f, (i as u32 + 1) * 98765))
-            .collect();
-        Self { stems, master_amp: 0.5 }
-    }
-
-    fn apply_state(&mut self, state: &SonificationState) {
-        self.master_amp = state.master_amplitude;
-        for (i, stem) in self.stems.iter_mut().enumerate() {
-            stem.update(&state.stems[i]);
-        }
-    }
-
-    fn render_block(&mut self, left: &mut [f32], right: &mut [f32]) {
-        let scale = self.master_amp / NUM_STEMS as f32;
-        for i in 0..left.len() {
-            let (mut l, mut r) = (0.0f32, 0.0f32);
-            for stem in self.stems.iter_mut() {
-                let (sl, sr) = stem.render();
-                l += sl;  r += sr;
-            }
-            left[i]  = (l * scale).clamp(-1.0, 1.0);
-            right[i] = (r * scale).clamp(-1.0, 1.0);
-        }
-    }
-}
 
 // ─── WasmAudioEngine (publieke API) ──────────────────────────────────────────
 
 pub struct WasmAudioEngine {
-    ctx:              AudioContext,
-    // Gedeelde toestand tussen render-loop en audio-callback
-    state:            Rc<RefCell<SonificationState>>,
-    // Closure moet leven zolang de engine leeft
-    _audio_closure:   Closure<dyn FnMut(AudioProcessingEvent)>,
-    // MediaStreamAudioDestinationNode voor opname via MediaRecorder
-    stream_dest:      MediaStreamAudioDestinationNode,
-    paused:           bool,
+    ctx:         AudioContext,
+    node:        Rc<RefCell<Option<AudioWorkletNode>>>,
+    stream_dest: Rc<MediaStreamAudioDestinationNode>,
+    paused:      bool,
 }
 
 impl WasmAudioEngine {
     /// Maak de audio engine aan. AudioContext start in 'suspended' state.
+    /// De AudioWorklet-module wordt asynchroon geladen; zodra klaar is het node-veld gevuld.
     /// Roep set_paused(false) aan vanuit een user-gesture om te starten.
     pub fn new() -> Result<Self, JsValue> {
-        crate::console_log!("🎵 WasmAudioEngine: initialiseren (supersaw synthesizer)...");
+        crate::console_log!("🎵 WasmAudioEngine v{} initialiseren...", env!("BUILD_ID"));
 
         let ctx = AudioContext::new()?;
+        let node: Rc<RefCell<Option<AudioWorkletNode>>> = Rc::new(RefCell::new(None));
+        let stream_dest = Rc::new(ctx.create_media_stream_destination()?);
 
-        let state = Rc::new(RefCell::new(SonificationState::default()));
+        // Bepaal de URL van de processor-module relatief aan de huidige pagina.
+        let processor_url = {
+            let location = web_sys::window()
+                .ok_or_else(|| JsValue::from_str("geen window"))?
+                .location();
+            let href = location.href()?;
+            let base = web_sys::Url::new(&href)?;
+            let abs  = web_sys::Url::new_with_base("audio-processor.js", &base.href())?;
+            abs.href()
+        };
 
-        // ScriptProcessorNode: 0 inputs, 2 output-kanalen, buffergrootte 512
-        let processor = ctx.create_script_processor_with_buffer_size_and_number_of_input_channels_and_number_of_output_channels(
-            BLOCK_SIZE as u32, 0, 2
-        )?;
+        // addModule() is asynchroon — laad de processor en maak daarna de AudioWorkletNode aan.
+        let node_clone        = Rc::clone(&node);
+        let stream_dest_clone = Rc::clone(&stream_dest);
+        let ctx_clone         = ctx.clone();
 
-        // Synthesizer-toestand in de callback (apart van SonificationState)
-        let synth = Rc::new(RefCell::new(WasmSynth::new()));
-        let state_clone = Rc::clone(&state);
-        let synth_clone = Rc::clone(&synth);
-
-        let closure = Closure::wrap(Box::new(move |event: AudioProcessingEvent| {
-            let output = match event.output_buffer() {
-                Ok(buf) => buf,
-                Err(_) => return,
+        wasm_bindgen_futures::spawn_local(async move {
+            let worklet = match ctx_clone.audio_worklet() {
+                Ok(w) => w,
+                Err(e) => { crate::console_log!("❌ audio_worklet() fout: {:?}", e); return; }
             };
-            let buf_len = output.length() as usize;
 
-            // Haal nieuwe SonificationState op (non-blocking via try_borrow)
-            if let Ok(s) = state_clone.try_borrow() {
-                if let Ok(mut synth) = synth_clone.try_borrow_mut() {
-                    synth.apply_state(&*s);
-                }
+            let add_module_promise = match worklet.add_module(&processor_url) {
+                Ok(p) => p,
+                Err(e) => { crate::console_log!("❌ addModule() fout: {:?}", e); return; }
+            };
+
+            if let Err(e) = JsFuture::from(add_module_promise).await {
+                crate::console_log!("❌ addModule() promise fout: {:?}", e);
+                return;
             }
 
-            // Render audioblok
-            let mut left  = vec![0.0f32; buf_len];
-            let mut right = vec![0.0f32; buf_len];
-            if let Ok(mut synth) = synth_clone.try_borrow_mut() {
-                synth.render_block(&mut left, &mut right);
+            let worklet_node = match AudioWorkletNode::new(&ctx_clone, "particle-life-processor") {
+                Ok(n) => n,
+                Err(e) => { crate::console_log!("❌ AudioWorkletNode::new() fout: {:?}", e); return; }
+            };
+
+            if let Err(e) = worklet_node.connect_with_audio_node(&ctx_clone.destination()) {
+                crate::console_log!("❌ connect destination fout: {:?}", e);
+                return;
+            }
+            if let Err(e) = worklet_node.connect_with_audio_node(&*stream_dest_clone) {
+                crate::console_log!("❌ connect stream_dest fout: {:?}", e);
+                return;
             }
 
-            // Schrijf naar Web Audio buffers
-            let _ = output.copy_to_channel(&left,  0);
-            let _ = output.copy_to_channel(&right, 1);
-        }) as Box<dyn FnMut(AudioProcessingEvent)>);
+            *node_clone.borrow_mut() = Some(worklet_node);
+            crate::console_log!("✅ AudioWorkletNode klaar en verbonden");
+        });
 
-        processor.set_onaudioprocess(Some(closure.as_ref().unchecked_ref()));
-
-        // Verbind processor → speakers én → opname-destination (parallel)
-        processor.connect_with_audio_node(&ctx.destination())?;
-        let stream_dest = ctx.create_media_stream_destination()?;
-        processor.connect_with_audio_node(&stream_dest)?;
-
-        crate::console_log!("✅ WasmAudioEngine klaar — start via audio-knop in de UI");
+        crate::console_log!("✅ WasmAudioEngine aangemaakt — wacht op AudioWorklet...");
 
         Ok(Self {
             ctx,
-            state,
-            _audio_closure: closure,
+            node,
             stream_dest,
-            paused: true, // Begint gepauzeerd; UI-knop roept set_paused(false) aan
+            paused: true,
         })
     }
 
     /// Bijwerk de SonificationState vanuit de render-loop.
+    /// Serialiseert de state naar een Float32Array en stuurt die naar de AudioWorklet.
     pub fn update(&self, new_state: SonificationState) {
-        if let Ok(mut s) = self.state.try_borrow_mut() {
-            *s = new_state;
-        }
+        let node_ref = self.node.borrow();
+        let Some(node) = node_ref.as_ref() else { return };
+        let Ok(port) = node.port() else { return };
+
+        let params = state_to_f32(&new_state);
+        let arr = Float32Array::from(params.as_slice());
+        let _ = port.post_message(&arr);
     }
 
     pub fn set_paused(&mut self, paused: bool) {
         self.paused = paused;
         if paused {
-            let _ = self.ctx.suspend();
+            if let Ok(promise) = self.ctx.suspend() {
+                wasm_bindgen_futures::spawn_local(async move {
+                    let _ = JsFuture::from(promise).await;
+                });
+            }
         } else {
-            let _ = self.ctx.resume();
+            match self.ctx.resume() {
+                Ok(promise) => {
+                    wasm_bindgen_futures::spawn_local(async move {
+                        match JsFuture::from(promise).await {
+                            Ok(_)  => crate::console_log!("🎵 AudioContext resumed"),
+                            Err(e) => crate::console_log!("❌ resume rejected: {:?}", e),
+                        }
+                    });
+                }
+                Err(e) => crate::console_log!("❌ ctx.resume() fout: {:?}", e),
+            }
         }
     }
 
-    /// Geeft de MediaStream terug voor gebruik in MediaRecorder (video-opname met audio).
     pub fn get_media_stream(&self) -> MediaStream {
         self.stream_dest.stream()
     }
 
     pub fn set_master_volume(&self, v: f32) {
-        // Volume-aanpassing via gain node is optioneel; voor nu via SonificationState.master_amplitude.
-        // Kan later uitgebreid worden met een GainNode in de signaalketen.
-        if let Ok(mut s) = self.state.try_borrow_mut() {
-            s.master_amplitude = v.clamp(0.0, 1.0);
-        }
+        // Stuur een bijgewerkte state met aangepaste master_amplitude naar de worklet.
+        // Omdat we geen lokale state bewaren, wordt dit afgehandeld door de render-loop
+        // die set_master_volume doorgeeft via update(). Voor directe aanpassing:
+        let node_ref = self.node.borrow();
+        let Some(node) = node_ref.as_ref() else { return };
+        let Ok(port) = node.port() else { return };
+        // Stuur alleen master_amplitude (1 float, onderscheiden van de 50-float state)
+        let arr = Float32Array::from([v.clamp(0.0, 1.0)].as_slice());
+        let _ = port.post_message(&arr);
     }
+}
+
+/// Serialiseer SonificationState naar een platte Float32Array (50 floats).
+fn state_to_f32(s: &SonificationState) -> Vec<f32> {
+    let mut v = Vec::with_capacity(1 + NUM_STEMS * 7);
+    v.push(s.master_amplitude);
+    for stem in &s.stems {
+        v.push(stem.frequency);
+        v.push(stem.detune);
+        v.push(stem.gate);
+        v.push(stem.noise);
+        v.push(stem.saturation);
+        v.push(stem.pan);
+        v.push(stem.amplitude);
+    }
+    v
 }

@@ -69,26 +69,18 @@ class App {
             console.log("🦀 Initializing WASM module...");
             this.updateStatus("Loading WASM module...");
 
-            // Try different path approaches
-            const wasmPaths = [
-                "/pkg/particle_life_wasm_bg.wasm", // Absolute path from domain root
-                "./pkg/particle_life_wasm_bg.wasm", // Relative to current page
-                "pkg/particle_life_wasm_bg.wasm", // Relative without ./
-            ];
-
+            // Resolve the WASM path relative to the current page URL so it works
+            // regardless of subdirectory deployment.
+            // Cache-bust zodat de browser altijd de nieuwste WASM laadt
+            const wasmUrl = new URL(`pkg/particle_life_wasm_bg.wasm?v=${Date.now()}`, window.location.href).toString();
             let initSuccess = false;
-            for (const wasmPath of wasmPaths) {
-                try {
-                    console.log(`🔍 Trying WASM path: ${wasmPath}`);
-                    await init({ module_or_path: wasmPath });
-                    console.log(
-                        `✅ WASM initialized successfully with path: ${wasmPath}`,
-                    );
-                    initSuccess = true;
-                    break;
-                } catch (error) {
-                    console.warn(`⚠️ Failed with path ${wasmPath}:`, error);
-                }
+            try {
+                console.log(`🔍 Loading WASM from: ${wasmUrl}`);
+                await init({ module_or_path: wasmUrl });
+                console.log(`✅ WASM initialized successfully`);
+                initSuccess = true;
+            } catch (error) {
+                console.warn(`⚠️ WASM init failed:`, error);
             }
 
             if (!initSuccess) {

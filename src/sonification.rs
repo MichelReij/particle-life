@@ -120,7 +120,7 @@ impl Default for SonificationState {
         }
         Self {
             stems,
-            master_amplitude: 0.5,
+            master_amplitude: 0.65,
             gpu_blend: 0.0,
             zoom: 1.0,
         }
@@ -168,8 +168,8 @@ pub fn compute_sonification(
     };
 
     // Master amplitude: bij uitzoomen zachter, geschaald door viewport-dichtheid
-    // zoom 1 → 0.35, zoom 12 → 0.75
-    let master_amplitude = ((0.35 + (zoom - 1.0) / 11.0 * 0.40) * master_amp_mod).clamp(0.3, 0.9);
+    // zoom 1 → 0.65, zoom 12 → 0.95
+    let master_amplitude = ((0.65 + (zoom - 1.0) / 11.0 * 0.30) * master_amp_mod).clamp(0.5, 1.0);
 
     // Globale chaos-maat uit SimParams (0 = maximale orde, 1 = maximale chaos)
     // Combineert lenia_growth_sigma (hoog = chaos) en friction (laag = chaos)

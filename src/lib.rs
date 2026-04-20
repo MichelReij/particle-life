@@ -37,6 +37,10 @@ pub mod audio_engine;
 #[cfg(target_arch = "wasm32")]
 pub mod audio_engine_wasm;
 
+// AudioWorklet exports: WASM-functies aanroepbaar vanuit audio-processor.js
+#[cfg(target_arch = "wasm32")]
+pub mod audio_worklet_exports;
+
 // GPU stats reader: particle-type statistieken voor sonificatie (native only)
 #[cfg(not(target_arch = "wasm32"))]
 pub mod stats_reader;

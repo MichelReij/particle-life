@@ -6,14 +6,14 @@ use rodio::{OutputStream, Sink, Source};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::dsp::{Stem, BASE_FREQS, BLOCK_SIZE, NUM_STEMS, SAMPLE_RATE};
+use crate::dsp::{StemGraph, BASE_FREQS, BLOCK_SIZE, NUM_STEMS, SAMPLE_RATE};
 use crate::sonification::SonificationState;
 
 // ─── SynthSource (rodio::Source) ─────────────────────────────────────────────
 
 pub struct SynthSource {
     state_ref:  Arc<Mutex<SonificationState>>,
-    stems:      Vec<Stem>,
+    stems:      Vec<StemGraph>,
     buffer:     Vec<f32>,
     buf_pos:    usize,
     master_amp: f32,
@@ -21,8 +21,8 @@ pub struct SynthSource {
 
 impl SynthSource {
     fn new(state_ref: Arc<Mutex<SonificationState>>) -> Self {
-        let stems = BASE_FREQS.iter().enumerate()
-            .map(|(i, &f)| Stem::new(f, (i as u32 + 1) * 12345))
+        let stems = BASE_FREQS.iter()
+            .map(|&f| StemGraph::new(f))
             .collect();
         Self {
             state_ref,

@@ -21,6 +21,7 @@ futures = "0.3"
 # hsluv removed — replaced with standard HSL (richer, more dramatic colours)
 rand = { version = "0.8", features = ["small_rng"] }
 raw-window-handle = "0.6"
+fundsp = { version = "0.23", default-features = false, features = ["std"] }
 
 # Platform-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -87,11 +88,16 @@ features = [
   "AudioContext",
   "AudioDestinationNode",
   "AudioNode",
-  "AudioProcessingEvent",
-  "AudioBuffer",
-  "ScriptProcessorNode",
+  "AudioWorklet",
+  "AudioWorkletNode",
+  "BaseAudioContext",
   "MediaStreamAudioDestinationNode",
   "MediaStream",
+  "MessagePort",
+  "AudioParam",
+  "AudioContextState",
+  "Url",
+  "Location",
 ]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

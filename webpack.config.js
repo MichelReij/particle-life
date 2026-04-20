@@ -113,7 +113,10 @@ class RustWasmPlugin {
     }
 }
 
-module.exports = {
+module.exports = (env, argv) => {
+const isProd = argv && argv.mode === "production";
+
+return {
     entry: {
         main: "./src/main.ts",
         styles: "./src/styles/main.scss",
@@ -122,6 +125,7 @@ module.exports = {
         filename: "[name].js",
         path: path.resolve(__dirname, "public"),
         clean: false, // Don't clean the public folder to preserve manual assets
+        publicPath: isProd ? "/webapps/origin-of-life/" : "auto",
     },
     resolve: {
         extensions: [".ts", ".js", ".wasm"],
@@ -130,7 +134,6 @@ module.exports = {
         },
     },
     experiments: {
-        asyncWebAssembly: true,
         topLevelAwait: true,
     },
     module: {
@@ -149,8 +152,11 @@ module.exports = {
                 use: [MiniCssExtractPlugin.loader, "css-loader", "sass-loader"],
             },
             {
+                // Treat WASM as a static asset (URL only) — wasm-bindgen's init() fetches it directly.
+                // webassembly/async conflicts with wasm-bindgen's own instantiation (LinkError on imports).
                 test: /\.wasm$/,
-                type: "webassembly/async",
+                type: "asset/resource",
+                generator: { emit: false }, // CopyWebpackPlugin handles the actual file copy
             },
             {
                 test: /particle_life_wasm\.js$/,
@@ -220,4 +226,5 @@ module.exports = {
         },
     },
     mode: "development",
-};
+}; // return
+}; // module.exports
