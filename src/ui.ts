@@ -208,6 +208,7 @@ let parameterUpdateCallbacks = {
     setParticleOpacity: (opacity: number) => {},
     setTypeColor: (typeIdx: number, r: number, g: number, b: number) => {},
     getTypeColorsRgb: (): Float32Array | null => null,
+    getZoom: (): number | null => null,
     // Rule regeneration
     regenerateRules: () => {},
 };
@@ -231,6 +232,7 @@ export function setParameterUpdateCallbacks(callbacks: {
     setParticleOpacity?: (opacity: number) => void;
     setTypeColor?: (typeIdx: number, r: number, g: number, b: number) => void;
     getTypeColorsRgb?: () => Float32Array | null;
+    getZoom?: () => number | null;
     // Rule regeneration
     regenerateRules?: () => void;
 }) {
@@ -1164,12 +1166,18 @@ function initializeZoomSlider(currentZoomLevel: number): void {
             );
         }
 
+        const updateZoomLabel = (sliderValue: number) => {
+            // Dezelfde formule als SimulationParams::slider_to_zoom in Rust
+            const t = (sliderValue - 1.0) / 11.0;
+            const actual = Math.pow(12.0, t);
+            zoomValueDisplay.textContent = actual.toFixed(1);
+        };
+
         zoomSlider.addEventListener("input", (event) => {
             const newValue = parseFloat(
                 (event.target as HTMLInputElement).value,
             );
             console.log(`🎚️ Zoom slider input event: ${newValue}`);
-            zoomValueDisplay.textContent = newValue.toFixed(1); // Show 1 decimal
             // Don't save to localStorage - always reset to minimum on reload
 
             // Constrain zoom center based on new zoom level
@@ -1197,37 +1205,24 @@ function initializeZoomSlider(currentZoomLevel: number): void {
                 );
             }
 
+            updateZoomLabel(newValue);
             updateZoomCenterInfo(newValue);
         });
 
-        // Also add a 'change' event listener to ensure the zoom value persists when dragging ends
         zoomSlider.addEventListener("change", (event) => {
             const newValue = parseFloat(
                 (event.target as HTMLInputElement).value,
             );
             console.log(`Zoom slider change event: ${newValue}`);
-            zoomValueDisplay.textContent = newValue.toFixed(1); // Show 1 decimal
-            // Don't save to localStorage - always reset to minimum on reload
-
-            // Constrain zoom center based on new zoom level
             constrainZoomCenter(newValue);
 
-            // Use comprehensive zoom method if available (Rust engine)
             if (parameterUpdateCallbacks.setZoom) {
-                parameterUpdateCallbacks.setZoom(
-                    newValue,
-                    zoomCenterX,
-                    zoomCenterY,
-                );
+                parameterUpdateCallbacks.setZoom(newValue, zoomCenterX, zoomCenterY);
             } else {
-                // Fallback to updateZoom callback (TypeScript engine)
-                parameterUpdateCallbacks.updateZoom(
-                    newValue,
-                    zoomCenterX,
-                    zoomCenterY,
-                );
+                parameterUpdateCallbacks.updateZoom(newValue, zoomCenterX, zoomCenterY);
             }
 
+            updateZoomLabel(newValue);
             updateZoomCenterInfo(newValue);
         });
     }

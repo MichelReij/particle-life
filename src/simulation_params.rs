@@ -464,6 +464,15 @@ impl SimulationParams {
         self.lenia_growth_sigma = 0.02 + combined_chaos * 0.14;
     }
 
+    /// Converteert een lineaire sliderwaarde [ZOOM_MIN, ZOOM_MAX] naar een
+    /// perceptueel uniforme zoomwaarde via exponentiële mapping: zoom = ZOOM_MAX^t.
+    /// Zo geeft elke millimeter slider een gelijke factor in plaats van een gelijk aantal x.
+    /// Gebruik deze functie overal waar een ruwe sliderwaarde omgezet wordt naar echte zoom.
+    pub fn slider_to_zoom(slider_value: f32) -> f32 {
+        let t = ((slider_value - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)).clamp(0.0, 1.0);
+        ZOOM_MAX.powf(t) // 12^t: 1x bij t=0, 12x bij t=1
+    }
+
     // Set zoom level and update viewport parameters
     pub fn apply_zoom(&mut self, zoom_level: f32, center_x: Option<f32>, center_y: Option<f32>) {
         // Clamp zoom level to valid range (1.0 to ZOOM_MAX)

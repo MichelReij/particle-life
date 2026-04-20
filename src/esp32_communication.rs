@@ -3,6 +3,7 @@
 // Receives sensor data and makes it available to the graphics thread
 
 use crate::config::{ZOOM_MAX, ZOOM_MIN};
+use crate::simulation_params::SimulationParams;
 use serde::{Deserialize, Serialize};
 use serialport::{available_ports, SerialPort};
 use std::io::{Read, Write};
@@ -769,8 +770,9 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
 impl ESP32SensorData {
     // Convert zoom (0-4096) to simulation zoom level (ZOOM_MIN - ZOOM_MAX)
     pub fn to_zoom_level(&self) -> f32 {
-        // Map 0-4096 to ZOOM_MIN-ZOOM_MAX range (1.0-12.0)
-        ZOOM_MIN + (self.zoom as f32 / 4096.0) * (ZOOM_MAX - ZOOM_MIN)
+        // 0-4096 → lineaire sliderwaarde → exponentiële zoom (perceptueel uniform)
+        let slider = ZOOM_MIN + (self.zoom as f32 / 4096.0) * (ZOOM_MAX - ZOOM_MIN);
+        SimulationParams::slider_to_zoom(slider)
     }
 
     // Convert pan values to normalised velocity (-1..+1) for relative panning.

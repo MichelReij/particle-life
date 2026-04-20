@@ -30,6 +30,7 @@ class App {
     private mediaRecorder: MediaRecorder | null = null;
     private recordedChunks: Blob[] = [];
     private isRecording = false;
+    private isAudioOn = false;
     // Guard against wasm-bindgen re-entrancy: async check_super_lightning holds a
     // &mut self borrow for the GPU readback; all other &mut self calls must be
     // deferred until it completes.
@@ -323,6 +324,9 @@ class App {
                     this.engine.set_zoom(level, centerX, centerY);
                 }
             },
+            getZoom: () => {
+                return this.engine ? this.engine.get_zoom() : null;
+            },
             // Rule regeneration
             regenerateRules: () => {
                 if (this.engine && !this.engineBusy) {
@@ -371,6 +375,11 @@ class App {
         initializeUI(defaultSimParams, defaultZoomLevel);
         initColorPanel();
 
+        // Audio toggle button
+        document
+            .getElementById("audio-btn")
+            ?.addEventListener("click", () => this.toggleAudio());
+
         // Screenshot button
         document
             .getElementById("screenshot-btn")
@@ -381,13 +390,14 @@ class App {
             .getElementById("record-btn")
             ?.addEventListener("click", () => this.toggleRecording());
 
-        // Keyboard shortcuts: S = screenshot, V = toggle video recording
+        // Keyboard shortcuts: S = screenshot, V = toggle video recording, A = audio toggle
         document.addEventListener("keydown", (e: KeyboardEvent) => {
             if (
                 document.activeElement instanceof HTMLInputElement ||
                 document.activeElement instanceof HTMLTextAreaElement
             )
                 return;
+            if (e.key === "a" || e.key === "A") this.toggleAudio();
             if (e.key === "s" || e.key === "S") this.triggerScreenshot();
             if (e.key === "v" || e.key === "V") this.toggleRecording();
         });
@@ -462,6 +472,17 @@ class App {
         console.log("✅ Rust simulation animation loop started");
     }
 
+    private toggleAudio() {
+        if (!this.engine) return;
+        this.isAudioOn = !this.isAudioOn;
+        this.engine.set_audio_paused(!this.isAudioOn);
+
+        const btn = document.getElementById("audio-btn");
+        const icon = btn?.querySelector(".material-symbols-outlined");
+        if (icon) icon.textContent = this.isAudioOn ? "volume_up" : "volume_off";
+        btn?.classList.toggle("audio-on", this.isAudioOn);
+    }
+
     private triggerScreenshot() {
         this.pendingScreenshot = true;
     }
@@ -478,7 +499,18 @@ class App {
         if (!this.canvas) return;
 
         const stream = this.canvas.captureStream(60);
-        const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+
+        // Voeg audiotrack toe als sonificatie actief is
+        if (this.isAudioOn && this.engine) {
+            const audioStream = this.engine.get_audio_stream();
+            if (audioStream) {
+                audioStream.getAudioTracks().forEach(track => stream.addTrack(track));
+            }
+        }
+
+        const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+            ? "video/webm;codecs=vp9,opus"
+            : MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
             ? "video/webm;codecs=vp9"
             : "video/webm";
 

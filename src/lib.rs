@@ -19,9 +19,27 @@ mod webgpu_renderer;
 #[cfg(not(target_arch = "wasm32"))]
 mod esp32_communication;
 
-// Audio system only for native builds
+// Audio system only for native builds (oud mp3-systeem, voor referentie)
 #[cfg(not(target_arch = "wasm32"))]
 mod audio;
+
+// Gedeelde DSP-primitieven (SawOscillator, BiquadLPF, NoiseGen, Stem)
+pub mod dsp;
+
+// Sonificatie: parameter → StemState mapping — gedeeld tussen native en WASM
+pub mod sonification;
+
+// Audio engine: supersaw synthesizer via rodio (native only)
+#[cfg(not(target_arch = "wasm32"))]
+pub mod audio_engine;
+
+// Audio engine: supersaw synthesizer via Web Audio API (WASM only)
+#[cfg(target_arch = "wasm32")]
+pub mod audio_engine_wasm;
+
+// GPU stats reader: particle-type statistieken voor sonificatie (native only)
+#[cfg(not(target_arch = "wasm32"))]
+pub mod stats_reader;
 
 pub use buffer_utils::*;
 pub use config::*;
@@ -78,6 +96,9 @@ pub struct ParticleLifeEngine {
     // Continuous rule evolution (shared logic, lives in interaction_rules.rs)
     rule_evolution: RuleEvolution,
     last_seen_flash_id: u32,
+    // Sonificatie
+    audio_engine: Option<audio_engine_wasm::WasmAudioEngine>,
+    sonification_state: sonification::SonificationState,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -129,6 +150,8 @@ impl ParticleLifeEngine {
             renderer: None,
             rule_evolution,
             last_seen_flash_id: 0,
+            audio_engine: None, // Lazy: aangemaakt bij eerste set_audio_paused(false)
+            sonification_state: sonification::SonificationState::default(),
         }
     }
 
@@ -268,7 +291,7 @@ impl ParticleLifeEngine {
         if self.frame_count % 300 == 0 {
             let active_particles = self.particle_system.get_active_count();
             console_log!(
-                "� Frame {}: particles={}, fps={:.1}",
+                "🎯 Frame {}: particles={}, fps={:.1}",
                 self.frame_count,
                 active_particles,
                 if delta_time > 0.0 {
@@ -280,19 +303,54 @@ impl ParticleLifeEngine {
         }
 
         // PHYSICS IS HANDLED BY GPU COMPUTE SHADER - no CPU physics needed
-        // The WebGPU renderer will handle all physics calculations via compute shaders
-
-        // Particle transitions are now handled entirely by GPU compute shader
-
-        // Lightning generation is now handled by the GPU compute shader
-        // (Rust lightning_system.update() removed to avoid conflicts)
-
         // === Continuous rule evolution (lerp) ===
         self.interaction_rules = self.rule_evolution.tick(delta_time, &mut self.rng).clone();
 
-        self.frame_count += 1;
+        // === Sonificatie ===
+        self.sonification_state = sonification::compute_sonification(
+            &self.simulation_params,
+            None, // GPU-stats niet beschikbaar in WASM (voor nu)
+            None,
+            &self.sonification_state,
+        );
+        if let Some(ref engine) = self.audio_engine {
+            engine.update(self.sonification_state.clone());
+        }
 
-        // Removed verbose frame time logging
+        self.frame_count += 1;
+    }
+
+    #[wasm_bindgen]
+    pub fn set_audio_paused(&mut self, paused: bool) {
+        if !paused && self.audio_engine.is_none() {
+            // Lazy init: aanmaken bij eerste klik (user-gesture context vereist)
+            match audio_engine_wasm::WasmAudioEngine::new() {
+                Ok(engine) => { self.audio_engine = Some(engine); }
+                Err(e) => { crate::console_log!("⚠️ Audio engine fout: {:?}", e); return; }
+            }
+        }
+        if let Some(ref mut engine) = self.audio_engine {
+            engine.set_paused(paused);
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn set_audio_volume(&self, v: f32) {
+        if let Some(ref engine) = self.audio_engine {
+            engine.set_master_volume(v);
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn is_audio_active(&self) -> bool {
+        self.audio_engine.is_some()
+    }
+
+    /// Geeft de audio MediaStream terug voor gebruik in MediaRecorder.
+    /// Returnt None als de audio engine niet beschikbaar is.
+    #[wasm_bindgen]
+    pub fn get_audio_stream(&self) -> Option<web_sys::MediaStream> {
+        self.audio_engine.as_ref().map(|e| e.get_media_stream())
     }
 
     // Particle count management
@@ -310,7 +368,6 @@ impl ParticleLifeEngine {
         let current_count = self.particle_system.get_active_count();
 
         if count != current_count {
-            // Start GPU-based transition
             console_log!(
                 "🕒 Starting transition at time {:.3}s: {} -> {} particles",
                 self.current_time,
@@ -323,146 +380,71 @@ impl ParticleLifeEngine {
                 self.current_time,
             );
 
-            // For grow transitions, update active count immediately and initialize new particles
-            // For shrink transitions, defer until transition completes
             if count > current_count {
                 self.particle_system.set_active_count(count);
                 self.simulation_params.set_num_particles(count);
-
-                // Initialize the new particles in the grow range
                 self.initialize_particles_for_grow_transition(current_count, count);
-
-                // Update only transition fields without overwriting GPU physics data
                 if let Some(ref mut renderer) = self.renderer {
                     renderer.update_particle_transitions(&self.particle_system);
                 }
-
-                // console_log!(
-                //     "🌱 GROW: {} -> {} particles, active_count now: {}, num_particles now: {}",
-                //     current_count,
-                //     count,
-                //     self.particle_system.get_active_count(),
-                //     self.simulation_params.num_particles
-                // );
             } else {
-                // Initialize particles for shrink transition
                 self.initialize_particles_for_shrink_transition(count, current_count);
-
-                // Update only transition fields without overwriting GPU physics data
                 if let Some(ref mut renderer) = self.renderer {
                     renderer.update_particle_transitions(&self.particle_system);
                 }
             }
-            // For shrink: keep old count during transition
-
-            // console_log!(
-            //     "🔄 Starting GPU transition: {} -> {} particles (deferred: {})",
-            //     current_count,
-            //     count,
-            //     if count < current_count {
-            //         "true"
-            //     } else {
-            //         "false"
-            //     }
-            // );
         } else {
-            // No change needed
             self.simulation_params.set_num_particles(count);
         }
 
         true
     }
 
-    // Initialize particles for grow transition
     fn initialize_particles_for_grow_transition(&mut self, start_index: u32, end_index: u32) {
         for i in start_index..end_index {
-            // let particle_type = (i % self.particle_system.get_num_types()) as u32;
-
             if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
-                // Initialize position, velocity, type, and target size
                 particle.position = [
-                    self.rng
-                        .gen_range(0.0..self.simulation_params.virtual_world_width),
-                    self.rng
-                        .gen_range(0.0..self.simulation_params.virtual_world_height),
+                    self.rng.gen_range(0.0..self.simulation_params.virtual_world_width),
+                    self.rng.gen_range(0.0..self.simulation_params.virtual_world_height),
                 ];
                 particle.velocity = [self.rng.gen_range(-2.0..2.0), self.rng.gen_range(-2.0..2.0)];
-
-                // For GPU transitions, start the growth with a very small size (will grow via GPU)
-                particle.size = 0.1; // Start tiny, GPU will handle the growth
-
-                // Set transition fields for grow transition
+                particle.size = 0.1;
                 particle.transition_start = self.current_time;
-                particle.transition_type = 0; // 0 = grow
-                particle.is_active = false; // GPU will set this to true at transition start
-
-                // console_log!(
-                //     "🌱 Initialized particle {} with target_size={:.2}, starting size=0.1, transition_start={:.3}, is_active=true",
-                //     i,
-                //     particle.target_size,
-                //     self.current_time
-                // );
+                particle.transition_type = 0;
+                particle.is_active = false;
             }
         }
     }
 
-    // Initialize particles for shrink transition
     fn initialize_particles_for_shrink_transition(&mut self, start_index: u32, end_index: u32) {
         for i in start_index..end_index {
             if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
-                // Set transition fields for shrink transition
                 particle.transition_start = self.current_time;
-                particle.transition_type = 1; // 1 = shrink
-                                              // Keep is_active = true during transition, will be set to false when transition completes
-
-                // console_log!(
-                //     "🍂 Set shrink transition for particle {} at time {:.3}, is_active remains true during transition",
-                //     i,
-                //     self.current_time
-                // );
+                particle.transition_type = 1;
             }
         }
     }
 
-    // Temperature-based background color mapping - now moved to SimulationParams as static function
-
-    // Set temperature and update all temperature-related simulation parameters
     #[wasm_bindgen]
     pub fn set_temperature(&mut self, temp: f32) {
         self.simulation_params.apply_temperature(temp);
-        console_log!(
-            "🌡️ Temperature set to {:.1}°C → applied to simulation parameters",
-            temp.max(3.0).min(40.0)
-        );
     }
 
-    // Set pressure and update all pressure-related simulation parameters
     #[wasm_bindgen]
     pub fn set_pressure(&mut self, pressure: f32) {
         self.simulation_params.apply_pressure(pressure);
-        console_log!(
-            "🔧 Pressure set to {:.1} → applied to simulation parameters",
-            pressure.max(0.0).min(350.0)
-        );
     }
 
-    // Set pH and update all pH-related simulation parameters
     #[wasm_bindgen]
     pub fn set_ph(&mut self, ph: f32) {
         self.simulation_params.apply_ph(ph);
-        console_log!(
-            "🧪 pH set to {:.1} → applied to simulation parameters (optimum ~10)",
-            ph.max(0.0).min(14.0)
-        );
     }
 
-    // Set particle opacity (0.0 = invisible, 1.0 = fully opaque)
     #[wasm_bindgen]
     pub fn set_particle_opacity(&mut self, opacity: f32) {
         self.particle_system.particle_opacity = opacity.clamp(0.0, 1.0);
     }
 
-    // Set color for a specific particle type (sRGB 0-1 range)
     #[wasm_bindgen]
     pub fn set_type_color(&mut self, type_idx: usize, r: f32, g: f32, b: f32) {
         if type_idx < 7 {
@@ -471,7 +453,6 @@ impl ParticleLifeEngine {
         }
     }
 
-    // Get all type colors as flat [r0,g0,b0, r1,g1,b1, ...] sRGB 0-1
     #[wasm_bindgen]
     pub fn get_type_colors_rgb(&self) -> Vec<f32> {
         self.particle_system
@@ -481,94 +462,58 @@ impl ParticleLifeEngine {
             .collect()
     }
 
-    // Set electrical activity and update all electrical-related simulation parameters
     #[wasm_bindgen]
     pub fn set_electrical_activity(&mut self, electrical_activity: f32) {
-        self.simulation_params
-            .apply_electrical_activity(electrical_activity);
-        console_log!(
-            "⚡ Electrical activity set to {:.2} → applied to simulation parameters",
-            electrical_activity.max(0.0).min(3.0)
-        );
-    }
-
-    // Lightning system access - now handled by GPU compute shader
-    #[wasm_bindgen]
-    pub fn get_lightning_segments_buffer(&self) -> Vec<u8> {
-        // Return empty buffer - lightning is now generated by GPU compute shader
-        Vec::new()
+        self.simulation_params.apply_electrical_activity(electrical_activity);
     }
 
     #[wasm_bindgen]
-    pub fn get_lightning_bolts_buffer(&self) -> Vec<u8> {
-        // Return empty buffer - lightning is now generated by GPU compute shader
-        Vec::new()
-    }
+    pub fn get_lightning_segments_buffer(&self) -> Vec<u8> { Vec::new() }
 
-    // Generate new random interaction rules
+    #[wasm_bindgen]
+    pub fn get_lightning_bolts_buffer(&self) -> Vec<u8> { Vec::new() }
+
     #[wasm_bindgen]
     pub fn regenerate_rules(&mut self) {
         self.interaction_rules = InteractionRules::new_random(&mut self.rng);
-        console_log!("🔄 Generated new interaction rules");
     }
 
-    // Regenerate interaction rules for physics testing
     #[wasm_bindgen]
     pub fn regenerate_interaction_rules(&mut self) {
         self.interaction_rules = InteractionRules::new_random(&mut self.rng);
-        console_log!("🎲 Generated new interaction rules");
     }
 
-    // === Rule evolution API ===
-
-    /// Set how many seconds a full lerp cycle from one rule set to the next takes.
-    /// Called by JS whenever the temperature changes.
     #[wasm_bindgen]
     pub fn set_rules_lerp_duration(&mut self, seconds: f32) {
         self.rule_evolution.set_duration(seconds);
     }
 
-    /// Immediately snap to the current target rules and start a fresh lerp toward
-    /// a newly generated set. Used when super-lightning is detected.
     #[wasm_bindgen]
     pub fn snap_to_new_rules(&mut self) {
         self.rule_evolution.snap_to_new(&mut self.rng);
         console_log!("⚡ Super-lightning: rules snapped immediately, new lerp started");
     }
 
-    /// Get current lerp progress (0.0–1.0), useful for UI display.
     #[wasm_bindgen]
     pub fn get_rules_lerp_progress(&self) -> f32 {
         self.rule_evolution.progress()
     }
 
-    // Get various constants needed by TypeScript
     #[wasm_bindgen]
-    pub fn get_max_particles(&self) -> u32 {
-        self.particle_system.get_max_particles()
-    }
+    pub fn get_max_particles(&self) -> u32 { self.particle_system.get_max_particles() }
 
     #[wasm_bindgen]
-    pub fn get_min_particles(&self) -> u32 {
-        self.particle_system.get_min_particles()
-    }
+    pub fn get_min_particles(&self) -> u32 { self.particle_system.get_min_particles() }
 
     #[wasm_bindgen]
-    pub fn get_num_types(&self) -> u32 {
-        self.particle_system.get_num_types()
-    }
+    pub fn get_num_types(&self) -> u32 { self.particle_system.get_num_types() }
 
     #[wasm_bindgen]
-    pub fn get_particle_size_bytes(&self) -> u32 {
-        48 // pos(8) + vel(8) + type(4) + size(4) + target_size(4) + transition_start(4) + transition_type(4) + is_active(4) + padding(8) = 48 bytes (16-byte aligned)
-    }
+    pub fn get_particle_size_bytes(&self) -> u32 { 48 }
 
     #[wasm_bindgen]
-    pub fn get_sim_params_size_bytes(&self) -> u32 {
-        self.simulation_params.get_buffer_size()
-    }
+    pub fn get_sim_params_size_bytes(&self) -> u32 { self.simulation_params.get_buffer_size() }
 
-    // Debug information
     #[wasm_bindgen]
     pub fn get_debug_info(&self) -> String {
         format!(
@@ -581,7 +526,6 @@ impl ParticleLifeEngine {
         )
     }
 
-    // Simple canvas rendering for debugging/fallback
     #[wasm_bindgen]
     pub fn render_to_canvas(&self, canvas_id: &str) -> Result<(), JsValue> {
         let window = web_sys::window().unwrap();
@@ -599,551 +543,183 @@ impl ParticleLifeEngine {
         let canvas_width = canvas.width() as f32;
         let canvas_height = canvas.height() as f32;
 
-        // Clear canvas with background color
-        let bg_r = self.simulation_params.background_color_r;
-        let bg_g = self.simulation_params.background_color_g;
-        let bg_b = self.simulation_params.background_color_b;
-
         let bg_color = format!(
             "rgb({},{},{})",
-            (bg_r * 255.0) as u8,
-            (bg_g * 255.0) as u8,
-            (bg_b * 255.0) as u8
+            (self.simulation_params.background_color_r * 255.0) as u8,
+            (self.simulation_params.background_color_g * 255.0) as u8,
+            (self.simulation_params.background_color_b * 255.0) as u8
         );
         context.set_fill_style_str(&bg_color);
         context.fill_rect(0.0, 0.0, canvas_width as f64, canvas_height as f64);
 
-        // Calculate the center view window (canvas size) in the virtual world
         let world_width = self.simulation_params.virtual_world_width;
         let world_height = self.simulation_params.virtual_world_height;
+        let view_left = world_width / 2.0 - canvas_width / 2.0;
+        let view_top  = world_height / 2.0 - canvas_height / 2.0;
 
-        // View the center of the world (no scaling, 1:1 pixel mapping)
-        let view_center_x = world_width / 2.0;
-        let view_center_y = world_height / 2.0;
-        let view_left = view_center_x - canvas_width / 2.0;
-        let view_top = view_center_y - canvas_height / 2.0;
-        let view_right = view_center_x + canvas_width / 2.0;
-        let view_bottom = view_center_y + canvas_height / 2.0;
-
-        // Debug logging for view window
-        if self.frame_count % 60 == 0 {
-            console_log!(
-                "🎨 View window - World: {}x{}, View: ({:.1},{:.1}) to ({:.1},{:.1})",
-                world_width,
-                world_height,
-                view_left,
-                view_top,
-                view_right,
-                view_bottom
-            );
-        }
-
-        // Always debug first few frames
-        if self.frame_count < 5 {
-            console_log!(
-                "🔧 Frame {} - World: {}x{}, View center: ({:.1},{:.1}), View bounds: ({:.1},{:.1}) to ({:.1},{:.1})",
-                self.frame_count,
-                world_width,
-                world_height,
-                view_center_x,
-                view_center_y,
-                view_left,
-                view_top,
-                view_right,
-                view_bottom
-            );
-        }
-
-        let mut particles_rendered = 0;
         for i in 0..self.particle_system.get_active_count() {
             if let Some(particle) = self.particle_system.get_particle(i as usize) {
-                // Check if particle is within the view window
-                if particle.position[0] < view_left
-                    || particle.position[0] > view_right
-                    || particle.position[1] < view_top
-                    || particle.position[1] > view_bottom
-                {
-                    continue; // Skip particles outside the view window
-                }
-
-                // Convert world coordinates to canvas coordinates
-                let canvas_x = particle.position[0] - view_left;
-                let canvas_y = particle.position[1] - view_top;
-
-                // Use particle size directly
-                let canvas_radius = if self.frame_count < 100 {
-                    5.0 // Large particles for debugging
-                } else {
-                    particle.size
-                };
-
-                // Get particle color based on type
-                let hue = (particle.particle_type as f32 / self.simulation_params.num_types as f32)
-                    * 360.0;
-                let color = format!("hsl({}, 70%, 60%)", hue);
-                context.set_fill_style_str(&color);
-
+                let cx = particle.position[0] - view_left;
+                let cy = particle.position[1] - view_top;
+                if cx < 0.0 || cx > canvas_width || cy < 0.0 || cy > canvas_height { continue; }
+                let hue = (particle.particle_type as f32 / self.simulation_params.num_types as f32) * 360.0;
+                context.set_fill_style_str(&format!("hsl({}, 70%, 60%)", hue));
                 context.begin_path();
-                context.arc(
-                    canvas_x as f64,
-                    canvas_y as f64,
-                    canvas_radius as f64,
-                    0.0,
-                    2.0 * std::f64::consts::PI,
-                )?;
+                context.arc(cx as f64, cy as f64, particle.size as f64, 0.0, 2.0 * std::f64::consts::PI)?;
                 context.fill();
-
-                particles_rendered += 1;
             }
         }
-
-        // Debug logging for particle rendering count
-        if self.frame_count % 60 == 0 || self.frame_count < 10 {
-            console_log!(
-                "🎨 Frame {} - Rendered {} particles out of {} active",
-                self.frame_count,
-                particles_rendered,
-                self.particle_system.get_active_count()
-            );
-        }
-
         Ok(())
     }
 
-    // Initialize WebGPU renderer
     #[wasm_bindgen]
-    pub async fn initialize_webgpu(
-        &mut self,
-        canvas: web_sys::HtmlCanvasElement,
-    ) -> Result<(), JsValue> {
-        console_log!("� Attempting to initialize WebGPU renderer with WGPU 25...");
-
+    pub async fn initialize_webgpu(&mut self, canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
         match WebGpuRenderer::new(&canvas).await {
-            Ok(renderer) => {
-                console_log!("✅ WebGPU renderer initialized successfully!");
-                self.renderer = Some(renderer);
-                Ok(())
-            }
-            Err(e) => {
-                console_log!("⚠️ WebGPU initialization failed: {:?}", e);
-                console_log!("🔄 Falling back to Canvas 2D rendering");
-                Err(e)
-            }
+            Ok(renderer) => { self.renderer = Some(renderer); Ok(()) }
+            Err(e) => Err(e)
         }
     }
 
-    /// Read the lightning bolt buffer from GPU and return whether a new super-lightning
-    /// event has occurred since the last call.
-    /// Returns 1 = new super-lightning (and snaps rules), 0 = nothing new.
     #[wasm_bindgen]
     pub async fn check_super_lightning(&mut self) -> u32 {
-        // Take renderer out temporarily so we can hold it across the await point
-        let mut renderer = match self.renderer.take() {
-            Some(r) => r,
-            None => return 0,
-        };
-
+        let mut renderer = match self.renderer.take() { Some(r) => r, None => return 0 };
         let result = match renderer.update_lightning_cache().await {
             Ok(()) => {
                 if let Some(bolt) = renderer.get_cached_lightning_bolt() {
                     if bolt.flash_id > self.last_seen_flash_id {
                         self.last_seen_flash_id = bolt.flash_id;
-                        if bolt.is_super() {
-                            1
-                        } else {
-                            0
-                        }
-                    } else {
-                        0
-                    }
-                } else {
-                    0
-                }
+                        if bolt.is_super() { 1 } else { 0 }
+                    } else { 0 }
+                } else { 0 }
             }
             Err(_) => 0,
         };
-
         self.renderer = Some(renderer);
-
-        // Snap rules immediately in Rust when super-lightning is detected
         if result == 1 {
             self.rule_evolution.snap_to_new(&mut self.rng);
             console_log!("⚡ Super-lightning: rules snapped immediately, new lerp started");
         }
-
         result
     }
 
-    // Render using WebGPU (preferred) or fallback to Canvas 2D
     #[wasm_bindgen]
     pub fn render(&mut self) -> Result<(), JsValue> {
-        // Check if GPU transition is complete and finalize it
-        if self
-            .simulation_params
-            .is_transition_complete(self.current_time)
+        if self.simulation_params.is_transition_complete(self.current_time)
             && self.simulation_params.transition_active
         {
-            let elapsed = self.current_time - self.simulation_params.transition_start_time;
-            console_log!(
-                "🕒 Transition completing: elapsed={:.3}s, duration={:.3}s, start_time={:.3}s, current_time={:.3}s",
-                elapsed,
-                self.simulation_params.transition_duration,
-                self.simulation_params.transition_start_time,
-                self.current_time
-            );
-
             let target_count = self.simulation_params.transition_end_count;
-
-            if self.simulation_params.transition_is_grow {
-                console_log!(
-                    "🌱 Completed grow transition - GPU handled all size and activation changes"
-                );
-            } else {
-                // For shrink transitions, update the CPU-side active count to match GPU state
+            if !self.simulation_params.transition_is_grow {
                 self.particle_system.set_active_count(target_count);
                 self.simulation_params.set_num_particles(target_count);
-
-                console_log!(
-                    "🍂 Completed shrink transition - CPU active count now matches GPU: {}",
-                    target_count
-                );
             }
-
             self.simulation_params.stop_particle_transition();
         }
 
         if let Some(ref mut renderer) = self.renderer {
-            // Lightning data is now generated by GPU compute shader, pass empty buffers
-            let lightning_segments_data = Vec::new();
-            let lightning_bolts_data = Vec::new();
-
-            // Use WebGPU renderer - lightning will be generated by compute shader
             renderer.render(
                 &self.particle_system,
                 &self.simulation_params,
                 &self.interaction_rules,
-                &lightning_segments_data,
-                &lightning_bolts_data,
+                &Vec::new(),
+                &Vec::new(),
             )?;
         } else {
-            // Fallback to Canvas 2D
             self.render_to_canvas("canvas")?;
-
-            // Also render a simple test circle to ensure canvas is working
-            if self.frame_count == 1 {
-                self.render_test_graphics()?;
-            }
         }
-
         Ok(())
     }
 
-    // Test graphics to verify canvas is working
     #[wasm_bindgen]
     pub fn render_test_graphics(&self) -> Result<(), JsValue> {
         let window = web_sys::window().unwrap();
         let document = window.document().unwrap();
-        let canvas = document
-            .get_element_by_id("canvas")
-            .unwrap()
+        let canvas = document.get_element_by_id("canvas").unwrap()
             .dyn_into::<web_sys::HtmlCanvasElement>()?;
-
-        let context = canvas
-            .get_context("2d")?
-            .unwrap()
+        let context = canvas.get_context("2d")?.unwrap()
             .dyn_into::<web_sys::CanvasRenderingContext2d>()?;
-
-        // Draw a bright red test circle in the center
         context.set_fill_style_str("#ff0000");
         context.begin_path();
         context.arc(400.0, 400.0, 50.0, 0.0, 2.0 * std::f64::consts::PI)?;
         context.fill();
-
-        console_log!("🎯 Test graphics rendered - red circle at center");
-
         Ok(())
     }
 
-    // Update background color (separate R, G, B components)
     #[wasm_bindgen]
     pub fn update_background_color(&mut self, r: f32, g: f32, b: f32) {
         self.simulation_params.background_color_r = r;
         self.simulation_params.background_color_g = g;
         self.simulation_params.background_color_b = b;
-        console_log!(
-            "🎨 Background color updated: R={:.3}, G={:.3}, B={:.3}",
-            r,
-            g,
-            b
-        );
     }
 
-    // Set particle count from pressure (using pressure-to-particle mapping)
     #[wasm_bindgen]
     pub fn set_particle_count_from_pressure(&mut self, pressure: f32) -> bool {
-        let particle_count = self.simulation_params.pressure_to_particle_count(
+        let count = self.simulation_params.pressure_to_particle_count(
             pressure,
             self.particle_system.get_max_particles(),
             self.particle_system.get_min_particles(),
         );
-        console_log!("📊 Pressure {} → {} particles", pressure, particle_count);
-        self.set_particle_count(particle_count)
-    }
-
-    // Set zoom level and update viewport parameters
-    #[wasm_bindgen]
-    pub fn set_zoom(&mut self, zoom_level: f32, center_x: Option<f32>, center_y: Option<f32>) {
-        self.simulation_params
-            .apply_zoom(zoom_level, center_x, center_y);
-        console_log!(
-            "🔍 Zoom set to {:.2}x → applied to viewport parameters",
-            zoom_level.max(ZOOM_MIN).min(ZOOM_MAX)
-        );
-    }
-
-    // === COMPREHENSIVE PARAMETER GETTERS ===
-    // These getters allow the UI to read all current simulation parameter values
-
-    #[wasm_bindgen]
-    pub fn get_drift_x_per_second(&self) -> f32 {
-        self.simulation_params.drift_x_per_second
+        self.set_particle_count(count)
     }
 
     #[wasm_bindgen]
-    pub fn get_friction(&self) -> f32 {
-        self.simulation_params.friction
+    pub fn set_zoom(&mut self, slider_value: f32, center_x: Option<f32>, center_y: Option<f32>) {
+        let zoom = SimulationParams::slider_to_zoom(slider_value);
+        self.simulation_params.apply_zoom(zoom, center_x, center_y);
     }
 
     #[wasm_bindgen]
-    pub fn get_force_scale(&self) -> f32 {
-        self.simulation_params.force_scale
+    pub fn get_zoom(&self) -> f32 {
+        self.simulation_params.current_zoom_level
     }
 
-    #[wasm_bindgen]
-    pub fn get_r_smooth(&self) -> f32 {
-        self.simulation_params.r_smooth
-    }
+    #[wasm_bindgen] pub fn get_drift_x_per_second(&self) -> f32 { self.simulation_params.drift_x_per_second }
+    #[wasm_bindgen] pub fn get_friction(&self) -> f32 { self.simulation_params.friction }
+    #[wasm_bindgen] pub fn get_force_scale(&self) -> f32 { self.simulation_params.force_scale }
+    #[wasm_bindgen] pub fn get_r_smooth(&self) -> f32 { self.simulation_params.r_smooth }
+    #[wasm_bindgen] pub fn get_inter_type_attraction_scale(&self) -> f32 { self.simulation_params.inter_type_attraction_scale }
+    #[wasm_bindgen] pub fn get_inter_type_radius_scale(&self) -> f32 { self.simulation_params.inter_type_radius_scale }
+    #[wasm_bindgen] pub fn get_fisheye_strength(&self) -> f32 { self.simulation_params.fisheye_strength }
+    #[wasm_bindgen] pub fn get_lenia_enabled(&self) -> bool { self.simulation_params.lenia_enabled }
+    #[wasm_bindgen] pub fn get_lenia_growth_mu(&self) -> f32 { self.simulation_params.lenia_growth_mu }
+    #[wasm_bindgen] pub fn get_lenia_growth_sigma(&self) -> f32 { self.simulation_params.lenia_growth_sigma }
+    #[wasm_bindgen] pub fn get_lenia_kernel_radius(&self) -> f32 { self.simulation_params.lenia_kernel_radius }
+    #[wasm_bindgen] pub fn get_lightning_frequency(&self) -> f32 { self.simulation_params.lightning_frequency }
+    #[wasm_bindgen] pub fn get_lightning_intensity(&self) -> f32 { self.simulation_params.lightning_intensity }
+    #[wasm_bindgen] pub fn get_lightning_duration(&self) -> f32 { self.simulation_params.lightning_duration }
+    #[wasm_bindgen] pub fn get_particle_render_size(&self) -> f32 { self.simulation_params.particle_render_size }
+    #[wasm_bindgen] pub fn get_flat_force(&self) -> bool { self.simulation_params.flat_force }
 
-    #[wasm_bindgen]
-    pub fn get_inter_type_attraction_scale(&self) -> f32 {
-        self.simulation_params.inter_type_attraction_scale
-    }
-
-    #[wasm_bindgen]
-    pub fn get_inter_type_radius_scale(&self) -> f32 {
-        self.simulation_params.inter_type_radius_scale
-    }
-
-    #[wasm_bindgen]
-    pub fn get_fisheye_strength(&self) -> f32 {
-        self.simulation_params.fisheye_strength
-    }
-
-    #[wasm_bindgen]
-    pub fn get_lenia_enabled(&self) -> bool {
-        self.simulation_params.lenia_enabled
-    }
-
-    #[wasm_bindgen]
-    pub fn get_lenia_growth_mu(&self) -> f32 {
-        self.simulation_params.lenia_growth_mu
-    }
-
-    #[wasm_bindgen]
-    pub fn get_lenia_growth_sigma(&self) -> f32 {
-        self.simulation_params.lenia_growth_sigma
-    }
-
-    #[wasm_bindgen]
-    pub fn get_lenia_kernel_radius(&self) -> f32 {
-        self.simulation_params.lenia_kernel_radius
-    }
-
-    #[wasm_bindgen]
-    pub fn get_lightning_frequency(&self) -> f32 {
-        self.simulation_params.lightning_frequency
-    }
-
-    #[wasm_bindgen]
-    pub fn get_lightning_intensity(&self) -> f32 {
-        self.simulation_params.lightning_intensity
-    }
-
-    #[wasm_bindgen]
-    pub fn get_lightning_duration(&self) -> f32 {
-        self.simulation_params.lightning_duration
-    }
-
-    // Add missing getter methods that are used in main.ts
-    #[wasm_bindgen]
-    pub fn get_particle_render_size(&self) -> f32 {
-        self.simulation_params.particle_render_size
-    }
-
-    #[wasm_bindgen]
-    pub fn get_flat_force(&self) -> bool {
-        self.simulation_params.flat_force
-    }
-
-    // === COMPREHENSIVE PARAMETER SETTERS ===
-    // These setters allow the UI to update individual parameters directly
-
-    #[wasm_bindgen]
-    pub fn set_drift_x_per_second(&mut self, value: f32) {
-        self.simulation_params.drift_x_per_second = value;
-        console_log!("🔧 Individual parameter: drift_x_per_second = {:.2}", value);
-    }
-
-    #[wasm_bindgen]
-    pub fn set_friction(&mut self, value: f32) {
-        self.simulation_params.friction = value.max(0.01).min(1.0);
-        console_log!(
-            "🔧 Individual parameter: friction = {:.3}",
-            self.simulation_params.friction
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_force_scale(&mut self, value: f32) {
-        self.simulation_params.force_scale = value.max(100.0).min(500.0);
-        console_log!(
-            "🔧 Individual parameter: force_scale = {:.1}",
-            self.simulation_params.force_scale
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_r_smooth(&mut self, value: f32) {
-        self.simulation_params.r_smooth = value.max(0.1).min(20.0);
-        console_log!(
-            "🔧 Individual parameter: r_smooth = {:.2}",
-            self.simulation_params.r_smooth
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_inter_type_attraction_scale(&mut self, value: f32) {
-        self.simulation_params.inter_type_attraction_scale = value.max(-3.0).min(3.0);
-        console_log!(
-            "🔧 Individual parameter: inter_type_attraction_scale = {:.2}",
-            self.simulation_params.inter_type_attraction_scale
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_inter_type_radius_scale(&mut self, value: f32) {
-        self.simulation_params.inter_type_radius_scale = value.max(0.1).min(2.0);
-        console_log!(
-            "🔧 Individual parameter: inter_type_radius_scale = {:.2}",
-            self.simulation_params.inter_type_radius_scale
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_fisheye_strength(&mut self, value: f32) {
-        self.simulation_params.fisheye_strength = value.max(0.0).min(3.0);
-        console_log!(
-            "🔧 Individual parameter: fisheye_strength = {:.2}",
-            self.simulation_params.fisheye_strength
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_lenia_enabled(&mut self, enabled: bool) {
-        self.simulation_params.lenia_enabled = enabled;
-        console_log!("🔧 Individual parameter: lenia_enabled = {}", enabled);
-    }
-
-    #[wasm_bindgen]
-    pub fn set_lenia_growth_mu(&mut self, value: f32) {
-        self.simulation_params.lenia_growth_mu = value.max(0.05).min(0.3);
-        console_log!(
-            "🔧 Individual parameter: lenia_growth_mu = {:.3}",
-            self.simulation_params.lenia_growth_mu
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_lenia_growth_sigma(&mut self, value: f32) {
-        self.simulation_params.lenia_growth_sigma = value.max(0.005).min(0.05);
-        console_log!(
-            "🔧 Individual parameter: lenia_growth_sigma = {:.4}",
-            self.simulation_params.lenia_growth_sigma
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_lenia_kernel_radius(&mut self, value: f32) {
-        self.simulation_params.lenia_kernel_radius = value.max(20.0).min(100.0);
-        console_log!(
-            "🔧 Individual parameter: lenia_kernel_radius = {:.1}",
-            self.simulation_params.lenia_kernel_radius
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_lightning_frequency(&mut self, value: f32) {
-        self.simulation_params.lightning_frequency = value.max(0.0).min(2.0);
-        console_log!(
-            "🔧 Individual parameter: lightning_frequency = {:.2}",
-            self.simulation_params.lightning_frequency
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_lightning_intensity(&mut self, value: f32) {
-        self.simulation_params.lightning_intensity = value.max(0.0).min(2.0);
-        console_log!(
-            "🔧 Individual parameter: lightning_intensity = {:.2}",
-            self.simulation_params.lightning_intensity
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_lightning_duration(&mut self, value: f32) {
-        self.simulation_params.lightning_duration = value.max(0.1).min(2.0);
-        console_log!(
-            "🔧 Individual parameter: lightning_duration = {:.2}",
-            self.simulation_params.lightning_duration
-        );
-    }
-
-    #[wasm_bindgen]
-    pub fn set_flat_force(&mut self, enabled: bool) {
-        self.simulation_params.flat_force = enabled;
-        console_log!("🔧 Individual parameter: flat_force = {}", enabled);
-    }
+    #[wasm_bindgen] pub fn set_drift_x_per_second(&mut self, v: f32) { self.simulation_params.drift_x_per_second = v; }
+    #[wasm_bindgen] pub fn set_friction(&mut self, v: f32) { self.simulation_params.friction = v.max(0.01).min(1.0); }
+    #[wasm_bindgen] pub fn set_force_scale(&mut self, v: f32) { self.simulation_params.force_scale = v.max(100.0).min(500.0); }
+    #[wasm_bindgen] pub fn set_r_smooth(&mut self, v: f32) { self.simulation_params.r_smooth = v.max(0.1).min(20.0); }
+    #[wasm_bindgen] pub fn set_inter_type_attraction_scale(&mut self, v: f32) { self.simulation_params.inter_type_attraction_scale = v.max(-3.0).min(3.0); }
+    #[wasm_bindgen] pub fn set_inter_type_radius_scale(&mut self, v: f32) { self.simulation_params.inter_type_radius_scale = v.max(0.1).min(2.0); }
+    #[wasm_bindgen] pub fn set_fisheye_strength(&mut self, v: f32) { self.simulation_params.fisheye_strength = v.max(0.0).min(3.0); }
+    #[wasm_bindgen] pub fn set_lenia_enabled(&mut self, v: bool) { self.simulation_params.lenia_enabled = v; }
+    #[wasm_bindgen] pub fn set_lenia_growth_mu(&mut self, v: f32) { self.simulation_params.lenia_growth_mu = v.max(0.05).min(0.3); }
+    #[wasm_bindgen] pub fn set_lenia_growth_sigma(&mut self, v: f32) { self.simulation_params.lenia_growth_sigma = v.max(0.005).min(0.05); }
+    #[wasm_bindgen] pub fn set_lenia_kernel_radius(&mut self, v: f32) { self.simulation_params.lenia_kernel_radius = v.max(20.0).min(100.0); }
+    #[wasm_bindgen] pub fn set_lightning_frequency(&mut self, v: f32) { self.simulation_params.lightning_frequency = v.max(0.0).min(2.0); }
+    #[wasm_bindgen] pub fn set_lightning_intensity(&mut self, v: f32) { self.simulation_params.lightning_intensity = v.max(0.0).min(2.0); }
+    #[wasm_bindgen] pub fn set_lightning_duration(&mut self, v: f32) { self.simulation_params.lightning_duration = v.max(0.1).min(2.0); }
+    #[wasm_bindgen] pub fn set_flat_force(&mut self, v: bool) { self.simulation_params.flat_force = v; }
 
     #[wasm_bindgen]
     pub fn set_particle_render_size(&mut self, value: f32) {
-        self.simulation_params.particle_render_size =
-            value.max(PARTICLE_SIZE_MIN).min(PARTICLE_SIZE_MAX);
-
-        // Update all existing particle sizes
-        self.particle_system
-            .update_particle_sizes(self.simulation_params.particle_render_size, &mut self.rng);
-
-        // Update GPU buffers with the new particle sizes
+        self.simulation_params.particle_render_size = value.max(PARTICLE_SIZE_MIN).min(PARTICLE_SIZE_MAX);
+        self.particle_system.update_particle_sizes(self.simulation_params.particle_render_size, &mut self.rng);
         if let Some(renderer) = &mut self.renderer {
             renderer.update_particle_sizes(&self.particle_system);
         }
-
-        console_log!(
-            "🔧 Individual parameter: particle_render_size = {:.1}",
-            self.simulation_params.particle_render_size
-        );
     }
 
-    /// Check if lightning is currently visible (simple status check)
     #[wasm_bindgen]
     pub fn is_lightning_visible(&self) -> bool {
-        // Return true if there's electrical activity that could generate lightning
-        // This is a simplified check that doesn't require GPU buffer reads
         self.simulation_params.lightning_frequency > 0.0
             && self.simulation_params.inter_type_attraction_scale > 0.1
     }
 
-    /// Get current electrical activity level for lightning generation
     #[wasm_bindgen]
     pub fn get_electrical_activity(&self) -> f32 {
         self.simulation_params.inter_type_attraction_scale
