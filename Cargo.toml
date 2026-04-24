@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]  # cdylib for WASM, rlib for native
 # Features for conditional compilation
 [features]
 default = []
+demo_audio = []
 
 # Dependencies that work for both WASM and native
 [dependencies]

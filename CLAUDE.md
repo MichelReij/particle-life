@@ -68,6 +68,16 @@ cargo build --release     # Release native binary
 ./target/debug/native_minimal  # Run directly
 ```
 
+### Native — demo-versie (mp3 audio i.p.v. synthesizer)
+```bash
+cargo build --release --features demo_audio
+./target/release/native_minimal
+```
+
+Start `quick-launch.sh` aanpassen voor demo: vervang de `cargo build` regel door bovenstaande.
+De `demo_audio` feature schakelt de supersaw synthesizer uit en speelt `assets/brainwaves.mp3`
+in loop af via rodio. Alle andere functionaliteit blijft identiek.
+
 ## Simulation Parameters
 
 - **Virtual world**: 3240×3240 units, rendered to 1080×1080 pixels

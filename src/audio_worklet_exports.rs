@@ -26,7 +26,7 @@ struct WorkletSynth {
 
 impl WorkletSynth {
     fn new() -> Self {
-        let stems: Vec<StemGraph> = BASE_FREQS.iter().map(|&f| StemGraph::new(f)).collect();
+        let stems: Vec<StemGraph> = BASE_FREQS.iter().enumerate().map(|(i, &f)| StemGraph::new(f, i)).collect();
         Self { stems, master_amp: 0.65 }
     }
 
