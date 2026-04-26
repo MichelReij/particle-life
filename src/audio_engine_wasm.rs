@@ -16,7 +16,6 @@ use web_sys::{
     AudioContext, AudioWorkletNode, MediaStream, MediaStreamAudioDestinationNode,
 };
 
-use crate::dsp::NUM_STEMS;
 use crate::sonification::SonificationState;
 
 // ─── WasmAudioEngine (publieke API) ──────────────────────────────────────────
@@ -151,18 +150,7 @@ impl WasmAudioEngine {
     }
 }
 
-/// Serialiseer SonificationState naar een platte Float32Array (50 floats).
-fn state_to_f32(s: &SonificationState) -> Vec<f32> {
-    let mut v = Vec::with_capacity(1 + NUM_STEMS * 7);
-    v.push(s.master_amplitude);
-    for stem in &s.stems {
-        v.push(stem.frequency);
-        v.push(stem.detune);
-        v.push(stem.gate);
-        v.push(stem.noise);
-        v.push(stem.saturation);
-        v.push(stem.pan);
-        v.push(stem.amplitude);
-    }
-    v
+fn state_to_f32(_s: &SonificationState) -> Vec<f32> {
+    // Standalone patch: geen state-serialisatie nodig
+    vec![]
 }

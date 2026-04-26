@@ -250,12 +250,7 @@ impl ApplicationHandler for MinimalNativeApp {
                     (None, None)
                 };
 
-                self.sonification_state = compute_sonification(
-                    &self.simulation_params, gpu_type_ref, gpu_global_ref, &self.sonification_state);
-
-                if let Some(e) = &self.audio_engine {
-                    e.update(self.sonification_state.clone());
-                }
+                // Standalone audio patch: sonificatie-koppeling tijdelijk uitgeschakeld
 
                 // Render
                 self.stats_dispatched_this_frame = false;
