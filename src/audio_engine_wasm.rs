@@ -1,15 +1,15 @@
 // src/audio_engine_wasm.rs
-// WASM audio engine: supersaw synthesizer via Web Audio API (AudioWorkletNode).
-// DSP-code (StemGraph, fundsp) draait in de AudioWorklet-thread (audio_worklet_exports.rs).
-// De AudioWorklet-processor is gedefinieerd in public/audio-processor.js.
+// WASM audio engine: synthesizer via Web Audio API (AudioWorkletNode).
 //
-// Gebruik:
-//   WasmAudioEngine::new() aanroepen bij opstart. De AudioContext start in 'suspended'
-//   state. Roep set_paused(false) aan vanuit een user-gesture (knopklik) om te starten.
+// Initialisatieflow voor de WASM-module in de AudioWorklet:
+//   1. main.ts roept set_audio_wasm_module(init.__wbindgen_wasm_module) aan
+//      vlak na de wasm-bindgen init() call.
+//   2. WasmAudioEngine::new() maakt de AudioWorkletNode aan.
+//   3. Na addModule() stuurt de engine de opgeslagen module via port.postMessage.
+//   4. audio-processor.js ontvangt de module, roept init() aan en start de synth.
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use js_sys::Float32Array;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{
@@ -17,6 +17,21 @@ use web_sys::{
 };
 
 use crate::sonification::SonificationState;
+
+// ─── WASM-module opslag (injecteerbaar vanuit main.ts) ───────────────────────
+
+thread_local! {
+    static WASM_MODULE: RefCell<Option<JsValue>> = RefCell::new(None);
+}
+
+/// Sla de WebAssembly.Module op voor gebruik in de AudioWorklet.
+/// Aanroepen vanuit main.ts direct na `await init(...)`:
+///   set_audio_wasm_module((init as any).__wbindgen_wasm_module);
+#[wasm_bindgen]
+pub fn set_audio_wasm_module(module: JsValue) {
+    WASM_MODULE.with(|m| *m.borrow_mut() = Some(module));
+    crate::console_log!("✅ WASM-module opgeslagen voor AudioWorklet");
+}
 
 // ─── WasmAudioEngine (publieke API) ──────────────────────────────────────────
 
@@ -28,9 +43,6 @@ pub struct WasmAudioEngine {
 }
 
 impl WasmAudioEngine {
-    /// Maak de audio engine aan. AudioContext start in 'suspended' state.
-    /// De AudioWorklet-module wordt asynchroon geladen; zodra klaar is het node-veld gevuld.
-    /// Roep set_paused(false) aan vanuit een user-gesture om te starten.
     pub fn new() -> Result<Self, JsValue> {
         crate::console_log!("🎵 WasmAudioEngine v{} initialiseren...", env!("BUILD_ID"));
 
@@ -38,7 +50,6 @@ impl WasmAudioEngine {
         let node: Rc<RefCell<Option<AudioWorkletNode>>> = Rc::new(RefCell::new(None));
         let stream_dest = Rc::new(ctx.create_media_stream_destination()?);
 
-        // Bepaal de URL van de processor-module relatief aan de huidige pagina.
         let processor_url = {
             let location = web_sys::window()
                 .ok_or_else(|| JsValue::from_str("geen window"))?
@@ -49,10 +60,12 @@ impl WasmAudioEngine {
             abs.href()
         };
 
-        // addModule() is asynchroon — laad de processor en maak daarna de AudioWorkletNode aan.
         let node_clone        = Rc::clone(&node);
         let stream_dest_clone = Rc::clone(&stream_dest);
         let ctx_clone         = ctx.clone();
+
+        // Haal de opgeslagen WASM-module op voor gebruik in de async closure.
+        let wasm_module = WASM_MODULE.with(|m| m.borrow().clone()).unwrap_or(JsValue::UNDEFINED);
 
         wasm_bindgen_futures::spawn_local(async move {
             let worklet = match ctx_clone.audio_worklet() {
@@ -70,24 +83,15 @@ impl WasmAudioEngine {
                 return;
             }
 
-            // Geef de huidige WASM-module door via processorOptions zodat de worklet
-            // init() kan aanroepen zonder fetch of URL (beide niet beschikbaar in AudioWorklet scope).
-            let processor_opts = js_sys::Object::new();
-            let _ = js_sys::Reflect::set(
-                &processor_opts,
-                &wasm_bindgen::JsValue::from_str("wasmModule"),
-                &wasm_bindgen::module(),
-            );
-            let mut node_opts = web_sys::AudioWorkletNodeOptions::new();
-            node_opts.set_processor_options(Some(&processor_opts));
-            let worklet_node = match AudioWorkletNode::new_with_options(
-                &ctx_clone,
-                "particle-life-processor",
-                &node_opts,
-            ) {
+            let worklet_node = match AudioWorkletNode::new(&ctx_clone, "particle-life-processor") {
                 Ok(n) => n,
                 Err(e) => { crate::console_log!("❌ AudioWorkletNode::new() fout: {:?}", e); return; }
             };
+
+            // Stuur de WASM-module via de port zodat de AudioWorklet init() kan aanroepen.
+            if let Ok(port) = worklet_node.port() {
+                let _ = port.post_message(&wasm_module);
+            }
 
             if let Err(e) = worklet_node.connect_with_audio_node(&ctx_clone.destination()) {
                 crate::console_log!("❌ connect destination fout: {:?}", e);
@@ -112,16 +116,8 @@ impl WasmAudioEngine {
         })
     }
 
-    /// Bijwerk de SonificationState vanuit de render-loop.
-    /// Serialiseert de state naar een Float32Array en stuurt die naar de AudioWorklet.
-    pub fn update(&self, new_state: SonificationState) {
-        let node_ref = self.node.borrow();
-        let Some(node) = node_ref.as_ref() else { return };
-        let Ok(port) = node.port() else { return };
-
-        let params = state_to_f32(&new_state);
-        let arr = Float32Array::from(params.as_slice());
-        let _ = port.post_message(&arr);
+    pub fn update(&self, _new_state: SonificationState) {
+        // Standalone patch: geen state-updates
     }
 
     pub fn set_paused(&mut self, paused: bool) {
@@ -151,20 +147,7 @@ impl WasmAudioEngine {
         self.stream_dest.stream()
     }
 
-    pub fn set_master_volume(&self, v: f32) {
-        // Stuur een bijgewerkte state met aangepaste master_amplitude naar de worklet.
-        // Omdat we geen lokale state bewaren, wordt dit afgehandeld door de render-loop
-        // die set_master_volume doorgeeft via update(). Voor directe aanpassing:
-        let node_ref = self.node.borrow();
-        let Some(node) = node_ref.as_ref() else { return };
-        let Ok(port) = node.port() else { return };
-        // Stuur alleen master_amplitude (1 float, onderscheiden van de 50-float state)
-        let arr = Float32Array::from([v.clamp(0.0, 1.0)].as_slice());
-        let _ = port.post_message(&arr);
+    pub fn set_master_volume(&self, _v: f32) {
+        // Standalone patch
     }
-}
-
-fn state_to_f32(_s: &SonificationState) -> Vec<f32> {
-    // Standalone patch: geen state-serialisatie nodig
-    vec![]
 }

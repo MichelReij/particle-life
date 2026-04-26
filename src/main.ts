@@ -1,7 +1,7 @@
 console.log("🚀 main.ts loading with proper WASM integration...");
 
 // Import WASM module using the standard wasm-bindgen approach
-import init, { ParticleLifeEngine } from "./pkg/particle_life_wasm";
+import init, { ParticleLifeEngine, set_audio_wasm_module } from "./pkg/particle_life_wasm";
 import {
     setParameterUpdateCallbacks,
     initializeUI,
@@ -78,6 +78,8 @@ class App {
                 console.log(`🔍 Loading WASM from: ${wasmUrl}`);
                 await init({ module_or_path: wasmUrl });
                 console.log(`✅ WASM initialized successfully`);
+                // Geef de gecompileerde module door aan de AudioWorklet-laag.
+                set_audio_wasm_module((init as any).__wbindgen_wasm_module);
                 initSuccess = true;
             } catch (error) {
                 console.warn(`⚠️ WASM init failed:`, error);
