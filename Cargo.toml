@@ -91,6 +91,7 @@ features = [
   "AudioNode",
   "AudioWorklet",
   "AudioWorkletNode",
+  "AudioWorkletNodeOptions",
   "BaseAudioContext",
   "MediaStreamAudioDestinationNode",
   "MediaStream",

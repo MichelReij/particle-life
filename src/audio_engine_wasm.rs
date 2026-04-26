@@ -70,7 +70,21 @@ impl WasmAudioEngine {
                 return;
             }
 
-            let worklet_node = match AudioWorkletNode::new(&ctx_clone, "particle-life-processor") {
+            // Geef de huidige WASM-module door via processorOptions zodat de worklet
+            // init() kan aanroepen zonder fetch of URL (beide niet beschikbaar in AudioWorklet scope).
+            let processor_opts = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(
+                &processor_opts,
+                &wasm_bindgen::JsValue::from_str("wasmModule"),
+                &wasm_bindgen::module(),
+            );
+            let mut node_opts = web_sys::AudioWorkletNodeOptions::new();
+            node_opts.set_processor_options(Some(&processor_opts));
+            let worklet_node = match AudioWorkletNode::new_with_options(
+                &ctx_clone,
+                "particle-life-processor",
+                &node_opts,
+            ) {
                 Ok(n) => n,
                 Err(e) => { crate::console_log!("❌ AudioWorkletNode::new() fout: {:?}", e); return; }
             };
