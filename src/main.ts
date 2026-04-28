@@ -78,8 +78,11 @@ class App {
                 console.log(`🔍 Loading WASM from: ${wasmUrl}`);
                 await init({ module_or_path: wasmUrl });
                 console.log(`✅ WASM initialized successfully`);
-                // Geef de gecompileerde module door aan de AudioWorklet-laag.
-                set_audio_wasm_module((init as any).__wbindgen_wasm_module);
+                // Fetch de WASM bytes en stuur ze naar de AudioWorklet-laag.
+                // (init.__wbindgen_wasm_module is niet betrouwbaar toegankelijk via webpack)
+                const wasmBytes = await fetch(wasmUrl).then(r => r.arrayBuffer());
+                set_audio_wasm_module(wasmBytes);
+                console.log(`✅ WASM bytes opgeslagen voor AudioWorklet (${wasmBytes.byteLength} bytes)`);
                 initSuccess = true;
             } catch (error) {
                 console.warn(`⚠️ WASM init failed:`, error);

@@ -6,10 +6,11 @@ mod synth {
     use rodio::{OutputStream, Sink, Source};
     use std::time::Duration;
 
-    use crate::dsp::{create_voices, Voice, BLOCK_SIZE, NUM_VOICES, SAMPLE_RATE};
+    use crate::dsp::{create_saw_voices, create_sine_voices, SawVoice, SineVoice, BLOCK_SIZE, SAMPLE_RATE};
 
     pub struct SynthSource {
-        voices:  Vec<Voice>,
+        saw:     Vec<SawVoice>,
+        sine:    Vec<SineVoice>,
         buffer:  Vec<f32>,
         buf_pos: usize,
     }
@@ -17,22 +18,25 @@ mod synth {
     impl SynthSource {
         pub fn new() -> Self {
             Self {
-                voices:  create_voices(),
+                saw:     create_saw_voices(),
+                sine:    create_sine_voices(),
                 buffer:  vec![0.0f32; BLOCK_SIZE * 2],
                 buf_pos: BLOCK_SIZE * 2,
             }
         }
 
         fn refill(&mut self) {
+            let n_saw  = self.saw.len()  as f32;
+            let n_sine = self.sine.len() as f32;
             for i in 0..BLOCK_SIZE {
                 let (mut l, mut r) = (0.0f32, 0.0f32);
-                for voice in self.voices.iter_mut() {
-                    let (vl, vr) = voice.render();
-                    l += vl;  r += vr;
-                }
-                let scale = 1.0 / NUM_VOICES as f32;
-                self.buffer[i * 2]     = (l * scale).clamp(-1.0, 1.0);
-                self.buffer[i * 2 + 1] = (r * scale).clamp(-1.0, 1.0);
+                for v in self.saw.iter_mut()  { let (vl, vr) = v.render(); l += vl; r += vr; }
+                let (sl, sr) = (l / n_saw, r / n_saw);
+                let (mut tl, mut tr) = (0.0f32, 0.0f32);
+                for v in self.sine.iter_mut() { let (vl, vr) = v.render(); tl += vl; tr += vr; }
+                let mix = 0.35;
+                self.buffer[i * 2]     = ((sl + tl / n_sine * mix) * 0.65).clamp(-1.0, 1.0);
+                self.buffer[i * 2 + 1] = ((sr + tr / n_sine * mix) * 0.65).clamp(-1.0, 1.0);
             }
             self.buf_pos = 0;
         }

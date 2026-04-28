@@ -14,7 +14,7 @@ if ! command -v wasm-pack &> /dev/null; then
 fi
 
 # Ensure WASM target is installed
-rustup target add wasm32-unknown-unknown --quiet
+rustup target add wasm32-unknown-unknown 2>/dev/null || true
 
 # Build the WASM module with explicit target (incrementeel — geen cargo clean)
 echo "🎯 Compiling Rust to WASM..."
@@ -47,6 +47,22 @@ echo "📋 Syncing shaders to public/shaders/..."
 mkdir -p public/shaders
 cp src/shaders/*.wgsl public/shaders/
 echo "✅ Shaders synced!"
+
+echo "📋 Syncing pkg to public/pkg/ (voor dev server)..."
+mkdir -p public/pkg
+cp src/pkg/particle_life_wasm_bg.wasm public/pkg/
+cp src/pkg/particle_life_wasm.js public/pkg/
+echo "✅ pkg synced!"
+
+# Herstart de webpack dev server zodat hij nooit een stale WASM uit geheugen serveert.
+# Webpack cached de WASM in-memory en pikt file-wijzigingen niet automatisch op.
+if pgrep -f "webpack serve" > /dev/null; then
+    echo "🔄 Herstart webpack dev server..."
+    pkill -f "webpack serve"
+    sleep 1
+    npm run dev > /tmp/webpack-dev.log 2>&1 &
+    echo "✅ webpack dev server herstart (log: /tmp/webpack-dev.log)"
+fi
 
 echo "🎉 WASM build complete!"
 echo "Generated files:"
