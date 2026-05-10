@@ -119,6 +119,7 @@ const isProd = argv && argv.mode === "production";
 return {
     entry: {
         main: "./src/main.ts",
+        "particle-life-embed": "./src/embed.ts",
         styles: "./src/styles/main.scss",
     },
     output: {
@@ -170,6 +171,7 @@ return {
             template: path.resolve(__dirname, "src/index.html"),
             inject: true,
             filename: "index.html",
+            chunks: ["main", "styles"],
             cache: false,
         }),
         new MiniCssExtractPlugin({

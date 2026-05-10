@@ -36,6 +36,7 @@ src/
     zoom_frag.wgsl / grid_frag.wgsl / frag_flat.wgsl
     text_vert.wgsl / text_frag.wgsl / text_overlay.wgsl
   index.html / main.ts / ui.ts / config.ts / particle-life-types.ts  # Web UI
+  embed.ts                 # WordPress embed entry point (minimal, zelfstandig)
   pkg/                     # Built WASM package (wasm-bindgen output)
 ```
 
@@ -55,9 +56,9 @@ src/
 
 ### Web (WASM)
 ```bash
-./build-wasm.sh           # Build WASM + bundle with webpack
-npm run build             # Webpack bundle only
-npm run dev               # Dev server
+./build-wasm.sh                        # Build WASM + bundle met webpack
+npx webpack --mode production          # Production bundle (naar public/)
+npm run dev                            # Dev server op poort 3000
 ```
 
 ### Native
@@ -100,6 +101,40 @@ All u16 values are 0–4096 range. See `ESP32_API.md` for full parameter mapping
 
 - `#[cfg(target_arch = "wasm32")]` — web-only code
 - `#[cfg(not(target_arch = "wasm32"))]` — native-only code (ESP32, audio, winit)
+
+## Web Deployment (michelreij.nl)
+
+Bestanden worden gepubliceerd naar `https://michelreij.nl/webapps/origin-of-life/`.
+
+### Deploy commando
+```bash
+FTP_PASS=$(security find-internet-password -s mwp12009.hostingserver.nl -g 2>&1 | grep '^password:' | sed 's/password: "\(.*\)"/\1/')
+FTP_USER="michelre"
+bash deploy.sh "$FTP_USER" "$FTP_PASS"
+```
+
+`deploy.sh` uploadt via lftp (vereist `brew install lftp`):
+- Top-level bestanden: `index.html`, `main.js`, `styles.css`, `styles.js`, `joy.js`
+- Embed bestanden: `particle-life-embed.js`, `particle-life-embed.html`
+- Mappen: `shaders/`, `pkg/` (incrementeel gesynchroniseerd)
+
+### WordPress embed
+
+`public/particle-life-embed.html` bevat het kant-en-klare snippet voor WordPress Custom HTML:
+
+```html
+<div id="ol-wrap"></div>
+<script src="https://michelreij.nl/webapps/origin-of-life/particle-life-embed.js"></script>
+```
+
+De embed (`src/embed.ts`) is volledig zelfstandig:
+- Injecteert zijn eigen CSS in `<head>`
+- Bouwt de DOM op in `#ol-wrap`
+- Leidt het WASM-pad af van `document.currentScript.src` — werkt op elke WordPress-pagina
+- Bevat alleen de 4 hoofdsliders (temperatuur, pH, zeedepte, elektrische activiteit)
+- Zoom via muiswiel en pinch-to-zoom; pan via muisdrag en touch-drag
+
+---
 
 ## Native Deployment (Ubuntu)
 
