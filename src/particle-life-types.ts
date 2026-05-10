@@ -1,3 +1,6 @@
+// Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 // TypeScript types for UI integration with Rust WASM implementation
 // Note: The actual simulation parameters are now handled entirely in Rust
 // This file only contains types needed for UI communication

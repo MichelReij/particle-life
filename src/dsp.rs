@@ -1,3 +1,6 @@
+// Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 // src/dsp.rs
 // Laag 1: drie zaagtand-oscillatoren op C2/Eb2/G2 — de drone-basis.
 // Laag 2: drie sinusoscillatoren op C3/Eb3/G3 — theremin-achtige zweeftonen.

@@ -1,3 +1,6 @@
+// Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 // Central configuration constants for the particle life simulation
 // This TypeScript file mirrors the Rust config.rs constants
 

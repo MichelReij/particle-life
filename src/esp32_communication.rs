@@ -1,3 +1,6 @@
+// Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 // ESP32 Communication Module
 // Handles serial communication with ESP32 in a separate thread
 // Receives sensor data and makes it available to the graphics thread

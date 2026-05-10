@@ -1,3 +1,6 @@
+// Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 // Utility functions for buffer management and data conversion
 
 pub fn validate_particle_count_change(

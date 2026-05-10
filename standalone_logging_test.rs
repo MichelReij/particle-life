@@ -1,3 +1,6 @@
+// Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 // Simple standalone test to verify console_log! macro works for native builds
 // This file doesn't depend on the main crate to avoid WebGPU compilation issues
 

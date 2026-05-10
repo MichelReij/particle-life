@@ -1,3 +1,6 @@
+# Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+# Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 #!/usr/bin/env python3
 # Use with virtual environment: source venv/bin/activate && python3 esp32_simulator.py
 """

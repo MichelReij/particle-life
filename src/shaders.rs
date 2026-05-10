@@ -1,3 +1,6 @@
+// Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 /// All WGSL shaders embedded as strings for the particle life simulation
 /// This allows for a clean architecture where Rust handles ALL rendering logic
 use crate::shader_constants::*;

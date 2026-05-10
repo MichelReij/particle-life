@@ -1,3 +1,6 @@
+// Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 /*
  * Minimal ESP32 code for Particle Life Simulation
  * Sends 17-byte packets at 115200 baud

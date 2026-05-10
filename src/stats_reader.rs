@@ -1,3 +1,6 @@
+// Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 // src/stats_reader.rs
 // GPU-side statistieken per particle-type lezen voor sonificatie.
 // Beheert de stats compute pipeline + staging buffer (CPU-readback).

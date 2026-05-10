@@ -1,3 +1,6 @@
+// Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 import init, { ParticleLifeEngine } from "./pkg/particle_life_wasm";
 import {
     CANVAS_WIDTH,

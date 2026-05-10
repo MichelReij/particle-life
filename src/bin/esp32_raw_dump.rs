@@ -1,3 +1,6 @@
+// Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
 // esp32_raw_dump.rs
 // Raw hex dump van wat de ESP32 stuurt, zonder enige verwerking
 // Gebruik: cargo run --bin esp32_raw_dump

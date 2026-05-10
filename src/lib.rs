@@ -1,3 +1,12 @@
+// Origin of Life Simulator
+// © 2025 Michel Reij – michelreij.nl
+// https://github.com/MichelReij/particle-life
+// Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
+
+/// Copyright string embedded in the WASM binary
+#[used]
+static COPYRIGHT: &str = "Origin of Life Simulator © 2025 Michel Reij – michelreij.nl | https://michelreij.nl/webapps/origin-of-life";
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
