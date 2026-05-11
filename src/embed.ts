@@ -58,59 +58,59 @@ const I18N: Record<Lang, {
     },
 };
 
-// Gradient stop: [percentage 0-100, L, C, H] in OKLCH
-type Stop = [number, number, number, number];
+// Gradient stop: [percentage 0-100, H] — L and C are constant across all sliders
+type Stop = [number, number];
+
+const OKLCH_L = 0.72;  // lightness
+const OKLCH_C = 0.13;  // chroma
+
+// Hue anchors in OKLCH
+const H_RED    = 26.5;
+const H_YELLOW = 72.5;
+const H_GREEN  = 148.0;
+const H_BLUE   = 251.0;
 
 function gradientColor(pct: number, stops: Stop[]): string {
-    if (pct <= stops[0][0]) { const [,l,c,h] = stops[0]; return `oklch(${l} ${c} ${h})`; }
-    if (pct >= stops[stops.length-1][0]) { const [,l,c,h] = stops[stops.length-1]; return `oklch(${l} ${c} ${h})`; }
+    if (pct <= stops[0][0]) return `oklch(${OKLCH_L} ${OKLCH_C} ${stops[0][1]})`;
+    if (pct >= stops[stops.length-1][0]) return `oklch(${OKLCH_L} ${OKLCH_C} ${stops[stops.length-1][1]})`;
     for (let i = 0; i < stops.length - 1; i++) {
-        const [p0, l0, c0, h0] = stops[i];
-        const [p1, l1, c1, h1] = stops[i + 1];
+        const [p0, h0] = stops[i];
+        const [p1, h1] = stops[i + 1];
         if (pct >= p0 && pct <= p1) {
             const t = (pct - p0) / (p1 - p0);
-            // Interpolate hue via shortest path to avoid spinning through unwanted hues
+            // Shortest-path hue interpolation
             let dh = h1 - h0;
             if (dh > 180) dh -= 360;
             if (dh < -180) dh += 360;
-            const l = l0 + t * (l1 - l0);
-            const c = c0 + t * (c1 - c0);
-            const h = h0 + t * dh;
-            return `oklch(${l.toFixed(3)} ${c.toFixed(3)} ${h.toFixed(1)})`;
+            return `oklch(${OKLCH_L} ${OKLCH_C} ${(h0 + t * dh).toFixed(1)})`;
         }
     }
-    return `oklch(0.466 0.177 26.5)`;
+    return `oklch(${OKLCH_L} ${OKLCH_C} ${H_RED})`;
 }
 
-// OKLCH color anchors: [L, C, H] — L+0.10, C×0.80 for lighter/less saturated look
-const RED:    [number,number,number] = [0.566, 0.142,  26.5];
-const YELLOW: [number,number,number] = [0.866, 0.130,  72.5];
-const GREEN:  [number,number,number] = [0.748, 0.133, 148.0];
-const BLUE:   [number,number,number] = [0.653, 0.098, 251.0];
-
-// Stops per slider in percentage, matching the CSS gradients exactly
+// Stops per slider: [percentage, H] — only hue varies, L and C are constant
 const SLIDER_STOPS: Record<string, Stop[]> = {
     "ol-temp": [
-        [  0, ...BLUE],   [49.0, ...BLUE],
-        [58.6, ...GREEN], [71.3, ...GREEN],
-        [77.7, ...YELLOW],[85.0, ...RED], [100, ...RED],
+        [  0, H_BLUE],   [49.0, H_BLUE],
+        [58.6, H_GREEN], [71.3, H_GREEN],
+        [77.7, H_YELLOW],[85.0, H_RED], [100, H_RED],
     ],
     "ol-pres": [
-        [  0, ...RED],  [20.0, ...RED],
-        [35.0, ...YELLOW], [50.0, ...GREEN],
-        [100, ...GREEN],
+        [  0, H_RED],  [20.0, H_RED],
+        [35.0, H_YELLOW], [50.0, H_GREEN],
+        [100, H_GREEN],
     ],
     "ol-ph": [
-        [  0, ...RED],   [57.1, ...RED],
-        [64.3, ...YELLOW], [71.4, ...GREEN],
-        [78.6, ...GREEN], [85.7, ...YELLOW],
-        [92.0, ...RED],  [100, ...RED],
+        [  0, H_RED],   [57.1, H_RED],
+        [64.3, H_YELLOW], [71.4, H_GREEN],
+        [78.6, H_GREEN], [85.7, H_YELLOW],
+        [92.0, H_RED],  [100, H_RED],
     ],
     "ol-elec": [
-        [  0, ...RED],   [60.0, ...RED],
-        [66.7, ...YELLOW], [70.0, ...GREEN],
-        [73.3, ...GREEN], [80.0, ...YELLOW],
-        [87.0, ...RED],  [100, ...RED],
+        [  0, H_RED],   [60.0, H_RED],
+        [66.7, H_YELLOW], [70.0, H_GREEN],
+        [73.3, H_GREEN], [80.0, H_YELLOW],
+        [87.0, H_RED],  [100, H_RED],
     ],
 };
 
