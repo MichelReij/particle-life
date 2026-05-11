@@ -504,15 +504,11 @@ class EmbedApp {
 
         const canvasWrap = document.getElementById("ol-canvas-wrap");
         const containerWidth = canvasWrap ? canvasWrap.getBoundingClientRect().width : CANVAS_WIDTH;
-        const dpr = window.devicePixelRatio || 1;
-        const cssSide = Math.max(300, Math.min(Math.floor(containerWidth), CANVAS_WIDTH));
-        const physicalSide = Math.min(Math.round(cssSide * dpr), CANVAS_WIDTH);
-        this.canvas.width  = physicalSide;
-        this.canvas.height = physicalSide;
-        this.canvas.style.width  = `${cssSide}px`;
-        this.canvas.style.height = `${cssSide}px`;
-        this.virtualWorldWidth  = physicalSide * (VIRTUAL_WORLD_WIDTH / CANVAS_WIDTH);
-        this.virtualWorldHeight = physicalSide * (VIRTUAL_WORLD_HEIGHT / CANVAS_HEIGHT);
+        const canvasSize = Math.max(300, Math.min(Math.floor(containerWidth), CANVAS_WIDTH));
+        this.canvas.width  = canvasSize;
+        this.canvas.height = canvasSize;
+        this.virtualWorldWidth  = canvasSize * (VIRTUAL_WORLD_WIDTH / CANVAS_WIDTH);
+        this.virtualWorldHeight = canvasSize * (VIRTUAL_WORLD_HEIGHT / CANVAS_HEIGHT);
         this.panX = this.virtualWorldWidth  / 2;
         this.panY = this.virtualWorldHeight / 2;
 
