@@ -264,6 +264,10 @@ const EMBED_CSS = `
 #ol-screenshot-btn:active, #ol-record-btn:active { transform: scale(0.88); }
 #ol-record-btn.recording { color: #ff5555; opacity: 1; }
 #ol-screenshot-btn:focus, #ol-record-btn:focus { outline: none; }
+@media (max-width: 480px) {
+    #ol-hint-zoom, #ol-hint-pan { display: none; }
+    #ol-record-btn { right: auto; left: 10px; }
+}
 canvas#ol-canvas {
     background-color: #0004;
     box-shadow: none;
