@@ -873,8 +873,9 @@ impl WebGpuRenderer {
                 let (_, img_w, img_h, _) = &self.corner_overlays[i];
                 match i {
                     0 => (0.0, 0.0),                                                                    // topleft
-                    1 => (0.0, canvas - *img_h as f32 * scale),                                         // bottomleft
-                    2 => (canvas - *img_w as f32 * scale, canvas - *img_h as f32 * scale),              // bottomright
+                    1 => (canvas - *img_w as f32 * scale, 0.0),                                         // topright
+                    2 => (0.0, canvas - *img_h as f32 * scale),                                         // bottomleft
+                    3 => (canvas - *img_w as f32 * scale, canvas - *img_h as f32 * scale),              // bottomright
                     _ => (0.0, 0.0),
                 }
             }).collect();
