@@ -590,7 +590,7 @@ impl ParticleLifeEngine {
         let href = web_sys::window()
             .and_then(|w| w.location().href().ok())
             .unwrap_or_default();
-        if !href.contains("michelreij.nl") {
+        if !href.contains("michelreij.nl") && !href.starts_with("http://localhost") {
             return Err(JsValue::from_str("Origin of Life: unauthorized origin"));
         }
         match WebGpuRenderer::new(&canvas).await {
