@@ -587,6 +587,12 @@ impl ParticleLifeEngine {
 
     #[wasm_bindgen]
     pub async fn initialize_webgpu(&mut self, canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
+        let href = web_sys::window()
+            .and_then(|w| w.location().href().ok())
+            .unwrap_or_default();
+        if !href.contains("michelreij.nl") {
+            return Err(JsValue::from_str("Origin of Life: unauthorized origin"));
+        }
         match WebGpuRenderer::new(&canvas).await {
             Ok(renderer) => { self.renderer = Some(renderer); Ok(()) }
             Err(e) => Err(e)
