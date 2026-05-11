@@ -119,8 +119,8 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     // Grid spacing: fixed at 54 CSS pixels (= 1080px canvas / 20 lines reference)
     // Expressed in world units so it stays constant regardless of canvas/world size
     let world_per_css_px = sim_params.virtual_world_width / sim_params.canvas_render_width;
-    let world_grid_spacing_x = 54.0 * (world_per_css_px / 2);
-    let world_grid_spacing_y = 54.0 * (world_per_css_px / 2);
+    let world_grid_spacing_x = 54.0 * (world_per_css_px);
+    let world_grid_spacing_y = 54.0 * (world_per_css_px);
 
     // Calculate zoom level (how much we're zoomed in)
     let zoom_level = sim_params.virtual_world_width / sim_params.viewport_width;
@@ -128,8 +128,8 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     // Pixels per world unit in the fisheye buffer — scales with canvas size
     let px_per_world = (sim_params.canvas_render_width * 1.3) / sim_params.virtual_world_width;
     // Line thickness: target ~1.5 screen pixels regardless of canvas size or zoom
-    let world_line_thickness        = (1.5 / zoom_level) / world_per_css_px;
-    let world_center_line_thickness = (2.5 / zoom_level) / world_per_css_px;
+    let world_line_thickness        = (1.5 / zoom_level) * world_per_css_px / 2;
+    let world_center_line_thickness = (2.5 / zoom_level) * world_per_css_px / 2;
 
     // World center coordinates
     let world_center_x = sim_params.virtual_world_width * 0.5;
@@ -155,7 +155,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let line_alpha: f32 = 0.25;
 
     // Anti-aliasing falloff in world coordinates
-    let falloff = (0.5 / zoom_level) / world_per_css_px;
+    let falloff = (0.5 / zoom_level) * world_per_css_px / 2; // 0.5 screen pixels in world units, scaled by zoom and world-to-screen ratio
 
     // Calculate line intensities using smoothstep for anti-aliasing
     let vertical_intensity = 1.0 - smoothstep(world_line_thickness * 0.5 - falloff, world_line_thickness * 0.5 + falloff, dist_to_vertical_line);
