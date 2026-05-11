@@ -597,6 +597,9 @@ impl ParticleLifeEngine {
         match WebGpuRenderer::new(&canvas).await {
             Ok(renderer) => {
                 self.renderer = Some(renderer);
+                // Sync simulation params to actual canvas size (may differ from compile-time 1080)
+                self.simulation_params.canvas_render_width  = canvas_size as f32;
+                self.simulation_params.canvas_render_height = canvas_size as f32;
                 let (new_max, new_min) = crate::config::scale_particle_counts(canvas_size);
                 self.particle_system.set_particle_limits(new_max, new_min);
                 let initial_count = new_max.min(DEFAULT_NUM_PARTICLES);
