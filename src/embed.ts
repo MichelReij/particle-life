@@ -255,6 +255,12 @@ const EMBED_CSS = `
 #ol-screenshot-btn:hover, #ol-record-btn:hover { opacity: 1; }
 #ol-screenshot-btn:active, #ol-record-btn:active { transform: scale(0.88); }
 #ol-record-btn.recording { color: #ff5555; opacity: 1; }
+#ol-screenshot-btn:focus, #ol-record-btn:focus { outline: none; }
+canvas#ol-canvas {
+    font-size: var(--wp--preset--font-size--small);
+    color: var(--wp--preset--color--accent-1, #e3c463);
+    box-shadow: none;
+}
 #ol-screenshot-flash {
     position: absolute;
     inset: 0;
