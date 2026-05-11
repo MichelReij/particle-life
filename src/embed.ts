@@ -395,11 +395,9 @@ class EmbedApp {
 
         const canvasWrap = document.getElementById("ol-canvas-wrap");
         const containerWidth = canvasWrap ? canvasWrap.getBoundingClientRect().width : CANVAS_WIDTH;
-        const dpr = window.devicePixelRatio || 1;
-        const canvasSize = Math.max(300, Math.min(Math.floor(containerWidth * dpr), CANVAS_WIDTH));
+        const canvasSize = Math.max(300, Math.min(Math.floor(containerWidth), CANVAS_WIDTH));
         this.canvas.width = canvasSize;
         this.canvas.height = canvasSize;
-        // CSS display size blijft via `width: 100%; height: 100%` — canvas.width is de interne resolutie
 
         const wasmUrl = `${getScriptBase()}pkg/particle_life_wasm_bg.wasm?v=${Date.now()}`;
 
