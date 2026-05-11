@@ -375,6 +375,8 @@ class EmbedApp {
     private zoom = 1.0;
     private panX = WORLD_CENTER_X;
     private panY = WORLD_CENTER_Y;
+    private virtualWorldWidth  = VIRTUAL_WORLD_WIDTH;
+    private virtualWorldHeight = VIRTUAL_WORLD_HEIGHT;
 
     private isDragging = false;
     private dragStartX = 0;
@@ -398,6 +400,10 @@ class EmbedApp {
         const canvasSize = Math.max(300, Math.min(Math.floor(containerWidth), CANVAS_WIDTH));
         this.canvas.width = canvasSize;
         this.canvas.height = canvasSize;
+        this.virtualWorldWidth  = canvasSize * (VIRTUAL_WORLD_WIDTH / CANVAS_WIDTH);
+        this.virtualWorldHeight = canvasSize * (VIRTUAL_WORLD_HEIGHT / CANVAS_HEIGHT);
+        this.panX = this.virtualWorldWidth  / 2;
+        this.panY = this.virtualWorldHeight / 2;
 
         const wasmUrl = `${getScriptBase()}pkg/particle_life_wasm_bg.wasm?v=${Date.now()}`;
 
@@ -495,10 +501,10 @@ class EmbedApp {
     }
 
     private constrainPan() {
-        const halfW = VIRTUAL_WORLD_WIDTH / this.zoom / 2;
-        const halfH = VIRTUAL_WORLD_HEIGHT / this.zoom / 2;
-        this.panX = Math.max(halfW, Math.min(VIRTUAL_WORLD_WIDTH - halfW, this.panX));
-        this.panY = Math.max(halfH, Math.min(VIRTUAL_WORLD_HEIGHT - halfH, this.panY));
+        const halfW = this.virtualWorldWidth  / this.zoom / 2;
+        const halfH = this.virtualWorldHeight / this.zoom / 2;
+        this.panX = Math.max(halfW, Math.min(this.virtualWorldWidth  - halfW, this.panX));
+        this.panY = Math.max(halfH, Math.min(this.virtualWorldHeight - halfH, this.panY));
     }
 
     private wireZoomPan() {
@@ -510,16 +516,16 @@ class EmbedApp {
             const cx = (e.clientX - rect.left) / rect.width;
             const cy = (e.clientY - rect.top) / rect.height;
 
-            const vw = VIRTUAL_WORLD_WIDTH / this.zoom;
-            const vh = VIRTUAL_WORLD_HEIGHT / this.zoom;
+            const vw = this.virtualWorldWidth  / this.zoom;
+            const vh = this.virtualWorldHeight / this.zoom;
             const worldX = this.panX + (cx - 0.5) * vw;
             const worldY = this.panY + (cy - 0.5) * vh;
 
             const factor = e.deltaY < 0 ? 1.03 : 1 / 1.03;
             this.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, this.zoom * factor));
 
-            const nvw = VIRTUAL_WORLD_WIDTH / this.zoom;
-            const nvh = VIRTUAL_WORLD_HEIGHT / this.zoom;
+            const nvw = this.virtualWorldWidth  / this.zoom;
+            const nvh = this.virtualWorldHeight / this.zoom;
             this.panX = worldX - (cx - 0.5) * nvw;
             this.panY = worldY - (cy - 0.5) * nvh;
             this.constrainPan();
@@ -539,8 +545,8 @@ class EmbedApp {
         window.addEventListener("mousemove", (e) => {
             if (!this.isDragging) return;
             const rect = canvas.getBoundingClientRect();
-            const sx = VIRTUAL_WORLD_WIDTH / (this.zoom * rect.width);
-            const sy = VIRTUAL_WORLD_HEIGHT / (this.zoom * rect.height);
+            const sx = this.virtualWorldWidth  / (this.zoom * rect.width);
+            const sy = this.virtualWorldHeight / (this.zoom * rect.height);
             this.panX = this.dragStartPanX - (e.clientX - this.dragStartX) * sx;
             this.panY = this.dragStartPanY - (e.clientY - this.dragStartY) * sy;
             this.constrainPan();
@@ -577,8 +583,8 @@ class EmbedApp {
             const rect = canvas.getBoundingClientRect();
 
             if (e.touches.length === 1 && this.isDragging) {
-                const sx = VIRTUAL_WORLD_WIDTH / (this.zoom * rect.width);
-                const sy = VIRTUAL_WORLD_HEIGHT / (this.zoom * rect.height);
+                const sx = this.virtualWorldWidth  / (this.zoom * rect.width);
+                const sy = this.virtualWorldHeight / (this.zoom * rect.height);
                 this.panX = this.dragStartPanX - (e.touches[0].clientX - this.dragStartX) * sx;
                 this.panY = this.dragStartPanY - (e.touches[0].clientY - this.dragStartY) * sy;
                 this.constrainPan();
@@ -592,23 +598,23 @@ class EmbedApp {
                 if (this.lastPinchDist > 0) {
                     const cx = (midX - rect.left) / rect.width;
                     const cy = (midY - rect.top) / rect.height;
-                    const vw = VIRTUAL_WORLD_WIDTH / this.zoom;
-                    const vh = VIRTUAL_WORLD_HEIGHT / this.zoom;
+                    const vw = this.virtualWorldWidth  / this.zoom;
+                    const vh = this.virtualWorldHeight / this.zoom;
                     const worldX = this.panX + (cx - 0.5) * vw;
                     const worldY = this.panY + (cy - 0.5) * vh;
 
                     this.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, this.zoom * (dist / this.lastPinchDist)));
 
-                    const nvw = VIRTUAL_WORLD_WIDTH / this.zoom;
-                    const nvh = VIRTUAL_WORLD_HEIGHT / this.zoom;
+                    const nvw = this.virtualWorldWidth  / this.zoom;
+                    const nvh = this.virtualWorldHeight / this.zoom;
                     this.panX = worldX - (cx - 0.5) * nvw;
                     this.panY = worldY - (cy - 0.5) * nvh;
 
                     // Also pan with midpoint movement between frames
                     const dmx = midX - this.lastPinchMidX;
                     const dmy = midY - this.lastPinchMidY;
-                    this.panX -= dmx * (VIRTUAL_WORLD_WIDTH / (this.zoom * rect.width));
-                    this.panY -= dmy * (VIRTUAL_WORLD_HEIGHT / (this.zoom * rect.height));
+                    this.panX -= dmx * (this.virtualWorldWidth  / (this.zoom * rect.width));
+                    this.panY -= dmy * (this.virtualWorldHeight / (this.zoom * rect.height));
 
                     this.constrainPan();
                     this.applyZoomPan();

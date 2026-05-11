@@ -116,9 +116,11 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let world_x = original_world_pos.x;
     let world_y = original_world_pos.y;
 
-    // Grid spacing in world coordinates (always show ~21 lines across the virtual world)
-    let world_grid_spacing_x = sim_params.virtual_world_width / 20.0;
-    let world_grid_spacing_y = sim_params.virtual_world_height / 20.0;
+    // Grid spacing: fixed at 54 CSS pixels (= 1080px canvas / 20 lines reference)
+    // Expressed in world units so it stays constant regardless of canvas/world size
+    let world_per_css_px = sim_params.virtual_world_width / sim_params.canvas_render_width;
+    let world_grid_spacing_x = 54.0 * world_per_css_px;
+    let world_grid_spacing_y = 54.0 * world_per_css_px;
 
     // Calculate zoom level (how much we're zoomed in)
     let zoom_level = sim_params.virtual_world_width / sim_params.viewport_width;
