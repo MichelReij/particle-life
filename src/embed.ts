@@ -20,6 +20,8 @@ const I18N: Record<Lang, {
     loading: string;
     hintZoom: string;
     hintPan: string;
+    titleScreenshot: string;
+    titleRecord: string;
     startText: string;
     playAnyway: string;
     temp: string;
@@ -28,9 +30,11 @@ const I18N: Record<Lang, {
     electricity: string;
 }> = {
     nl: {
-        loading:    "Simulatie laden…",
-        hintZoom:   "scroll / knijp om te zoomen",
-        hintPan:    "sleep om te bewegen",
+        loading:         "Simulatie laden…",
+        hintZoom:        "scroll / knijp om te zoomen",
+        hintPan:         "sleep om te bewegen",
+        titleScreenshot: "Screenshot",
+        titleRecord:     "Video opnemen",
         startText:  "Deze simulatie gebruikt je grafische processor intensief en werkt mogelijk niet goed op oudere apparaten. Ook verbruikt het veel energie, waardoor de batterij van je telefoon of laptop snel leegloopt.",
         playAnyway: "Starten",
         temp:       "Temperatuur",
@@ -39,9 +43,11 @@ const I18N: Record<Lang, {
         electricity:"Elektriciteit",
     },
     en: {
-        loading:    "Loading simulation…",
-        hintZoom:   "scroll / pinch to zoom",
-        hintPan:    "drag to pan",
+        loading:         "Loading simulation…",
+        hintZoom:        "scroll / pinch to zoom",
+        hintPan:         "drag to pan",
+        titleScreenshot: "Screenshot",
+        titleRecord:     "Record video",
         startText:  "This simulation uses your graphics processor intensively and may not run well on older devices. It also consumes a lot of energy, which will drain the battery of your phone or laptop quickly.",
         playAnyway: "Play anyway",
         temp:       "Temperature",
@@ -50,9 +56,11 @@ const I18N: Record<Lang, {
         electricity:"Electricity",
     },
     fr: {
-        loading:    "Chargement de la simulation…",
-        hintZoom:   "molette / pincer pour zoomer",
-        hintPan:    "glisser pour déplacer",
+        loading:         "Chargement de la simulation…",
+        hintZoom:        "molette / pincer pour zoomer",
+        hintPan:         "glisser pour déplacer",
+        titleScreenshot: "Capture d'écran",
+        titleRecord:     "Enregistrer la vidéo",
         startText:  "Cette simulation sollicite intensément votre processeur graphique et peut ne pas fonctionner correctement sur les appareils plus anciens. Elle consomme également beaucoup d'énergie, ce qui déchargera rapidement la batterie de votre téléphone ou ordinateur portable.",
         playAnyway: "Démarrer quand même",
         temp:       "Température",
@@ -425,8 +433,8 @@ function buildDOM() {
             <div id="ol-status">${t.loading}</div>
             <div id="ol-hint-zoom">${t.hintZoom}</div>
             <div id="ol-hint-pan">${t.hintPan}</div>
-            <button id="ol-screenshot-btn" title="Screenshot"><span class="ol-material-icon">photo_camera</span></button>
-            <button id="ol-record-btn" title="Video opnemen"><span class="ol-material-icon">videocam</span></button>
+            <button id="ol-screenshot-btn" title="${t.titleScreenshot}"><span class="ol-material-icon">photo_camera</span></button>
+            <button id="ol-record-btn" title="${t.titleRecord}"><span class="ol-material-icon">videocam</span></button>
             <div id="ol-screenshot-flash"></div>
             <div id="ol-start-overlay">
                 <p>${t.startText}</p>
