@@ -147,6 +147,23 @@ function getScriptBase(): string {
 }
 
 const EMBED_CSS = `
+.ol-material-icon {
+    font-family: 'Material Symbols Outlined';
+    font-weight: normal;
+    font-style: normal;
+    font-size: 18px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-feature-settings: 'liga';
+    font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+}
+
 #ol-wrap {
     display: flex;
     flex-direction: column;
@@ -214,7 +231,7 @@ const EMBED_CSS = `
 #ol-capture-btns {
     position: absolute;
     bottom: 8px;
-    left: 8px;
+    right: 8px;
     display: flex;
     gap: 6px;
     pointer-events: auto;
@@ -381,7 +398,11 @@ function injectStyles() {
     if (document.getElementById("ol-embed-styles")) return;
     const style = document.createElement("style");
     style.id = "ol-embed-styles";
-    style.textContent = EMBED_CSS;
+    style.textContent = `@font-face {
+    font-family: 'Material Symbols Outlined';
+    font-style: normal;
+    src: url('${getScriptBase()}fonts/material-symbols-outlined.woff2') format('woff2');
+}` + EMBED_CSS;
     document.head.appendChild(style);
 }
 
@@ -398,8 +419,8 @@ function buildDOM() {
             <div id="ol-hint-zoom">${t.hintZoom}</div>
             <div id="ol-hint-pan">${t.hintPan}</div>
             <div id="ol-capture-btns">
-                <button id="ol-screenshot-btn" title="Screenshot">📷</button>
-                <button id="ol-record-btn" title="Video opnemen">🎥</button>
+                <button id="ol-screenshot-btn" title="Screenshot"><span class="ol-material-icon">photo_camera</span></button>
+                <button id="ol-record-btn" title="Video opnemen"><span class="ol-material-icon">videocam</span></button>
             </div>
             <div id="ol-screenshot-flash"></div>
             <div id="ol-start-overlay">
@@ -457,7 +478,6 @@ class EmbedApp {
 
     private mediaRecorder: MediaRecorder | null = null;
     private recordedChunks: Blob[] = [];
-    private screenshotPending = false;
 
     async init() {
         injectStyles();
@@ -763,8 +783,6 @@ class EmbedApp {
 
     private captureScreenshot() {
         if (!this.canvas) return;
-        this.screenshotPending = true;
-        // Flash feedback
         const flash = document.getElementById("ol-screenshot-flash") as HTMLElement | null;
         if (flash) { flash.style.opacity = "0.7"; setTimeout(() => { flash.style.opacity = "0"; }, 150); }
         this.canvas.toBlob((blob) => {
@@ -775,7 +793,6 @@ class EmbedApp {
             a.download = `origin-of-life-${Date.now()}.png`;
             a.click();
             URL.revokeObjectURL(url);
-            this.screenshotPending = false;
         }, "image/png");
     }
 
