@@ -82,11 +82,11 @@ function gradientColor(pct: number, stops: Stop[]): string {
     return `oklch(0.466 0.177 26.5)`;
 }
 
-// OKLCH color anchors: [L, C, H]
-const RED:    [number,number,number] = [0.466, 0.177,  26.5];
-const YELLOW: [number,number,number] = [0.766, 0.163,  72.5];
-const GREEN:  [number,number,number] = [0.648, 0.166, 148.0];
-const BLUE:   [number,number,number] = [0.553, 0.123, 251.0];
+// OKLCH color anchors: [L, C, H] — L+0.10, C×0.80 for lighter/less saturated look
+const RED:    [number,number,number] = [0.566, 0.142,  26.5];
+const YELLOW: [number,number,number] = [0.866, 0.130,  72.5];
+const GREEN:  [number,number,number] = [0.748, 0.133, 148.0];
+const BLUE:   [number,number,number] = [0.653, 0.098, 251.0];
 
 // Stops per slider in percentage, matching the CSS gradients exactly
 const SLIDER_STOPS: Record<string, Stop[]> = {
@@ -295,32 +295,32 @@ const EMBED_CSS = `
 
 /* Temp: blauw (koud) → groen (optimaal) → geel → rood (te warm) */
 #ol-temp { background: linear-gradient(in oklch to right,
-    oklch(0.553 0.123 251) 49%, oklch(0.648 0.166 148) 58.6%,
-    oklch(0.648 0.166 148) 71.3%, oklch(0.766 0.163 72.5) 77.7%,
-    oklch(0.466 0.177 26.5) 85%); }
+    oklch(0.653 0.098 251) 49%, oklch(0.748 0.133 148) 58.6%,
+    oklch(0.748 0.133 148) 71.3%, oklch(0.866 0.130 72.5) 77.7%,
+    oklch(0.566 0.142 26.5) 85%); }
 #ol-temp::-webkit-slider-runnable-track { background: transparent; }
 #ol-temp::-moz-range-track { background: transparent; }
 
 /* Diepte (0–1000m): rood → geel → groen */
 #ol-pres { background: linear-gradient(in oklch to right,
-    oklch(0.466 0.177 26.5) 20%, oklch(0.766 0.163 72.5) 35%,
-    oklch(0.648 0.166 148) 50%); }
+    oklch(0.566 0.142 26.5) 20%, oklch(0.866 0.130 72.5) 35%,
+    oklch(0.748 0.133 148) 50%); }
 #ol-pres::-webkit-slider-runnable-track { background: transparent; }
 #ol-pres::-moz-range-track { background: transparent; }
 
 /* pH (0–14): rood → groen → rood */
 #ol-ph { background: linear-gradient(in oklch to right,
-    oklch(0.466 0.177 26.5) 57.1%, oklch(0.766 0.163 72.5) 64.3%,
-    oklch(0.648 0.166 148) 71.4%, oklch(0.648 0.166 148) 78.6%,
-    oklch(0.766 0.163 72.5) 85.7%, oklch(0.466 0.177 26.5) 92%); }
+    oklch(0.566 0.142 26.5) 57.1%, oklch(0.866 0.130 72.5) 64.3%,
+    oklch(0.748 0.133 148) 71.4%, oklch(0.748 0.133 148) 78.6%,
+    oklch(0.866 0.130 72.5) 85.7%, oklch(0.566 0.142 26.5) 92%); }
 #ol-ph::-webkit-slider-runnable-track { background: transparent; }
 #ol-ph::-moz-range-track { background: transparent; }
 
 /* Elec (0–3 kJ): rood → groen → rood */
 #ol-elec { background: linear-gradient(in oklch to right,
-    oklch(0.466 0.177 26.5) 60%, oklch(0.766 0.163 72.5) 66.7%,
-    oklch(0.648 0.166 148) 70%, oklch(0.648 0.166 148) 73.3%,
-    oklch(0.766 0.163 72.5) 80%, oklch(0.466 0.177 26.5) 87%); }
+    oklch(0.566 0.142 26.5) 60%, oklch(0.866 0.130 72.5) 66.7%,
+    oklch(0.748 0.133 148) 70%, oklch(0.748 0.133 148) 73.3%,
+    oklch(0.866 0.130 72.5) 80%, oklch(0.566 0.142 26.5) 87%); }
 #ol-elec::-webkit-slider-runnable-track { background: transparent; }
 #ol-elec::-moz-range-track { background: transparent; }
 `;
