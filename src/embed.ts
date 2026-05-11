@@ -257,9 +257,13 @@ const EMBED_CSS = `
 #ol-record-btn.recording { color: #ff5555; opacity: 1; }
 #ol-screenshot-btn:focus, #ol-record-btn:focus { outline: none; }
 canvas#ol-canvas {
+    background-color: #0004;
+    box-shadow: none;
+}
+#ol-hint-zoom,
+#ol-hint-pan {
     font-size: var(--wp--preset--font-size--small);
     color: var(--wp--preset--color--accent-1, #e3c463);
-    box-shadow: none;
 }
 #ol-screenshot-flash {
     position: absolute;
