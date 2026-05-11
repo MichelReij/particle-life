@@ -103,9 +103,9 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let viewport_top = sim_params.viewport_center_y - sim_params.viewport_height * 0.5;
 
     // Convert fragment coord to world coordinate using fisheye buffer dimensions
-    // frag_coord ranges from 0 to fisheye_buffer_size (1404x1404), not canvas size (1080x1080)
-    let fisheye_buffer_width = 1404.0;
-    let fisheye_buffer_height = 1404.0;
+    // frag_coord ranges from 0 to fisheye_buffer_size (canvas * 1.3), not canvas size
+    let fisheye_buffer_width  = sim_params.canvas_render_width  * 1.3;
+    let fisheye_buffer_height = sim_params.canvas_render_height * 1.3;
     let fisheye_world_x = viewport_left + (frag_coord.x / fisheye_buffer_width) * sim_params.viewport_width;
     let fisheye_world_y = viewport_top + (frag_coord.y / fisheye_buffer_height) * sim_params.viewport_height;
 
