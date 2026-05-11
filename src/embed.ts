@@ -228,36 +228,33 @@ const EMBED_CSS = `
     pointer-events: none;
     user-select: none;
 }
-#ol-capture-btns {
+#ol-screenshot-btn, #ol-record-btn {
     position: absolute;
-    bottom: 8px;
-    right: 8px;
-    display: flex;
-    gap: 6px;
-    pointer-events: auto;
-}
-#ol-capture-btns button {
-    background: rgba(0,0,0,0.55);
-    color: #ccc;
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 6px;
-    width: 32px;
-    height: 32px;
+    bottom: 10px;
+    background: none;
+    border: none;
+    color: #E3C463;
+    font-size: 0;
+    width: 40px;
+    height: 40px;
+    cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
-    font-size: 16px;
+    transition: opacity 0.15s, transform 0.1s;
+    z-index: 10;
+    opacity: 0.85;
     padding: 0;
-    transition: background 0.15s;
 }
-#ol-capture-btns button:hover {
-    background: rgba(0,0,0,0.8);
+#ol-screenshot-btn { right: 10px; }
+#ol-record-btn     { right: 58px; }
+#ol-screenshot-btn .ol-material-icon, #ol-record-btn .ol-material-icon {
+    font-size: 32px;
+    line-height: 1;
 }
-#ol-capture-btns button.recording {
-    color: #f44;
-    border-color: #f44;
-}
+#ol-screenshot-btn:hover, #ol-record-btn:hover { opacity: 1; }
+#ol-screenshot-btn:active, #ol-record-btn:active { transform: scale(0.88); }
+#ol-record-btn.recording { color: #ff5555; opacity: 1; }
 #ol-screenshot-flash {
     position: absolute;
     inset: 0;
@@ -418,10 +415,8 @@ function buildDOM() {
             <div id="ol-status">${t.loading}</div>
             <div id="ol-hint-zoom">${t.hintZoom}</div>
             <div id="ol-hint-pan">${t.hintPan}</div>
-            <div id="ol-capture-btns">
-                <button id="ol-screenshot-btn" title="Screenshot"><span class="ol-material-icon">photo_camera</span></button>
-                <button id="ol-record-btn" title="Video opnemen"><span class="ol-material-icon">videocam</span></button>
-            </div>
+            <button id="ol-screenshot-btn" title="Screenshot"><span class="ol-material-icon">photo_camera</span></button>
+            <button id="ol-record-btn" title="Video opnemen"><span class="ol-material-icon">videocam</span></button>
             <div id="ol-screenshot-flash"></div>
             <div id="ol-start-overlay">
                 <p>${t.startText}</p>
