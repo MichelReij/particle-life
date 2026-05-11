@@ -216,6 +216,13 @@ pub struct WebGpuRenderer {
     text_overlay_pipeline: Option<wgpu::RenderPipeline>,
     text_overlay_bind_group: Option<wgpu::BindGroup>,
     fps_data_buffer: Option<wgpu::Buffer>,
+
+    // Corner copyright overlay (PNG textures uploaded from JS)
+    corner_overlay_pipeline: Option<wgpu::RenderPipeline>,
+    corner_overlay_uniform_buffer: Option<wgpu::Buffer>,
+    // [topleft, bottomleft, bottomright]: (bind_group, img_w, img_h)
+    corner_overlays: Vec<(wgpu::BindGroup, u32, u32)>,
+    surface_format: wgpu::TextureFormat,
 }
 
 impl WebGpuRenderer {
@@ -724,6 +731,10 @@ impl WebGpuRenderer {
         let text_overlay_bind_group: Option<wgpu::BindGroup> = None;
 
         Ok(WebGpuRenderer {
+            corner_overlay_pipeline: None,
+            corner_overlay_uniform_buffer: None,
+            corner_overlays: Vec::new(),
+            surface_format,
             device,
             queue,
             surface,
@@ -854,6 +865,39 @@ impl WebGpuRenderer {
         { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Zoom"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
           p.set_pipeline(&self.zoom_render_pipeline); p.set_bind_group(0, &self.zoom_render_bind_group, &[]); p.draw(0..6, 0..1); }
 
+        // Corner copyright overlays (PNG textures, hidden by circular viewport but present in raw canvas)
+        if let (Some(pipeline), Some(uniform_buf)) = (&self.corner_overlay_pipeline, &self.corner_overlay_uniform_buffer) {
+            let canvas = simulation_params.canvas_render_width;
+            let scale  = canvas / 1080.0;
+
+            // [topleft, bottomleft, bottomright]: (x, y) of top-left corner in canvas pixels
+            let positions: [(f32, f32); 3] = [
+                (0.0,                                                        0.0),                                                          // topleft
+                (0.0,                                                        canvas - self.corner_overlays[1].2 as f32 * scale),            // bottomleft
+                (canvas - self.corner_overlays[2].1 as f32 * scale,         canvas - self.corner_overlays[2].2 as f32 * scale),            // bottomright
+            ];
+
+            for (i, (bg, img_w, img_h)) in self.corner_overlays.iter().enumerate() {
+                let (ox, oy) = positions[i];
+                let ow = *img_w as f32 * scale;
+                let oh = *img_h as f32 * scale;
+                let uniforms: [f32; 4] = [ox, oy, ow, oh];
+                self.queue.write_buffer(uniform_buf, 0, bytemuck::cast_slice(&uniforms));
+
+                let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Corner Overlay"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view, resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })],
+                    depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None,
+                });
+                p.set_pipeline(pipeline);
+                p.set_bind_group(0, bg, &[]);
+                p.draw(0..6, 0..1);
+            }
+        }
+
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
@@ -979,4 +1023,124 @@ impl WebGpuRenderer {
 
     #[cfg(target_arch = "wasm32")]
     pub fn update_fps_data(&mut self, _fps: f32, _frame_count: u32, _particle_count: u32, _time: f32) {}
+
+    /// Upload 3 PNG corner overlays (topleft, bottomleft, bottomright) as GPU textures.
+    /// images: [(bitmap, width, height); 3] — sized for a 1080×1080 canvas, scaled at render time.
+    #[cfg(target_arch = "wasm32")]
+    pub fn set_overlay_images(&mut self, images: Vec<(web_sys::ImageBitmap, u32, u32)>) {
+        let surface_format = self.surface_format;
+        let device = &self.device;
+        let queue  = &self.queue;
+
+        // Build the corner overlay pipeline if not yet created
+        if self.corner_overlay_pipeline.is_none() {
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Corner Overlay"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/corner_overlay.wgsl").into()),
+            });
+
+            let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Corner Overlay BGL"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                ],
+            });
+
+            let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Corner Overlay PL"),
+                bind_group_layouts: &[&bgl],
+                push_constant_ranges: &[],
+            });
+
+            // Load the bg_vert shader for fullscreen quad (already compiled but we need a fresh ref)
+            let vert = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Corner Overlay Vert"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/background_vert.wgsl").into()),
+            });
+
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Corner Overlay Pipeline"),
+                layout: Some(&pl),
+                vertex: wgpu::VertexState { module: &vert, entry_point: Some("main"), buffers: &[], compilation_options: Default::default() },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader, entry_point: Some("main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
+                multiview: None, cache: None,
+            });
+
+            let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Corner Overlay Uniforms"),
+                size: 16, // 4 × f32
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                label: Some("Corner Overlay Sampler"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                ..Default::default()
+            });
+
+            // Build bind groups — one per image
+            let mut overlays = Vec::new();
+            for (bitmap, img_w, img_h) in &images {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Corner Overlay Texture"),
+                    size: wgpu::Extent3d { width: *img_w, height: *img_h, depth_or_array_layers: 1 },
+                    mip_level_count: 1, sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                });
+
+                queue.copy_external_image_to_texture(
+                    &wgpu::CopyExternalImageSourceInfo {
+                        source: wgpu::ExternalImageSource::ImageBitmap(bitmap.clone()),
+                        origin: wgpu::Origin2d::ZERO,
+                        flip_y: false,
+                    },
+                    wgpu::CopyExternalImageDestInfo {
+                        texture: &texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                        color_space: wgpu::PredefinedColorSpace::Srgb,
+                        premultiplied_alpha: false,
+                    },
+                    wgpu::Extent3d { width: *img_w, height: *img_h, depth_or_array_layers: 1 },
+                );
+
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+                let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("Corner Overlay BG"),
+                    layout: &bgl,
+                    entries: &[
+                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Sampler(&sampler) },
+                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                        wgpu::BindGroupEntry { binding: 2, resource: uniform_buffer.as_entire_binding() },
+                    ],
+                });
+
+                overlays.push((bg, *img_w, *img_h));
+            }
+
+            self.corner_overlay_pipeline   = Some(pipeline);
+            self.corner_overlay_uniform_buffer = Some(uniform_buffer);
+            self.corner_overlays = overlays;
+        }
+    }
 }

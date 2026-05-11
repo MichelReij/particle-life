@@ -65,6 +65,16 @@ mirror -R --delete --verbose --parallel=4 \
     $FTP_PATH/pkg
 LFTP
 
+# Mirror assets/images/ (copyright overlay PNGs)
+echo "Syncing assets/images/ ..."
+lftp -u "$FTP_USER","$FTP_PASS" "ftp://$FTP_HOST" <<LFTP
+set ftp:ssl-allow yes
+set ssl:verify-certificate no
+mirror -R --delete --verbose --parallel=4 \
+    $PUBLIC_DIR/assets/images \
+    $FTP_PATH/assets/images
+LFTP
+
 echo ""
 echo "Deploy complete."
 echo "Direct URL : https://michelreij.nl/webapps/origin-of-life/index.html"

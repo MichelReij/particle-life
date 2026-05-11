@@ -432,6 +432,23 @@ class EmbedApp {
             console.warn("Origin of Life: WebGPU init failed:", e);
         }
 
+        // Load copyright overlay PNGs and upload as GPU textures
+        try {
+            const base = getScriptBase();
+            const loadBitmap = async (name: string): Promise<[ImageBitmap, number, number]> => {
+                const resp = await fetch(`${base}assets/images/${name}`);
+                const blob = await resp.blob();
+                const bm   = await createImageBitmap(blob);
+                return [bm, bm.width, bm.height];
+            };
+            const [tlBm, tlW, tlH] = await loadBitmap("copyright-michelreij-2025-2026.png");
+            const [blBm, blW, blH] = await loadBitmap("cc-by-nc-4.png");
+            const [brBm, brW, brH] = await loadBitmap("michelreij.png");
+            this.engine.set_overlay_images(tlBm, blBm, brBm, tlW, tlH, blW, blH, brW, brH);
+        } catch (e) {
+            console.warn("Origin of Life: overlay images failed to load:", e);
+        }
+
         this.wireSliders();
         this.wireZoomPan();
         this.wireStartOverlay();

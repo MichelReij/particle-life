@@ -631,6 +631,27 @@ impl ParticleLifeEngine {
         }
     }
 
+    /// Upload 3 corner overlay PNGs as GPU textures.
+    /// Order: topleft (copyright), bottomleft (cc-by-nc), bottomright (michelreij).
+    #[wasm_bindgen]
+    pub fn set_overlay_images(
+        &mut self,
+        topleft:     web_sys::ImageBitmap,
+        bottomleft:  web_sys::ImageBitmap,
+        bottomright: web_sys::ImageBitmap,
+        tl_w: u32, tl_h: u32,
+        bl_w: u32, bl_h: u32,
+        br_w: u32, br_h: u32,
+    ) {
+        if let Some(ref mut r) = self.renderer {
+            r.set_overlay_images(vec![
+                (topleft,     tl_w, tl_h),
+                (bottomleft,  bl_w, bl_h),
+                (bottomright, br_w, br_h),
+            ]);
+        }
+    }
+
     #[wasm_bindgen]
     pub async fn check_super_lightning(&mut self) -> u32 {
         let mut renderer = match self.renderer.take() { Some(r) => r, None => return 0 };
