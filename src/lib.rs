@@ -593,8 +593,20 @@ impl ParticleLifeEngine {
         if !href.contains("michelreij.nl") && !href.starts_with("http://localhost") {
             return Err(JsValue::from_str("Origin of Life: unauthorized origin"));
         }
+        let canvas_size = canvas.width();
         match WebGpuRenderer::new(&canvas).await {
-            Ok(renderer) => { self.renderer = Some(renderer); Ok(()) }
+            Ok(renderer) => {
+                self.renderer = Some(renderer);
+                let (new_max, new_min) = crate::config::scale_particle_counts(canvas_size);
+                self.particle_system.set_particle_limits(new_max, new_min);
+                let initial_count = new_max.min(DEFAULT_NUM_PARTICLES);
+                self.particle_system.set_active_count(initial_count);
+                self.simulation_params.set_num_particles(initial_count);
+                if let Some(ref mut r) = self.renderer {
+                    r.initialize_particle_buffers(&self.particle_system);
+                }
+                Ok(())
+            }
             Err(e) => Err(e)
         }
     }

@@ -124,6 +124,14 @@ impl ParticleSystem {
         self.num_types
     }
 
+    pub fn set_particle_limits(&mut self, max: u32, min: u32) {
+        self.max_particles = max;
+        self.min_particles = min;
+        if self.active_count > max {
+            self.active_count = max;
+        }
+    }
+
     pub fn set_active_count(&mut self, count: u32) {
         let new_count = count.min(self.max_particles);
         self.active_count = new_count;

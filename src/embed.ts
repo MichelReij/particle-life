@@ -393,8 +393,11 @@ class EmbedApp {
         this.canvas = document.getElementById("ol-canvas") as HTMLCanvasElement;
         if (!this.canvas) return;
 
-        this.canvas.width = CANVAS_WIDTH;
-        this.canvas.height = CANVAS_HEIGHT;
+        const canvasWrap = document.getElementById("ol-canvas-wrap");
+        const containerWidth = canvasWrap ? canvasWrap.getBoundingClientRect().width : CANVAS_WIDTH;
+        const canvasSize = Math.max(300, Math.min(Math.floor(containerWidth), CANVAS_WIDTH));
+        this.canvas.width = canvasSize;
+        this.canvas.height = canvasSize;
 
         const wasmUrl = `${getScriptBase()}pkg/particle_life_wasm_bg.wasm?v=${Date.now()}`;
 

@@ -210,6 +210,8 @@ pub struct WebGpuRenderer {
     zoom_render_bind_group: wgpu::BindGroup,
 
     zoom_uniforms_buffer: wgpu::Buffer,
+    pub fisheye_buffer_width: u32,
+    pub fisheye_buffer_height: u32,
 
     text_overlay_pipeline: Option<wgpu::RenderPipeline>,
     text_overlay_bind_group: Option<wgpu::BindGroup>,
@@ -313,8 +315,8 @@ impl WebGpuRenderer {
             mapped_at_creation: false,
         });
 
-        let max_particles = 6400usize;
-        let active_particles = 6400usize;
+        let max_particles = MAX_PARTICLES as usize;
+        let active_particles = MAX_PARTICLES as usize;
         let num_types = 7usize;
         let mut initial_particle_data = Vec::with_capacity(max_particles * 48);
         let mut rng = rand::thread_rng();
@@ -385,13 +387,15 @@ impl WebGpuRenderer {
 
         let zoom_uniforms_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Zoom Uniforms Buffer"),
-            size: 32,
+            size: 48,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
+        let fisheye_width  = ((width  as f32) * FISHEYE_BUFFER_SCALE) as u32;
+        let fisheye_height = ((height as f32) * FISHEYE_BUFFER_SCALE) as u32;
         let scene_texture_size = wgpu::Extent3d {
-            width: FISHEYE_BUFFER_WIDTH_U32, height: FISHEYE_BUFFER_HEIGHT_U32, depth_or_array_layers: 1,
+            width: fisheye_width, height: fisheye_height, depth_or_array_layers: 1,
         };
         let intermediate_texture_size = scene_texture_size;
 
@@ -755,6 +759,8 @@ impl WebGpuRenderer {
             fisheye_render_bind_group,
             zoom_render_bind_group,
             zoom_uniforms_buffer,
+            fisheye_buffer_width: fisheye_width,
+            fisheye_buffer_height: fisheye_height,
             fps_data_buffer,
             text_overlay_bind_group,
             text_overlay_pipeline,
@@ -865,9 +871,17 @@ impl WebGpuRenderer {
         #[cfg(not(target_arch = "wasm32"))]
         let gamma = 1.0f32;
 
-        let zoom_uniforms = [zoom_level, center_x, center_y, gamma,
+        let fw = self.fisheye_buffer_width as f32;
+        let fh = self.fisheye_buffer_height as f32;
+        let cw = simulation_params.canvas_render_width;
+        let ch = simulation_params.canvas_render_height;
+        let zoom_uniforms = [
+            zoom_level, center_x, center_y, gamma,
             simulation_params.virtual_world_width, simulation_params.virtual_world_height,
-            simulation_params.canvas_render_width, simulation_params.canvas_render_height];
+            cw, ch,
+            fw, fh,
+            (fw - cw) / 2.0, (fh - ch) / 2.0,
+        ];
         self.queue.write_buffer(&self.zoom_uniforms_buffer, 0, bytemuck::cast_slice(&zoom_uniforms));
     }
 

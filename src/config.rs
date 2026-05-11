@@ -81,6 +81,15 @@ pub fn calculate_fisheye_buffer_size(fisheye_strength: f32) -> (u32, u32) {
     }
 }
 
+/// Compute scaled particle limits for a given canvas size (proportional to area vs 1080²).
+/// Returns (max_particles, min_particles) both rounded to nearest 64.
+pub fn scale_particle_counts(canvas_size: u32) -> (u32, u32) {
+    let scale = (canvas_size as f64 / CANVAS_WIDTH as f64).powi(2);
+    let new_max = ((MAX_PARTICLES as f64 * scale / 64.0).round() as u32 * 64).clamp(64, MAX_PARTICLES);
+    let new_min = ((MIN_PARTICLES as f64 * scale / 64.0).round() as u32 * 64).clamp(64, new_max);
+    (new_max, new_min)
+}
+
 /// Configuration for easy experimentation
 /// Change these values to experiment with different world/canvas sizes
 pub struct WorldConfig {

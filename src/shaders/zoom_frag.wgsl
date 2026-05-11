@@ -8,11 +8,14 @@ struct ZoomUniforms {
     center_x: f32,
     center_y: f32,
     native_gamma_correction: f32,
-    // 1.0 for native gamma correction, 0.0 for browser (no extra correction)
     virtual_world_width: f32,
     virtual_world_height: f32,
     canvas_width: f32,
     canvas_height: f32,
+    fisheye_buffer_width: f32,
+    fisheye_buffer_height: f32,
+    crop_offset_x: f32,
+    crop_offset_y: f32,
 }
 
 ;
@@ -28,24 +31,13 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     // Convert fragment coordinates to normalized UV coordinates (0.0 to 1.0)
     let canvas_uv = frag_coord.xy / vec2<f32>(zoom_uniforms.canvas_width, zoom_uniforms.canvas_height);
 
-    // Get fisheye buffer dimensions (hardcoded constants from config.rs)
-    let fisheye_buffer_width = 1404.0;
-    let fisheye_buffer_height = 1404.0;
-    let crop_offset_x = 162.0;
-    // (1404 - 1080) / 2
-    let crop_offset_y = 162.0;
-    // (1404 - 1080) / 2
-
-    // Map canvas UV (0,0 to 1,1) to the central crop region of the fisheye buffer
-    // We want to sample the center 1080x1080 region from the 1404x1404 fisheye buffer
-    // Center of fisheye buffer: (702, 702)
-    // Crop region: from (162, 162) to (1242, 1242)
-
-    // Simple direct mapping: canvas UV (0,0 to 1,1) to crop region (162,162 to 1242,1242)
-    // Start UV: (162/1404, 162/1404) = (0.1154, 0.1154)
-    // End UV: (1242/1404, 1242/1404) = (0.8846, 0.8846)
-    let crop_start_uv = vec2<f32>(162.0 / 1404.0, 162.0 / 1404.0);
-    let crop_end_uv = vec2<f32>(1242.0 / 1404.0, 1242.0 / 1404.0);
+    // Get fisheye buffer dimensions from uniforms (scale proportionally with canvas)
+    let fw = zoom_uniforms.fisheye_buffer_width;
+    let fh = zoom_uniforms.fisheye_buffer_height;
+    let ox = zoom_uniforms.crop_offset_x;
+    let oy = zoom_uniforms.crop_offset_y;
+    let crop_start_uv = vec2<f32>(ox / fw, oy / fh);
+    let crop_end_uv   = vec2<f32>((fw - ox) / fw, (fh - oy) / fh);
 
     // Linear interpolation from crop start to crop end based on canvas UV
     let fisheye_uv = crop_start_uv + canvas_uv * (crop_end_uv - crop_start_uv);
