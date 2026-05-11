@@ -142,8 +142,9 @@ fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thic
 
     // Scale thickness to viewport (smaller viewport = larger relative thickness)
     let viewport_scale = sim_params.virtual_world_width / sim_params.viewport_width;
-    // zoom factor
-    let scaled_thickness = thickness * viewport_scale;
+    // Compensate for smaller virtual world on smaller canvases so lightning stays the same CSS pixel size
+    let canvas_scale = 1080.0 / sim_params.canvas_render_width;
+    let scaled_thickness = thickness * viewport_scale * canvas_scale;
 
     let segmentDir = end_viewport - start_viewport;
     let segmentLength = length(segmentDir);
