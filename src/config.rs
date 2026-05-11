@@ -18,9 +18,9 @@ pub const PARTICLE_SIZE_MIN: f32 = 8.0;
 pub const PARTICLE_SIZE_MAX: f32 = 32.0;
 
 /// Particle system configuration
-pub const DEFAULT_NUM_PARTICLES: u32 = 4800;
-pub const MAX_PARTICLES: u32 = 4800;
-pub const MIN_PARTICLES: u32 = 1200;
+pub const DEFAULT_NUM_PARTICLES: u32 = 6400;
+pub const MAX_PARTICLES: u32 = 6400;
+pub const MIN_PARTICLES: u32 = 1600;
 
 /// FPS display configuration - no longer capped to allow 3-digit display
 pub const FPS_SAMPLE_COUNT: usize = 10; // Number of samples for moving average

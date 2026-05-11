@@ -606,7 +606,7 @@ impl ParticleLifeEngine {
                 self.particle_system.set_active_count(initial_count);
                 self.simulation_params.set_num_particles(initial_count);
                 if let Some(ref mut r) = self.renderer {
-                    r.initialize_particle_buffers(&self.particle_system);
+                    r.update_particle_active_states(&self.particle_system);
                 }
                 Ok(())
             }

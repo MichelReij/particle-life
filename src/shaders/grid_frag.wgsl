@@ -123,11 +123,11 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     // Calculate zoom level (how much we're zoomed in)
     let zoom_level = sim_params.virtual_world_width / sim_params.viewport_width;
 
-    // Line thickness in world coordinates, scaled by zoom for consistent visual appearance
-    let world_line_thickness = (3.0 / zoom_level);
-    // Regular lines get thinner when zoomed in
-    let world_center_line_thickness = (5.0 / zoom_level);
-    // Center lines get thinner when zoomed in
+    // Pixels per world unit in the fisheye buffer — scales with canvas size
+    let px_per_world = (sim_params.canvas_render_width * 1.3) / sim_params.virtual_world_width;
+    // Line thickness: target ~1.5 screen pixels regardless of canvas size or zoom
+    let world_line_thickness        = (1.5 / zoom_level) / px_per_world;
+    let world_center_line_thickness = (2.5 / zoom_level) / px_per_world;
 
     // World center coordinates
     let world_center_x = sim_params.virtual_world_width * 0.5;
@@ -153,8 +153,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let line_alpha: f32 = 0.25;
 
     // Anti-aliasing falloff in world coordinates
-    let falloff = 0.5 / zoom_level;
-    // Falloff scales with zoom to maintain sharpness
+    let falloff = (0.5 / zoom_level) / px_per_world;
 
     // Calculate line intensities using smoothstep for anti-aliasing
     let vertical_intensity = 1.0 - smoothstep(world_line_thickness * 0.5 - falloff, world_line_thickness * 0.5 + falloff, dist_to_vertical_line);
