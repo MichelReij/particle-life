@@ -43,6 +43,11 @@ else
     echo "   apt install binaryen    (on Ubuntu)"
 fi
 
+echo "📋 Syncing assets/images to public/assets/images/..."
+mkdir -p public/assets/images
+cp assets/images/*.png public/assets/images/
+echo "✅ Assets synced!"
+
 echo "📋 Syncing shaders to public/shaders/..."
 mkdir -p public/shaders
 cp src/shaders/*.wgsl public/shaders/
