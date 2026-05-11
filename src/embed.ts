@@ -78,12 +78,13 @@ function gradientColor(pct: number, stops: Stop[]): string {
 const RED:    [number,number,number] = [192,  57, 43];
 const YELLOW: [number,number,number] = [243, 156, 18];
 const GREEN:  [number,number,number] = [ 39, 174, 96];
+const BLUE:   [number,number,number] = [ 41, 128, 185];
 
 // Stops per slider in percentage, matching the CSS gradients exactly
 const SLIDER_STOPS: Record<string, Stop[]> = {
     "ol-temp": [
-        [  0, ...RED],   [49.0, ...RED],
-        [58.6, ...YELLOW], [64.9, ...GREEN],
+        [  0, ...BLUE],  [49.0, ...BLUE],
+        [58.6, ...GREEN], [64.9, ...GREEN],
         [71.3, ...GREEN], [77.7, ...YELLOW],
         [85.0, ...RED],  [100, ...RED],
     ],
@@ -285,11 +286,11 @@ const EMBED_CSS = `
     box-shadow: 0 1px 3px rgba(0,0,0,0.5);
 }
 
-/* Temp (3–160°C), range=157: rood<80, geel 80–95, groen 95–115, geel 115–125, rood>125
+/* Temp (3–160°C): blauw<80, groen 80–125, geel 125–135, rood>135
    (80-3)/157=49.0%  (95-3)/157=58.6%  (115-3)/157=71.3%  (125-3)/157=77.7% */
 #ol-temp { background: linear-gradient(to right,
-    #c0392b 49.0%, #f39c12 58.6%, #27ae60 64.9%,
-    #27ae60 71.3%, #f39c12 77.7%, #c0392b 85%); }
+    #2980b9 49.0%, #27ae60 58.6%, #27ae60 71.3%,
+    #f39c12 77.7%, #c0392b 85%); }
 #ol-temp::-webkit-slider-runnable-track { background: transparent; }
 #ol-temp::-moz-range-track { background: transparent; }
 
@@ -449,6 +450,7 @@ class EmbedApp {
     }
 
     private wireSliders() {
+        const LS_PREFIX = "ol-slider-";
         const wire = (
             id: string,
             valId: string,
@@ -458,11 +460,14 @@ class EmbedApp {
             const slider = document.getElementById(id) as HTMLInputElement | null;
             const display = document.getElementById(valId);
             if (!slider) return;
+            const saved = localStorage.getItem(LS_PREFIX + id);
+            if (saved !== null) slider.value = saved;
             const update = () => {
                 const v = parseFloat(slider.value);
                 if (display) display.textContent = format(v);
                 updateThumbColor(slider);
                 if (display) display.style.color = slider.style.getPropertyValue("--thumb-color");
+                localStorage.setItem(LS_PREFIX + id, slider.value);
                 apply(v);
             };
             slider.addEventListener("input", update);
