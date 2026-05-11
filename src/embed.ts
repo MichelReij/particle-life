@@ -58,35 +58,42 @@ const I18N: Record<Lang, {
     },
 };
 
-// Gradient stop: [percentage 0-100, r, g, b]
+// Gradient stop: [percentage 0-100, L, C, H] in OKLCH
 type Stop = [number, number, number, number];
 
 function gradientColor(pct: number, stops: Stop[]): string {
-    if (pct <= stops[0][0]) return `rgb(${stops[0][1]},${stops[0][2]},${stops[0][3]})`;
-    if (pct >= stops[stops.length - 1][0]) { const s = stops[stops.length - 1]; return `rgb(${s[1]},${s[2]},${s[3]})`; }
+    if (pct <= stops[0][0]) { const [,l,c,h] = stops[0]; return `oklch(${l} ${c} ${h})`; }
+    if (pct >= stops[stops.length-1][0]) { const [,l,c,h] = stops[stops.length-1]; return `oklch(${l} ${c} ${h})`; }
     for (let i = 0; i < stops.length - 1; i++) {
-        const [p0, r0, g0, b0] = stops[i];
-        const [p1, r1, g1, b1] = stops[i + 1];
+        const [p0, l0, c0, h0] = stops[i];
+        const [p1, l1, c1, h1] = stops[i + 1];
         if (pct >= p0 && pct <= p1) {
             const t = (pct - p0) / (p1 - p0);
-            return `rgb(${Math.round(r0 + t*(r1-r0))},${Math.round(g0 + t*(g1-g0))},${Math.round(b0 + t*(b1-b0))})`;
+            // Interpolate hue via shortest path to avoid spinning through unwanted hues
+            let dh = h1 - h0;
+            if (dh > 180) dh -= 360;
+            if (dh < -180) dh += 360;
+            const l = l0 + t * (l1 - l0);
+            const c = c0 + t * (c1 - c0);
+            const h = h0 + t * dh;
+            return `oklch(${l.toFixed(3)} ${c.toFixed(3)} ${h.toFixed(1)})`;
         }
     }
-    return `rgb(192,57,43)`;
+    return `oklch(0.466 0.177 26.5)`;
 }
 
-const RED:    [number,number,number] = [192,  57, 43];
-const YELLOW: [number,number,number] = [243, 156, 18];
-const GREEN:  [number,number,number] = [ 39, 174, 96];
-const BLUE:   [number,number,number] = [ 41, 128, 185];
+// OKLCH color anchors: [L, C, H]
+const RED:    [number,number,number] = [0.466, 0.177,  26.5];
+const YELLOW: [number,number,number] = [0.766, 0.163,  72.5];
+const GREEN:  [number,number,number] = [0.648, 0.166, 148.0];
+const BLUE:   [number,number,number] = [0.553, 0.123, 251.0];
 
 // Stops per slider in percentage, matching the CSS gradients exactly
 const SLIDER_STOPS: Record<string, Stop[]> = {
     "ol-temp": [
-        [  0, ...BLUE],  [49.0, ...BLUE],
-        [58.6, ...GREEN], [64.9, ...GREEN],
-        [71.3, ...GREEN], [77.7, ...YELLOW],
-        [85.0, ...RED],  [100, ...RED],
+        [  0, ...BLUE],   [49.0, ...BLUE],
+        [58.6, ...GREEN], [71.3, ...GREEN],
+        [77.7, ...YELLOW],[85.0, ...RED], [100, ...RED],
     ],
     "ol-pres": [
         [  0, ...RED],  [20.0, ...RED],
@@ -286,33 +293,34 @@ const EMBED_CSS = `
     box-shadow: 0 1px 3px rgba(0,0,0,0.5);
 }
 
-/* Temp (3–160°C): blauw<80, groen 80–125, geel 125–135, rood>135
-   (80-3)/157=49.0%  (95-3)/157=58.6%  (115-3)/157=71.3%  (125-3)/157=77.7% */
-#ol-temp { background: linear-gradient(to right,
-    #2980b9 49.0%, #27ae60 58.6%, #27ae60 71.3%,
-    #f39c12 77.7%, #c0392b 85%); }
+/* Temp: blauw (koud) → groen (optimaal) → geel → rood (te warm) */
+#ol-temp { background: linear-gradient(in oklch to right,
+    oklch(0.553 0.123 251) 49%, oklch(0.648 0.166 148) 58.6%,
+    oklch(0.648 0.166 148) 71.3%, oklch(0.766 0.163 72.5) 77.7%,
+    oklch(0.466 0.177 26.5) 85%); }
 #ol-temp::-webkit-slider-runnable-track { background: transparent; }
 #ol-temp::-moz-range-track { background: transparent; }
 
-/* Diepte (0–1000m): rood<200, geel 200–500, groen 500–1000 */
-#ol-pres { background: linear-gradient(to right,
-    #c0392b 20%, #f39c12 35%, #27ae60 50%); }
+/* Diepte (0–1000m): rood → geel → groen */
+#ol-pres { background: linear-gradient(in oklch to right,
+    oklch(0.466 0.177 26.5) 20%, oklch(0.766 0.163 72.5) 35%,
+    oklch(0.648 0.166 148) 50%); }
 #ol-pres::-webkit-slider-runnable-track { background: transparent; }
 #ol-pres::-moz-range-track { background: transparent; }
 
-/* pH (0–14): rood<8, geel 8–9, groen 9–11, geel 11–12, rood>12
-   8/14=57.1%  9/14=64.3%  11/14=78.6%  12/14=85.7% */
-#ol-ph { background: linear-gradient(to right,
-    #c0392b 57.1%, #f39c12 64.3%, #27ae60 71.4%,
-    #27ae60 78.6%, #f39c12 85.7%, #c0392b 92%); }
+/* pH (0–14): rood → groen → rood */
+#ol-ph { background: linear-gradient(in oklch to right,
+    oklch(0.466 0.177 26.5) 57.1%, oklch(0.766 0.163 72.5) 64.3%,
+    oklch(0.648 0.166 148) 71.4%, oklch(0.648 0.166 148) 78.6%,
+    oklch(0.766 0.163 72.5) 85.7%, oklch(0.466 0.177 26.5) 92%); }
 #ol-ph::-webkit-slider-runnable-track { background: transparent; }
 #ol-ph::-moz-range-track { background: transparent; }
 
-/* Elec (0–3 kJ): rood<1.8, geel 1.8–2.0, groen 2.0–2.2, geel 2.2–2.4, rood>2.4
-   1.8/3=60.0%  2.0/3=66.7%  2.2/3=73.3%  2.4/3=80.0% */
-#ol-elec { background: linear-gradient(to right,
-    #c0392b 60.0%, #f39c12 66.7%, #27ae60 70.0%,
-    #27ae60 73.3%, #f39c12 80.0%, #c0392b 87%); }
+/* Elec (0–3 kJ): rood → groen → rood */
+#ol-elec { background: linear-gradient(in oklch to right,
+    oklch(0.466 0.177 26.5) 60%, oklch(0.766 0.163 72.5) 66.7%,
+    oklch(0.648 0.166 148) 70%, oklch(0.648 0.166 148) 73.3%,
+    oklch(0.766 0.163 72.5) 80%, oklch(0.466 0.177 26.5) 87%); }
 #ol-elec::-webkit-slider-runnable-track { background: transparent; }
 #ol-elec::-moz-range-track { background: transparent; }
 `;
