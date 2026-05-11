@@ -600,13 +600,23 @@ impl ParticleLifeEngine {
                 // Sync simulation params to actual canvas size (may differ from compile-time 1080)
                 self.simulation_params.canvas_render_width  = canvas_size as f32;
                 self.simulation_params.canvas_render_height = canvas_size as f32;
-                // Scale particle_render_size so particles occupy the same number of CSS pixels
-                // regardless of canvas resolution (world-unit size must grow as canvas shrinks)
-                let size_scale = CANVAS_WIDTH / canvas_size as f32;
-                self.simulation_params.particle_render_size =
-                    (self.simulation_params.particle_render_size * size_scale)
-                        .max(PARTICLE_SIZE_MIN)
-                        .min(PARTICLE_SIZE_MAX);
+                // Scale virtual world proportionally with canvas: ratio stays 3:1 (3240/1080)
+                // This keeps particle density, forces, and interaction radii all consistent
+                let world_scale = VIRTUAL_WORLD_WIDTH / CANVAS_WIDTH;
+                let virtual_size = canvas_size as f32 * world_scale;
+                self.simulation_params.virtual_world_width  = virtual_size;
+                self.simulation_params.virtual_world_height = virtual_size;
+                // Viewport center at new world center; viewport fills entire world at zoom=1
+                self.simulation_params.viewport_center_x = virtual_size / 2.0;
+                self.simulation_params.viewport_center_y = virtual_size / 2.0;
+                self.simulation_params.viewport_width    = virtual_size;
+                self.simulation_params.viewport_height   = virtual_size;
+                self.simulation_params.viewport_radius   = virtual_size / 2.0;
+                // Spatial grid cell size scales with world (80 units per cell at 3240 world)
+                let cell_size = (virtual_size / VIRTUAL_WORLD_WIDTH) * 80.0;
+                self.simulation_params.spatial_grid_cell_size = cell_size;
+                self.simulation_params.spatial_grid_width  = (virtual_size / cell_size).ceil() as u32;
+                self.simulation_params.spatial_grid_height = (virtual_size / cell_size).ceil() as u32;
                 let (new_max, new_min) = crate::config::scale_particle_counts(canvas_size);
                 self.particle_system.set_particle_limits(new_max, new_min);
                 let initial_count = new_max.min(DEFAULT_NUM_PARTICLES);

@@ -485,20 +485,20 @@ impl SimulationParams {
         self.current_zoom_level = clamped_zoom;
 
         // Calculate viewport size: at zoom 1.0 = full world, at zoom 2.0 = half world, etc.
-        let viewport_width = VIRTUAL_WORLD_WIDTH / clamped_zoom;
-        let viewport_height = VIRTUAL_WORLD_HEIGHT / clamped_zoom;
+        let viewport_width = self.virtual_world_width / clamped_zoom;
+        let viewport_height = self.virtual_world_height / clamped_zoom;
 
         // Center the viewport around world center by default
-        let center_x = center_x.unwrap_or(VIRTUAL_WORLD_CENTER_X);
-        let center_y = center_y.unwrap_or(VIRTUAL_WORLD_CENTER_Y);
+        let center_x = center_x.unwrap_or(self.virtual_world_width / 2.0);
+        let center_y = center_y.unwrap_or(self.virtual_world_height / 2.0);
 
         // Calculate offset to center the viewport
         let offset_x = center_x - (viewport_width / 2.0);
         let offset_y = center_y - (viewport_height / 2.0);
 
         // Clamp offsets to ensure viewport stays within virtual world bounds
-        let max_offset_x = VIRTUAL_WORLD_WIDTH - viewport_width;
-        let max_offset_y = VIRTUAL_WORLD_HEIGHT - viewport_height;
+        let max_offset_x = self.virtual_world_width - viewport_width;
+        let max_offset_y = self.virtual_world_height - viewport_height;
 
         let clamped_offset_x = offset_x.max(0.0).min(max_offset_x);
         let clamped_offset_y = offset_y.max(0.0).min(max_offset_y);
@@ -562,11 +562,11 @@ impl SimulationParams {
         // Apply relative pan (velocity-based)
         let (new_center_x, new_center_y) = if sensor_data.joy_click || sensor_data.joystick_button {
             // Button pressed: snap viewport back to world center
-            (VIRTUAL_WORLD_CENTER_X, VIRTUAL_WORLD_CENTER_Y)
+            (self.virtual_world_width / 2.0, self.virtual_world_height / 2.0)
         } else {
             let (vel_x, vel_y) = sensor_data.to_pan_velocity();
-            let viewport_width = VIRTUAL_WORLD_WIDTH / zoom_level;
-            let viewport_height = VIRTUAL_WORLD_HEIGHT / zoom_level;
+            let viewport_width = self.virtual_world_width / zoom_level;
+            let viewport_height = self.virtual_world_height / zoom_level;
             // 50 % of visible viewport per second at max deflection
             let speed_factor = 0.5_f32;
             (
