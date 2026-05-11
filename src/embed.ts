@@ -441,10 +441,11 @@ class EmbedApp {
                 const bm   = await createImageBitmap(blob);
                 return [bm, bm.width, bm.height];
             };
-            const [tlBm, tlW, tlH] = await loadBitmap("copyright-michelreij-2025-2026.png");
-            const [blBm, blW, blH] = await loadBitmap("cc-by-nc-4.png");
-            const [brBm, brW, brH] = await loadBitmap("michelreij.png");
-            this.engine.set_overlay_images(tlBm, blBm, brBm, tlW, tlH, blW, blH, brW, brH);
+            const [tlBm, tlW, tlH] = await loadBitmap("copyright-michelreij.png");
+            const [trBm, trW, trH] = await loadBitmap("2025-2026.png");
+            const [blBm, blW, blH] = await loadBitmap("michelreij.png");
+            const [brBm, brW, brH] = await loadBitmap("cc-by-nc-4.png");
+            this.engine.set_overlay_images(tlBm, trBm, blBm, brBm, tlW, tlH, trW, trH, blW, blH, brW, brH);
         } catch (e) {
             console.warn("Origin of Life: overlay images failed to load:", e);
         }
