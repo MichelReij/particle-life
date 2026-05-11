@@ -269,8 +269,9 @@ impl SimulationParams {
         buffer.extend_from_slice(&self.r_smooth.to_le_bytes()); // 13
         buffer.extend_from_slice(&(if self.flat_force { 1u32 } else { 0u32 }).to_le_bytes()); // 14
 
-        // Apply zoom-adjusted drift: divide drift by zoom level for better user experience when zoomed in
-        let zoom_adjusted_drift = self.drift_x_per_second / zoom_level.max(1.0); // Ensure we don't divide by 0
+        // Scale drift proportionally with world size so apparent speed stays constant across canvas sizes
+        let world_scale = self.virtual_world_width / crate::config::VIRTUAL_WORLD_WIDTH;
+        let zoom_adjusted_drift = self.drift_x_per_second * world_scale / zoom_level.max(1.0);
         buffer.extend_from_slice(&zoom_adjusted_drift.to_le_bytes()); // 15
         buffer.extend_from_slice(&self.inter_type_attraction_scale.to_le_bytes()); // 16
         buffer.extend_from_slice(&self.inter_type_radius_scale.to_le_bytes()); // 17
