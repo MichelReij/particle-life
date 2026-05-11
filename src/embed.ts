@@ -18,7 +18,8 @@ type Lang = "nl" | "en" | "fr";
 
 const I18N: Record<Lang, {
     loading: string;
-    hint: string;
+    hintZoom: string;
+    hintPan: string;
     startText: string;
     playAnyway: string;
     temp: string;
@@ -28,7 +29,8 @@ const I18N: Record<Lang, {
 }> = {
     nl: {
         loading:    "Simulatie laden…",
-        hint:       "scroll / knijp om te zoomen · sleep om te bewegen",
+        hintZoom:   "scroll / knijp om te zoomen",
+        hintPan:    "sleep om te bewegen",
         startText:  "Deze simulatie gebruikt je grafische processor intensief en werkt mogelijk niet goed op oudere apparaten. Ook verbruikt het veel energie, waardoor de batterij van je telefoon of laptop snel leegloopt.",
         playAnyway: "Starten",
         temp:       "Temperatuur",
@@ -38,7 +40,8 @@ const I18N: Record<Lang, {
     },
     en: {
         loading:    "Loading simulation…",
-        hint:       "scroll / pinch to zoom · drag to pan",
+        hintZoom:   "scroll / pinch to zoom",
+        hintPan:    "drag to pan",
         startText:  "This simulation uses your graphics processor intensively and may not run well on older devices. It also consumes a lot of energy, which will drain the battery of your phone or laptop quickly.",
         playAnyway: "Play anyway",
         temp:       "Temperature",
@@ -48,7 +51,8 @@ const I18N: Record<Lang, {
     },
     fr: {
         loading:    "Chargement de la simulation…",
-        hint:       "molette / pincer pour zoomer · glisser pour déplacer",
+        hintZoom:   "molette / pincer pour zoomer",
+        hintPan:    "glisser pour déplacer",
         startText:  "Cette simulation sollicite intensément votre processeur graphique et peut ne pas fonctionner correctement sur les appareils plus anciens. Elle consomme également beaucoup d'énergie, ce qui déchargera rapidement la batterie de votre téléphone ou ordinateur portable.",
         playAnyway: "Démarrer quand même",
         temp:       "Température",
@@ -189,14 +193,62 @@ const EMBED_CSS = `
     pointer-events: none;
     text-shadow: 0 1px 4px rgba(0,0,0,0.8);
 }
-#ol-hint {
+#ol-hint-zoom {
     position: absolute;
-    bottom: 6px;
+    top: 6px;
+    left: 8px;
+    font-size: 10px;
+    color: #ccc;
+    pointer-events: none;
+    user-select: none;
+}
+#ol-hint-pan {
+    position: absolute;
+    top: 6px;
     right: 8px;
     font-size: 10px;
     color: #ccc;
     pointer-events: none;
     user-select: none;
+}
+#ol-capture-btns {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    display: flex;
+    gap: 6px;
+    pointer-events: auto;
+}
+#ol-capture-btns button {
+    background: rgba(0,0,0,0.55);
+    color: #ccc;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+    padding: 0;
+    transition: background 0.15s;
+}
+#ol-capture-btns button:hover {
+    background: rgba(0,0,0,0.8);
+}
+#ol-capture-btns button.recording {
+    color: #f44;
+    border-color: #f44;
+}
+#ol-screenshot-flash {
+    position: absolute;
+    inset: 0;
+    background: white;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.05s;
+    border-radius: 50%;
 }
 #ol-start-overlay {
     position: absolute;
@@ -343,7 +395,13 @@ function buildDOM() {
         <div id="ol-canvas-wrap">
             <canvas id="ol-canvas"></canvas>
             <div id="ol-status">${t.loading}</div>
-            <div id="ol-hint">${t.hint}</div>
+            <div id="ol-hint-zoom">${t.hintZoom}</div>
+            <div id="ol-hint-pan">${t.hintPan}</div>
+            <div id="ol-capture-btns">
+                <button id="ol-screenshot-btn" title="Screenshot">📷</button>
+                <button id="ol-record-btn" title="Video opnemen">🎥</button>
+            </div>
+            <div id="ol-screenshot-flash"></div>
             <div id="ol-start-overlay">
                 <p>${t.startText}</p>
                 <button id="ol-play-anyway">${t.playAnyway}</button>
@@ -396,6 +454,10 @@ class EmbedApp {
     private lastPinchDist = 0;
     private lastPinchMidX = 0;
     private lastPinchMidY = 0;
+
+    private mediaRecorder: MediaRecorder | null = null;
+    private recordedChunks: Blob[] = [];
+    private screenshotPending = false;
 
     async init() {
         injectStyles();
@@ -453,6 +515,7 @@ class EmbedApp {
         this.wireSliders();
         this.wireZoomPan();
         this.wireStartOverlay();
+        this.wireCapture();
 
         const status = document.getElementById("ol-status");
         if (status) status.style.display = "none";
@@ -670,6 +733,61 @@ class EmbedApp {
                 this.lastPinchDist = 0;
             }
         }, { passive: false });
+    }
+
+    private wireCapture() {
+        document.getElementById("ol-screenshot-btn")
+            ?.addEventListener("click", () => this.captureScreenshot());
+        document.getElementById("ol-record-btn")
+            ?.addEventListener("click", () => this.toggleRecording());
+    }
+
+    private captureScreenshot() {
+        if (!this.canvas) return;
+        this.screenshotPending = true;
+        // Flash feedback
+        const flash = document.getElementById("ol-screenshot-flash") as HTMLElement | null;
+        if (flash) { flash.style.opacity = "0.7"; setTimeout(() => { flash.style.opacity = "0"; }, 150); }
+        this.canvas.toBlob((blob) => {
+            if (!blob) return;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `origin-of-life-${Date.now()}.png`;
+            a.click();
+            URL.revokeObjectURL(url);
+            this.screenshotPending = false;
+        }, "image/png");
+    }
+
+    private toggleRecording() {
+        if (this.mediaRecorder && this.mediaRecorder.state !== "inactive") {
+            this.mediaRecorder.stop();
+            return;
+        }
+        if (!this.canvas) return;
+        const stream = this.canvas.captureStream(60);
+        const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+            ? "video/webm;codecs=vp9"
+            : "video/webm";
+        this.recordedChunks = [];
+        this.mediaRecorder = new MediaRecorder(stream, { mimeType });
+        this.mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) this.recordedChunks.push(e.data);
+        };
+        this.mediaRecorder.onstop = () => {
+            const blob = new Blob(this.recordedChunks, { type: mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `origin-of-life-${Date.now()}.webm`;
+            a.click();
+            URL.revokeObjectURL(url);
+            this.recordedChunks = [];
+            document.getElementById("ol-record-btn")?.classList.remove("recording");
+        };
+        this.mediaRecorder.start();
+        document.getElementById("ol-record-btn")?.classList.add("recording");
     }
 
     private startLoop() {
