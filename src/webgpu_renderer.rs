@@ -219,9 +219,8 @@ pub struct WebGpuRenderer {
 
     // Corner copyright overlay (PNG textures uploaded from JS)
     corner_overlay_pipeline: Option<wgpu::RenderPipeline>,
-    corner_overlay_uniform_buffer: Option<wgpu::Buffer>,
-    // [topleft, bottomleft, bottomright]: (bind_group, img_w, img_h)
-    corner_overlays: Vec<(wgpu::BindGroup, u32, u32)>,
+    // [topleft, bottomleft, bottomright]: (bind_group, img_w, img_h, uniform_buffer)
+    corner_overlays: Vec<(wgpu::BindGroup, u32, u32, wgpu::Buffer)>,
     surface_format: wgpu::TextureFormat,
 }
 
@@ -732,7 +731,6 @@ impl WebGpuRenderer {
 
         Ok(WebGpuRenderer {
             corner_overlay_pipeline: None,
-            corner_overlay_uniform_buffer: None,
             corner_overlays: Vec::new(),
             surface_format,
             device,
@@ -866,24 +864,29 @@ impl WebGpuRenderer {
           p.set_pipeline(&self.zoom_render_pipeline); p.set_bind_group(0, &self.zoom_render_bind_group, &[]); p.draw(0..6, 0..1); }
 
         // Corner copyright overlays (PNG textures, hidden by circular viewport but present in raw canvas)
-        if let (Some(pipeline), Some(uniform_buf)) = (&self.corner_overlay_pipeline, &self.corner_overlay_uniform_buffer) {
+        if let Some(pipeline) = &self.corner_overlay_pipeline {
             let canvas = simulation_params.canvas_render_width;
             let scale  = canvas / 1080.0;
 
-            // [topleft, bottomleft, bottomright]: (x, y) of top-left corner in canvas pixels
-            let positions: [(f32, f32); 3] = [
-                (0.0,                                                        0.0),                                                          // topleft
-                (0.0,                                                        canvas - self.corner_overlays[1].2 as f32 * scale),            // bottomleft
-                (canvas - self.corner_overlays[2].1 as f32 * scale,         canvas - self.corner_overlays[2].2 as f32 * scale),            // bottomright
-            ];
+            let n = self.corner_overlays.len();
+            let positions: Vec<(f32, f32)> = (0..n).map(|i| {
+                let (_, img_w, img_h, _) = &self.corner_overlays[i];
+                match i {
+                    0 => (0.0, 0.0),                                                                    // topleft
+                    1 => (0.0, canvas - *img_h as f32 * scale),                                         // bottomleft
+                    2 => (canvas - *img_w as f32 * scale, canvas - *img_h as f32 * scale),              // bottomright
+                    _ => (0.0, 0.0),
+                }
+            }).collect();
 
-            for (i, (bg, img_w, img_h)) in self.corner_overlays.iter().enumerate() {
+            // Write positions to each overlay's own uniform buffer before encoding
+            for (i, (_, img_w, img_h, ubuf)) in self.corner_overlays.iter().enumerate() {
                 let (ox, oy) = positions[i];
-                let ow = *img_w as f32 * scale;
-                let oh = *img_h as f32 * scale;
-                let uniforms: [f32; 4] = [ox, oy, ow, oh];
-                self.queue.write_buffer(uniform_buf, 0, bytemuck::cast_slice(&uniforms));
+                let uniforms: [f32; 4] = [ox, oy, *img_w as f32 * scale, *img_h as f32 * scale];
+                self.queue.write_buffer(ubuf, 0, bytemuck::cast_slice(&uniforms));
+            }
 
+            for (bg, _, _, _) in self.corner_overlays.iter() {
                 let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Corner Overlay"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1093,7 +1096,7 @@ impl WebGpuRenderer {
                 ..Default::default()
             });
 
-            // Build bind groups — one per image
+            // Build bind groups — one per image, each with its own uniform buffer
             let mut overlays = Vec::new();
             for (bitmap, img_w, img_h) in &images {
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -1125,21 +1128,28 @@ impl WebGpuRenderer {
 
                 let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
+                // Each overlay gets its own uniform buffer so positions don't overwrite each other
+                let ubuf = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("Corner Overlay Uniforms"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+
                 let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("Corner Overlay BG"),
                     layout: &bgl,
                     entries: &[
                         wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Sampler(&sampler) },
                         wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
-                        wgpu::BindGroupEntry { binding: 2, resource: uniform_buffer.as_entire_binding() },
+                        wgpu::BindGroupEntry { binding: 2, resource: ubuf.as_entire_binding() },
                     ],
                 });
 
-                overlays.push((bg, *img_w, *img_h));
+                overlays.push((bg, *img_w, *img_h, ubuf));
             }
 
-            self.corner_overlay_pipeline   = Some(pipeline);
-            self.corner_overlay_uniform_buffer = Some(uniform_buffer);
+            self.corner_overlay_pipeline = Some(pipeline);
             self.corner_overlays = overlays;
         }
     }
