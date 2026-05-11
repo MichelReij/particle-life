@@ -600,6 +600,13 @@ impl ParticleLifeEngine {
                 // Sync simulation params to actual canvas size (may differ from compile-time 1080)
                 self.simulation_params.canvas_render_width  = canvas_size as f32;
                 self.simulation_params.canvas_render_height = canvas_size as f32;
+                // Scale particle_render_size so particles occupy the same number of CSS pixels
+                // regardless of canvas resolution (world-unit size must grow as canvas shrinks)
+                let size_scale = CANVAS_WIDTH / canvas_size as f32;
+                self.simulation_params.particle_render_size =
+                    (self.simulation_params.particle_render_size * size_scale)
+                        .max(PARTICLE_SIZE_MIN)
+                        .min(PARTICLE_SIZE_MAX);
                 let (new_max, new_min) = crate::config::scale_particle_counts(canvas_size);
                 self.particle_system.set_particle_limits(new_max, new_min);
                 let initial_count = new_max.min(DEFAULT_NUM_PARTICLES);
