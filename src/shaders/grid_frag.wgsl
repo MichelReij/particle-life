@@ -126,8 +126,8 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let zoom_level = sim_params.virtual_world_width / sim_params.viewport_width;
 
     // Line thickness: same approach as grid_spacing — multiply target CSS pixels by world_per_css_px
-    let world_line_thickness        = (1.5 / zoom_level) * world_per_css_px;
-    let world_center_line_thickness = (2.5 / zoom_level) * world_per_css_px;
+    let world_line_thickness        = (1.5 / zoom_level);
+    let world_center_line_thickness = (2.5 / zoom_level);
 
     // World center coordinates
     let world_center_x = sim_params.virtual_world_width * 0.5;
