@@ -19,62 +19,42 @@ type Lang = "nl" | "en" | "fr";
 const I18N: Record<Lang, {
     loading: string;
     hint: string;
-    playTitle: string;
-    pauseTitle: string;
     startText: string;
-    startOk: string;
-    startCancel: string;
-    stopText: string;
-    stopOk: string;
+    playAnyway: string;
     temp: string;
     ph: string;
     depth: string;
     electricity: string;
 }> = {
     nl: {
-        loading:      "Simulatie laden…",
-        hint:         "scroll / knijp om te zoomen · sleep om te bewegen",
-        playTitle:    "Start simulatie",
-        pauseTitle:   "Stop simulatie",
-        startText:    "Deze simulatie gebruikt je grafische processor intensief en werkt mogelijk niet goed op oudere apparaten. Ook verbruikt het veel energie, waardoor de batterij van je telefoon of laptop snel leegloopt.",
-        startOk:      "Starten",
-        startCancel:  "Annuleren",
-        stopText:     "De simulatie is gepauzeerd. Je batterij is nu weer veilig.",
-        stopOk:       "Sluiten",
-        temp:         "Temperatuur",
-        ph:           "pH",
-        depth:        "Zeedepte",
-        electricity:  "Elektriciteit",
+        loading:    "Simulatie laden…",
+        hint:       "scroll / knijp om te zoomen · sleep om te bewegen",
+        startText:  "Deze simulatie gebruikt je grafische processor intensief en werkt mogelijk niet goed op oudere apparaten. Ook verbruikt het veel energie, waardoor de batterij van je telefoon of laptop snel leegloopt.",
+        playAnyway: "Starten",
+        temp:       "Temperatuur",
+        ph:         "pH",
+        depth:      "Zeedepte",
+        electricity:"Elektriciteit",
     },
     en: {
-        loading:      "Loading simulation…",
-        hint:         "scroll / pinch to zoom · drag to pan",
-        playTitle:    "Start simulation",
-        pauseTitle:   "Stop simulation",
-        startText:    "This simulation uses your graphics processor intensively and may not run well on older devices. It also consumes a lot of energy, which will drain the battery of your phone or laptop quickly.",
-        startOk:      "Start",
-        startCancel:  "Cancel",
-        stopText:     "The simulation has stopped. Your battery is safe again.",
-        stopOk:       "Close",
-        temp:         "Temperature",
-        ph:           "pH",
-        depth:        "Sea depth",
-        electricity:  "Electricity",
+        loading:    "Loading simulation…",
+        hint:       "scroll / pinch to zoom · drag to pan",
+        startText:  "This simulation uses your graphics processor intensively and may not run well on older devices. It also consumes a lot of energy, which will drain the battery of your phone or laptop quickly.",
+        playAnyway: "Play anyway",
+        temp:       "Temperature",
+        ph:         "pH",
+        depth:      "Sea depth",
+        electricity:"Electricity",
     },
     fr: {
-        loading:      "Chargement de la simulation…",
-        hint:         "molette / pincer pour zoomer · glisser pour déplacer",
-        playTitle:    "Démarrer la simulation",
-        pauseTitle:   "Arrêter la simulation",
-        startText:    "Cette simulation sollicite intensément votre processeur graphique et peut ne pas fonctionner correctement sur les appareils plus anciens. Elle consomme également beaucoup d'énergie, ce qui déchargera rapidement la batterie de votre téléphone ou ordinateur portable.",
-        startOk:      "Démarrer",
-        startCancel:  "Annuler",
-        stopText:     "La simulation est arrêtée. Votre batterie est à nouveau en sécurité.",
-        stopOk:       "Fermer",
-        temp:         "Température",
-        ph:           "pH",
-        depth:        "Profondeur",
-        electricity:  "Électricité",
+        loading:    "Chargement de la simulation…",
+        hint:       "molette / pincer pour zoomer · glisser pour déplacer",
+        startText:  "Cette simulation sollicite intensément votre processeur graphique et peut ne pas fonctionner correctement sur les appareils plus anciens. Elle consomme également beaucoup d'énergie, ce qui déchargera rapidement la batterie de votre téléphone ou ordinateur portable.",
+        playAnyway: "Démarrer quand même",
+        temp:       "Température",
+        ph:         "pH",
+        depth:      "Profondeur",
+        electricity:"Électricité",
     },
 };
 
@@ -210,83 +190,37 @@ const EMBED_CSS = `
     pointer-events: none;
     user-select: none;
 }
-#ol-playpause {
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 11%;
-    aspect-ratio: 1 / 1;
-    border-radius: 50%;
-    border: none;
-    background: rgba(40,140,60,0.85);
-    color: #fff;
-    font-size: 1.5em;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-    transition: background 0.15s;
-    line-height: 1;
-    padding: 0;
-}
-#ol-playpause:hover {
-    background: rgba(40,140,60,1);
-}
-#ol-playpause.running {
-    background: rgba(180,30,30,0.85);
-}
-#ol-playpause.running:hover {
-    background: rgba(180,30,30,1);
-}
-#ol-modal-start, #ol-modal-stop {
+#ol-start-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(0,0,0,0.6);
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     z-index: 20;
     border-radius: 50%;
-}
-#ol-modal {
-    background: #1a1a2a;
-    border: 1px solid #333;
-    border-radius: 12px;
-    padding: 18px 20px;
-    max-width: 80%;
-    color: #ddd;
-    font-size: 12px;
-    line-height: 1.5;
+    padding: 12%;
     text-align: center;
 }
-#ol-modal p {
-    margin: 0 0 14px;
+#ol-start-overlay p {
+    color: #ccc;
+    font-size: 12px;
+    line-height: 1.6;
+    margin: 0 0 16px;
+    text-shadow: 0 1px 6px rgba(0,0,0,0.9);
 }
-#ol-modal-ok {
+#ol-start-overlay button {
     background: rgba(40,140,60,0.9);
     color: #fff;
     border: none;
     border-radius: 6px;
-    padding: 7px 18px;
-    font-size: 12px;
+    padding: 8px 22px;
+    font-size: 13px;
     cursor: pointer;
-    margin-right: 8px;
+    transition: background 0.15s;
 }
-#ol-modal-ok:hover {
+#ol-start-overlay button:hover {
     background: rgba(40,140,60,1);
-}
-#ol-modal-cancel {
-    background: rgba(80,80,80,0.6);
-    color: #ccc;
-    border: none;
-    border-radius: 6px;
-    padding: 7px 18px;
-    font-size: 12px;
-    cursor: pointer;
-}
-#ol-modal-cancel:hover {
-    background: rgba(80,80,80,0.9);
 }
 #ol-controls {
     display: flex;
@@ -401,19 +335,9 @@ function buildDOM() {
             <canvas id="ol-canvas"></canvas>
             <div id="ol-status">${t.loading}</div>
             <div id="ol-hint">${t.hint}</div>
-            <button id="ol-playpause" title="${t.playTitle}">▶</button>
-            <div id="ol-modal-start" style="display:none">
-                <div id="ol-modal">
-                    <p>${t.startText}</p>
-                    <button id="ol-modal-start-ok">${t.startOk}</button>
-                    <button id="ol-modal-start-cancel">${t.startCancel}</button>
-                </div>
-            </div>
-            <div id="ol-modal-stop" style="display:none">
-                <div id="ol-modal">
-                    <p>${t.stopText}</p>
-                    <button id="ol-modal-stop-ok">${t.stopOk}</button>
-                </div>
+            <div id="ol-start-overlay">
+                <p>${t.startText}</p>
+                <button id="ol-play-anyway">${t.playAnyway}</button>
             </div>
         </div>
         <div id="ol-controls">
@@ -447,7 +371,6 @@ class EmbedApp {
     private animationId: number | null = null;
     private engineBusy = false;
     private lastTime = 0;
-    private running = false;
 
     private zoom = 1.0;
     private panX = WORLD_CENTER_X;
@@ -493,7 +416,7 @@ class EmbedApp {
 
         this.wireSliders();
         this.wireZoomPan();
-        this.wirePlayPause();
+        this.wireStartOverlay();
 
         const status = document.getElementById("ol-status");
         if (status) status.style.display = "none";
@@ -504,57 +427,15 @@ class EmbedApp {
         if (el) el.textContent = msg;
     }
 
-    private wirePlayPause() {
-        const btn         = document.getElementById("ol-playpause") as HTMLButtonElement;
-        const startModal  = document.getElementById("ol-modal-start");
-        const stopModal   = document.getElementById("ol-modal-stop");
-        const startOk     = document.getElementById("ol-modal-start-ok");
-        const startCancel = document.getElementById("ol-modal-start-cancel");
-        const stopOk      = document.getElementById("ol-modal-stop-ok");
-        if (!btn || !startModal || !stopModal || !startOk || !startCancel || !stopOk) return;
-
-        const t = I18N[getLang()];
-
-        const startSim = () => {
-            this.running = true;
-            btn.textContent = "⏸";
-            btn.title = t.pauseTitle;
-            btn.classList.add("running");
-            this.lastTime = performance.now();
-            this.startLoop();
-        };
-
-        const stopSim = () => {
-            this.running = false;
-            btn.textContent = "▶";
-            btn.title = t.playTitle;
-            btn.classList.remove("running");
-            if (this.animationId !== null) {
-                cancelAnimationFrame(this.animationId);
-                this.animationId = null;
-            }
-        };
+    private wireStartOverlay() {
+        const overlay = document.getElementById("ol-start-overlay");
+        const btn     = document.getElementById("ol-play-anyway");
+        if (!overlay || !btn) return;
 
         btn.addEventListener("click", () => {
-            if (this.running) {
-                stopSim();
-                stopModal.style.display = "flex";
-            } else {
-                startModal.style.display = "flex";
-            }
-        });
-
-        startOk.addEventListener("click", () => {
-            startModal.style.display = "none";
-            startSim();
-        });
-
-        startCancel.addEventListener("click", () => {
-            startModal.style.display = "none";
-        });
-
-        stopOk.addEventListener("click", () => {
-            stopModal.style.display = "none";
+            overlay.style.display = "none";
+            this.lastTime = performance.now();
+            this.startLoop();
         });
     }
 
