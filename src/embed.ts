@@ -626,6 +626,25 @@ class EmbedApp {
             this.applyZoomPan();
         }, { passive: false });
 
+        canvas.addEventListener("dblclick", () => {
+            this.zoom = ZOOM_MIN;
+            this.panX = this.virtualWorldWidth  / 2;
+            this.panY = this.virtualWorldHeight / 2;
+            this.applyZoomPan();
+        });
+
+        let lastTap = 0;
+        canvas.addEventListener("touchend", (e) => {
+            const now = Date.now();
+            if (now - lastTap < 300 && e.changedTouches.length === 1) {
+                this.zoom = ZOOM_MIN;
+                this.panX = this.virtualWorldWidth  / 2;
+                this.panY = this.virtualWorldHeight / 2;
+                this.applyZoomPan();
+            }
+            lastTap = now;
+        });
+
         canvas.addEventListener("mousedown", (e) => {
             if (e.button !== 0) return;
             this.isDragging = true;
