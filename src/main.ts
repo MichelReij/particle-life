@@ -746,10 +746,7 @@ function showUnsupportedBrowser(missing: string[]) {
                     ${missing.map(f => `<li style="margin: 0.4rem 0; color: #f88;">✗ ${f}</li>`).join("")}
                 </ul>
                 <p style="line-height: 1.6; color: #aaa;">
-                    Please use a recent version of
-                    <strong style="color:#fff">Chrome</strong> or
-                    <strong style="color:#fff">Edge</strong> (version 113+) on desktop.
-                    Safari and Firefox do not yet support WebGPU.
+                    Please update your browser to the latest version, or try a different browser.
                 </p>
             </div>
         </div>
