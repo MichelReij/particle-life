@@ -709,10 +709,65 @@ class App {
     }
 }
 
+function checkBrowserSupport(): { supported: boolean; missing: string[] } {
+    const missing: string[] = [];
+    if (typeof WebAssembly === "undefined") missing.push("WebAssembly");
+    if (!("gpu" in navigator)) missing.push("WebGPU (required for WGSL shaders)");
+    return { supported: missing.length === 0, missing };
+}
+
+function showUnsupportedBrowser(missing: string[]) {
+    document.body.innerHTML = `
+        <div style="
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background: #0a0a0f;
+            font-family: sans-serif;
+            color: #ccc;
+            padding: 2rem;
+            box-sizing: border-box;
+        ">
+            <div style="max-width: 520px; text-align: center;">
+                <h1 style="color: #fff; font-size: 1.5rem; margin-bottom: 1rem;">
+                    Browser not supported
+                </h1>
+                <p style="margin-bottom: 1rem; line-height: 1.6;">
+                    This simulation requires features your browser does not support:
+                </p>
+                <ul style="
+                    text-align: left;
+                    display: inline-block;
+                    margin: 0 0 1.5rem;
+                    padding: 0;
+                    list-style: none;
+                ">
+                    ${missing.map(f => `<li style="margin: 0.4rem 0; color: #f88;">✗ ${f}</li>`).join("")}
+                </ul>
+                <p style="line-height: 1.6; color: #aaa;">
+                    Please use a recent version of
+                    <strong style="color:#fff">Chrome</strong> or
+                    <strong style="color:#fff">Edge</strong> (version 113+) on desktop.
+                    Safari and Firefox do not yet support WebGPU.
+                </p>
+            </div>
+        </div>
+    `;
+}
+
 // Initialize the app when DOM is loaded
 console.log("📋 Setting up DOMContentLoaded listener...");
 document.addEventListener("DOMContentLoaded", async () => {
     console.log("🌟 DOM loaded, creating app...");
+
+    const { supported, missing } = checkBrowserSupport();
+    if (!supported) {
+        console.warn("❌ Browser missing required features:", missing);
+        showUnsupportedBrowser(missing);
+        return;
+    }
+
     const app = new App();
     await app.init();
 
