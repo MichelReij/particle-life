@@ -16,75 +16,83 @@ const WORLD_CENTER_Y = VIRTUAL_WORLD_HEIGHT / 2;
 
 type Lang = "nl" | "en" | "fr";
 
-const I18N: Record<Lang, {
-    loading: string;
-    hintZoom: string;
-    hintPan: string;
-    titleScreenshot: string;
-    titleRecord: string;
-    startText: string;
-    playAnyway: string;
-    temp: string;
-    ph: string;
-    depth: string;
-    electricity: string;
-}> = {
+const I18N: Record<
+    Lang,
+    {
+        loading: string;
+        hintZoom: string;
+        hintPan: string;
+        titleScreenshot: string;
+        titleRecord: string;
+        startText: string;
+        playAnyway: string;
+        temp: string;
+        ph: string;
+        depth: string;
+        electricity: string;
+    }
+> = {
     nl: {
-        loading:         "Simulatie laden…",
-        hintZoom:        "scroll / knijp om te zoomen",
-        hintPan:         "sleep om te bewegen",
+        loading: "Simulatie laden…",
+        hintZoom: "scroll / knijp om te zoomen",
+        hintPan: "sleep om te bewegen",
         titleScreenshot: "Screenshot",
-        titleRecord:     "Video opnemen",
-        startText:  "Deze simulatie gebruikt je grafische processor intensief en werkt mogelijk niet goed op oudere apparaten. Ook verbruikt het veel energie, waardoor de batterij van je telefoon of laptop snel leegloopt.",
+        titleRecord: "Video opnemen",
+        startText:
+            "Deze simulatie gebruikt je grafische processor intensief en werkt mogelijk niet goed op oudere apparaten. Ook verbruikt het veel energie, waardoor de batterij van je telefoon of laptop snel leegloopt.",
         playAnyway: "Starten",
-        temp:       "Temperatuur",
-        ph:         "pH",
-        depth:      "Zeedepte",
-        electricity:"Elektriciteit",
+        temp: "Temperatuur",
+        ph: "pH",
+        depth: "Diepte (druk)",
+        electricity: "Elektriciteit",
     },
     en: {
-        loading:         "Loading simulation…",
-        hintZoom:        "scroll / pinch to zoom",
-        hintPan:         "drag to pan",
+        loading: "Loading simulation…",
+        hintZoom: "scroll / pinch to zoom",
+        hintPan: "drag to pan",
         titleScreenshot: "Screenshot",
-        titleRecord:     "Record video",
-        startText:  "This simulation uses your graphics processor intensively and may not run well on older devices. It also consumes a lot of energy, which will drain the battery of your phone or laptop quickly.",
+        titleRecord: "Record video",
+        startText:
+            "This simulation uses your graphics processor intensively and may not run well on older devices. It also consumes a lot of energy, which will drain the battery of your phone or laptop quickly.",
         playAnyway: "Play anyway",
-        temp:       "Temperature",
-        ph:         "pH",
-        depth:      "Sea depth",
-        electricity:"Electricity",
+        temp: "Temperature",
+        ph: "pH",
+        depth: "Sea depth",
+        electricity: "Electricity",
     },
     fr: {
-        loading:         "Chargement de la simulation…",
-        hintZoom:        "molette / pincer pour zoomer",
-        hintPan:         "glisser pour déplacer",
+        loading: "Chargement de la simulation…",
+        hintZoom: "molette / pincer pour zoomer",
+        hintPan: "glisser pour déplacer",
         titleScreenshot: "Capture d'écran",
-        titleRecord:     "Enregistrer la vidéo",
-        startText:  "Cette simulation sollicite intensément votre processeur graphique et peut ne pas fonctionner correctement sur les appareils plus anciens. Elle consomme également beaucoup d'énergie, ce qui déchargera rapidement la batterie de votre téléphone ou ordinateur portable.",
+        titleRecord: "Enregistrer la vidéo",
+        startText:
+            "Cette simulation sollicite intensément votre processeur graphique et peut ne pas fonctionner correctement sur les appareils plus anciens. Elle consomme également beaucoup d'énergie, ce qui déchargera rapidement la batterie de votre téléphone ou ordinateur portable.",
         playAnyway: "Démarrer quand même",
-        temp:       "Température",
-        ph:         "pH",
-        depth:      "Profondeur",
-        electricity:"Électricité",
+        temp: "Température",
+        ph: "pH",
+        depth: "Profondeur",
+        electricity: "Électricité",
     },
 };
 
 // Gradient stop: [percentage 0-100, H] — L and C are constant across all sliders
 type Stop = [number, number];
 
-const OKLCH_L = 0.72;  // lightness
-const OKLCH_C = 0.13;  // chroma
+const OKLCH_L = 0.72; // lightness
+const OKLCH_C = 0.13; // chroma
 
 // Hue anchors in OKLCH
-const H_RED    = 26.5;
+const H_RED = 26.5;
 const H_YELLOW = 72.5;
-const H_GREEN  = 148.0;
-const H_BLUE   = 251.0;
+const H_GREEN = 148.0;
+const H_BLUE = 251.0;
 
 function gradientColor(pct: number, stops: Stop[]): string {
-    if (pct <= stops[0][0]) return `oklch(${OKLCH_L} ${OKLCH_C} ${stops[0][1]})`;
-    if (pct >= stops[stops.length-1][0]) return `oklch(${OKLCH_L} ${OKLCH_C} ${stops[stops.length-1][1]})`;
+    if (pct <= stops[0][0])
+        return `oklch(${OKLCH_L} ${OKLCH_C} ${stops[0][1]})`;
+    if (pct >= stops[stops.length - 1][0])
+        return `oklch(${OKLCH_L} ${OKLCH_C} ${stops[stops.length - 1][1]})`;
     for (let i = 0; i < stops.length - 1; i++) {
         const [p0, h0] = stops[i];
         const [p1, h1] = stops[i + 1];
@@ -103,41 +111,57 @@ function gradientColor(pct: number, stops: Stop[]): string {
 // Stops per slider: [percentage, H] — only hue varies, L and C are constant
 const SLIDER_STOPS: Record<string, Stop[]> = {
     "ol-temp": [
-        [  0, H_BLUE],   [49.0, H_BLUE],
-        [58.6, H_GREEN], [71.3, H_GREEN],
-        [77.7, H_YELLOW],[85.0, H_RED], [100, H_RED],
+        [0, H_BLUE],
+        [49.0, H_BLUE],
+        [58.6, H_GREEN],
+        [71.3, H_GREEN],
+        [77.7, H_YELLOW],
+        [85.0, H_RED],
+        [100, H_RED],
     ],
     "ol-pres": [
-        [  0, H_RED],  [20.0, H_RED],
-        [35.0, H_YELLOW], [50.0, H_GREEN],
+        [0, H_RED],
+        [20.0, H_RED],
+        [35.0, H_YELLOW],
+        [50.0, H_GREEN],
         [100, H_GREEN],
     ],
     "ol-ph": [
-        [  0, H_RED],   [57.1, H_RED],
-        [64.3, H_YELLOW], [71.4, H_GREEN],
-        [78.6, H_GREEN], [85.7, H_YELLOW],
-        [92.0, H_RED],  [100, H_RED],
+        [0, H_RED],
+        [57.1, H_RED],
+        [64.3, H_YELLOW],
+        [71.4, H_GREEN],
+        [78.6, H_GREEN],
+        [85.7, H_YELLOW],
+        [92.0, H_RED],
+        [100, H_RED],
     ],
     "ol-elec": [
-        [  0, H_RED],   [60.0, H_RED],
-        [66.7, H_YELLOW], [70.0, H_GREEN],
-        [73.3, H_GREEN], [80.0, H_YELLOW],
-        [87.0, H_RED],  [100, H_RED],
+        [0, H_RED],
+        [60.0, H_RED],
+        [66.7, H_YELLOW],
+        [70.0, H_GREEN],
+        [73.3, H_GREEN],
+        [80.0, H_YELLOW],
+        [87.0, H_RED],
+        [100, H_RED],
     ],
 };
 
 function updateThumbColor(slider: HTMLInputElement) {
     const stops = SLIDER_STOPS[slider.id];
     if (!stops) return;
-    const pct = (parseFloat(slider.value) - parseFloat(slider.min)) /
-                (parseFloat(slider.max)  - parseFloat(slider.min)) * 100;
+    const pct =
+        ((parseFloat(slider.value) - parseFloat(slider.min)) /
+            (parseFloat(slider.max) - parseFloat(slider.min))) *
+        100;
     slider.style.setProperty("--thumb-color", gradientColor(pct, stops));
 }
 
 function getLang(): Lang {
     const wrap = document.getElementById("ol-wrap");
     const raw = (wrap?.dataset.lang ?? "en").toLowerCase();
-    return (raw === "nl" || raw === "fr") ? raw : "en";
+    return raw === "nl" || raw === "fr" ? raw : "en";
 }
 
 // Derive base URL from our script tag so WASM loads from the right server
@@ -416,7 +440,8 @@ function injectStyles() {
     if (document.getElementById("ol-embed-styles")) return;
     const style = document.createElement("style");
     style.id = "ol-embed-styles";
-    style.textContent = `@font-face {
+    style.textContent =
+        `@font-face {
     font-family: 'Material Symbols Outlined';
     font-style: normal;
     src: url('${getScriptBase()}fonts/material-symbols-outlined.woff2') format('woff2');
@@ -479,7 +504,7 @@ class EmbedApp {
     private zoom = 1.0;
     private panX = WORLD_CENTER_X;
     private panY = WORLD_CENTER_Y;
-    private virtualWorldWidth  = VIRTUAL_WORLD_WIDTH;
+    private virtualWorldWidth = VIRTUAL_WORLD_WIDTH;
     private virtualWorldHeight = VIRTUAL_WORLD_HEIGHT;
 
     private isDragging = false;
@@ -503,13 +528,20 @@ class EmbedApp {
         if (!this.canvas) return;
 
         const canvasWrap = document.getElementById("ol-canvas-wrap");
-        const containerWidth = canvasWrap ? canvasWrap.getBoundingClientRect().width : CANVAS_WIDTH;
-        const canvasSize = Math.max(300, Math.min(Math.floor(containerWidth), CANVAS_WIDTH));
-        this.canvas.width  = canvasSize;
+        const containerWidth = canvasWrap
+            ? canvasWrap.getBoundingClientRect().width
+            : CANVAS_WIDTH;
+        const canvasSize = Math.max(
+            300,
+            Math.min(Math.floor(containerWidth), CANVAS_WIDTH),
+        );
+        this.canvas.width = canvasSize;
         this.canvas.height = canvasSize;
-        this.virtualWorldWidth  = canvasSize * (VIRTUAL_WORLD_WIDTH / CANVAS_WIDTH);
-        this.virtualWorldHeight = canvasSize * (VIRTUAL_WORLD_HEIGHT / CANVAS_HEIGHT);
-        this.panX = this.virtualWorldWidth  / 2;
+        this.virtualWorldWidth =
+            canvasSize * (VIRTUAL_WORLD_WIDTH / CANVAS_WIDTH);
+        this.virtualWorldHeight =
+            canvasSize * (VIRTUAL_WORLD_HEIGHT / CANVAS_HEIGHT);
+        this.panX = this.virtualWorldWidth / 2;
         this.panY = this.virtualWorldHeight / 2;
 
         const wasmUrl = `${getScriptBase()}pkg/particle_life_wasm_bg.wasm?v=${Date.now()}`;
@@ -533,17 +565,34 @@ class EmbedApp {
         // Load copyright overlay PNGs and upload as GPU textures
         try {
             const base = getScriptBase();
-            const loadBitmap = async (name: string): Promise<[ImageBitmap, number, number]> => {
+            const loadBitmap = async (
+                name: string,
+            ): Promise<[ImageBitmap, number, number]> => {
                 const resp = await fetch(`${base}assets/images/${name}`);
                 const blob = await resp.blob();
-                const bm   = await createImageBitmap(blob);
+                const bm = await createImageBitmap(blob);
                 return [bm, bm.width, bm.height];
             };
-            const [tlBm, tlW, tlH] = await loadBitmap("copyright-michelreij.png");
+            const [tlBm, tlW, tlH] = await loadBitmap(
+                "copyright-michelreij.png",
+            );
             const [trBm, trW, trH] = await loadBitmap("2025-2026.png");
             const [blBm, blW, blH] = await loadBitmap("michelreij.png");
             const [brBm, brW, brH] = await loadBitmap("cc-by-nc-4.png");
-            this.engine.set_overlay_images(tlBm, trBm, blBm, brBm, tlW, tlH, trW, trH, blW, blH, brW, brH);
+            this.engine.set_overlay_images(
+                tlBm,
+                trBm,
+                blBm,
+                brBm,
+                tlW,
+                tlH,
+                trW,
+                trH,
+                blW,
+                blH,
+                brW,
+                brH,
+            );
         } catch (e) {
             console.warn("Origin of Life: overlay images failed to load:", e);
         }
@@ -564,7 +613,7 @@ class EmbedApp {
 
     private wireStartOverlay() {
         const overlay = document.getElementById("ol-start-overlay");
-        const btn     = document.getElementById("ol-play-anyway");
+        const btn = document.getElementById("ol-play-anyway");
         if (!overlay || !btn) return;
 
         btn.addEventListener("click", () => {
@@ -582,7 +631,9 @@ class EmbedApp {
             format: (v: number) => string,
             apply: (v: number) => void,
         ) => {
-            const slider = document.getElementById(id) as HTMLInputElement | null;
+            const slider = document.getElementById(
+                id,
+            ) as HTMLInputElement | null;
             const display = document.getElementById(valId);
             if (!slider) return;
             const saved = localStorage.getItem(LS_PREFIX + id);
@@ -591,7 +642,9 @@ class EmbedApp {
                 const v = parseFloat(slider.value);
                 if (display) display.textContent = format(v);
                 updateThumbColor(slider);
-                if (display) display.style.color = slider.style.getPropertyValue("--thumb-color");
+                if (display)
+                    display.style.color =
+                        slider.style.getPropertyValue("--thumb-color");
                 localStorage.setItem(LS_PREFIX + id, slider.value);
                 apply(v);
             };
@@ -599,29 +652,49 @@ class EmbedApp {
             update();
         };
 
-        wire("ol-temp", "ol-temp-val", (v) => `${v}°C`, (v) => {
-            if (this.engine && !this.engineBusy) {
-                this.engine.set_temperature(v);
-                const dur = 1800 - (1620 * (v - 3)) / 157;
-                this.engine.set_rules_lerp_duration(Math.round(dur));
-            }
-        });
+        wire(
+            "ol-temp",
+            "ol-temp-val",
+            (v) => `${v}°C`,
+            (v) => {
+                if (this.engine && !this.engineBusy) {
+                    this.engine.set_temperature(v);
+                    const dur = 1800 - (1620 * (v - 3)) / 157;
+                    this.engine.set_rules_lerp_duration(Math.round(dur));
+                }
+            },
+        );
 
-        wire("ol-ph", "ol-ph-val", (v) => v.toFixed(1), (v) => {
-            if (this.engine && !this.engineBusy) this.engine.set_ph(v);
-        });
+        wire(
+            "ol-ph",
+            "ol-ph-val",
+            (v) => v.toFixed(1),
+            (v) => {
+                if (this.engine && !this.engineBusy) this.engine.set_ph(v);
+            },
+        );
 
-        wire("ol-pres", "ol-pres-val", (v) => `${v}m`, (v) => {
-            if (this.engine && !this.engineBusy) {
-                this.engine.set_pressure(v);
-                this.engine.set_particle_count_from_pressure(v);
-            }
-        });
+        wire(
+            "ol-pres",
+            "ol-pres-val",
+            (v) => `${v}m`,
+            (v) => {
+                if (this.engine && !this.engineBusy) {
+                    this.engine.set_pressure(v);
+                    this.engine.set_particle_count_from_pressure(v);
+                }
+            },
+        );
 
-        wire("ol-elec", "ol-elec-val", (v) => v.toFixed(2), (v) => {
-            if (this.engine && !this.engineBusy)
-                this.engine.set_electrical_activity(v);
-        });
+        wire(
+            "ol-elec",
+            "ol-elec-val",
+            (v) => v.toFixed(2),
+            (v) => {
+                if (this.engine && !this.engineBusy)
+                    this.engine.set_electrical_activity(v);
+            },
+        );
     }
 
     private applyZoomPan() {
@@ -631,36 +704,49 @@ class EmbedApp {
     }
 
     private constrainPan() {
-        const halfW = this.virtualWorldWidth  / this.zoom / 2;
+        const halfW = this.virtualWorldWidth / this.zoom / 2;
         const halfH = this.virtualWorldHeight / this.zoom / 2;
-        this.panX = Math.max(halfW, Math.min(this.virtualWorldWidth  - halfW, this.panX));
-        this.panY = Math.max(halfH, Math.min(this.virtualWorldHeight - halfH, this.panY));
+        this.panX = Math.max(
+            halfW,
+            Math.min(this.virtualWorldWidth - halfW, this.panX),
+        );
+        this.panY = Math.max(
+            halfH,
+            Math.min(this.virtualWorldHeight - halfH, this.panY),
+        );
     }
 
     private wireZoomPan() {
         const canvas = this.canvas!;
 
-        canvas.addEventListener("wheel", (e) => {
-            e.preventDefault();
-            const rect = canvas.getBoundingClientRect();
-            const cx = (e.clientX - rect.left) / rect.width;
-            const cy = (e.clientY - rect.top) / rect.height;
+        canvas.addEventListener(
+            "wheel",
+            (e) => {
+                e.preventDefault();
+                const rect = canvas.getBoundingClientRect();
+                const cx = (e.clientX - rect.left) / rect.width;
+                const cy = (e.clientY - rect.top) / rect.height;
 
-            const vw = this.virtualWorldWidth  / this.zoom;
-            const vh = this.virtualWorldHeight / this.zoom;
-            const worldX = this.panX + (cx - 0.5) * vw;
-            const worldY = this.panY + (cy - 0.5) * vh;
+                const vw = this.virtualWorldWidth / this.zoom;
+                const vh = this.virtualWorldHeight / this.zoom;
+                const worldX = this.panX + (cx - 0.5) * vw;
+                const worldY = this.panY + (cy - 0.5) * vh;
 
-            const factor = e.deltaY < 0 ? 1.03 : 1 / 1.03;
-            this.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, this.zoom * factor));
+                const factor = e.deltaY < 0 ? 1.03 : 1 / 1.03;
+                this.zoom = Math.max(
+                    ZOOM_MIN,
+                    Math.min(ZOOM_MAX, this.zoom * factor),
+                );
 
-            const nvw = this.virtualWorldWidth  / this.zoom;
-            const nvh = this.virtualWorldHeight / this.zoom;
-            this.panX = worldX - (cx - 0.5) * nvw;
-            this.panY = worldY - (cy - 0.5) * nvh;
-            this.constrainPan();
-            this.applyZoomPan();
-        }, { passive: false });
+                const nvw = this.virtualWorldWidth / this.zoom;
+                const nvh = this.virtualWorldHeight / this.zoom;
+                this.panX = worldX - (cx - 0.5) * nvw;
+                this.panY = worldY - (cy - 0.5) * nvh;
+                this.constrainPan();
+                this.applyZoomPan();
+            },
+            { passive: false },
+        );
 
         canvas.addEventListener("mousedown", (e) => {
             if (e.button !== 0) return;
@@ -675,7 +761,7 @@ class EmbedApp {
         window.addEventListener("mousemove", (e) => {
             if (!this.isDragging) return;
             const rect = canvas.getBoundingClientRect();
-            const sx = this.virtualWorldWidth  / (this.zoom * rect.width);
+            const sx = this.virtualWorldWidth / (this.zoom * rect.width);
             const sy = this.virtualWorldHeight / (this.zoom * rect.height);
             this.panX = this.dragStartPanX - (e.clientX - this.dragStartX) * sx;
             this.panY = this.dragStartPanY - (e.clientY - this.dragStartY) * sy;
@@ -690,98 +776,144 @@ class EmbedApp {
             }
         });
 
-        canvas.addEventListener("touchstart", (e) => {
-            e.preventDefault();
-            if (e.touches.length === 1) {
-                this.isDragging = true;
-                this.dragStartX = e.touches[0].clientX;
-                this.dragStartY = e.touches[0].clientY;
-                this.dragStartPanX = this.panX;
-                this.dragStartPanY = this.panY;
-                this.lastPinchDist = 0;
-            } else if (e.touches.length === 2) {
-                this.isDragging = false;
-                const t0 = e.touches[0], t1 = e.touches[1];
-                this.lastPinchDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
-                this.lastPinchMidX = (t0.clientX + t1.clientX) / 2;
-                this.lastPinchMidY = (t0.clientY + t1.clientY) / 2;
-            }
-        }, { passive: false });
+        canvas.addEventListener(
+            "touchstart",
+            (e) => {
+                e.preventDefault();
+                if (e.touches.length === 1) {
+                    this.isDragging = true;
+                    this.dragStartX = e.touches[0].clientX;
+                    this.dragStartY = e.touches[0].clientY;
+                    this.dragStartPanX = this.panX;
+                    this.dragStartPanY = this.panY;
+                    this.lastPinchDist = 0;
+                } else if (e.touches.length === 2) {
+                    this.isDragging = false;
+                    const t0 = e.touches[0],
+                        t1 = e.touches[1];
+                    this.lastPinchDist = Math.hypot(
+                        t1.clientX - t0.clientX,
+                        t1.clientY - t0.clientY,
+                    );
+                    this.lastPinchMidX = (t0.clientX + t1.clientX) / 2;
+                    this.lastPinchMidY = (t0.clientY + t1.clientY) / 2;
+                }
+            },
+            { passive: false },
+        );
 
-        canvas.addEventListener("touchmove", (e) => {
-            e.preventDefault();
-            const rect = canvas.getBoundingClientRect();
+        canvas.addEventListener(
+            "touchmove",
+            (e) => {
+                e.preventDefault();
+                const rect = canvas.getBoundingClientRect();
 
-            if (e.touches.length === 1 && this.isDragging) {
-                const sx = this.virtualWorldWidth  / (this.zoom * rect.width);
-                const sy = this.virtualWorldHeight / (this.zoom * rect.height);
-                this.panX = this.dragStartPanX - (e.touches[0].clientX - this.dragStartX) * sx;
-                this.panY = this.dragStartPanY - (e.touches[0].clientY - this.dragStartY) * sy;
-                this.constrainPan();
-                this.applyZoomPan();
-            } else if (e.touches.length === 2) {
-                const t0 = e.touches[0], t1 = e.touches[1];
-                const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
-                const midX = (t0.clientX + t1.clientX) / 2;
-                const midY = (t0.clientY + t1.clientY) / 2;
-
-                if (this.lastPinchDist > 0) {
-                    const cx = (midX - rect.left) / rect.width;
-                    const cy = (midY - rect.top) / rect.height;
-                    const vw = this.virtualWorldWidth  / this.zoom;
-                    const vh = this.virtualWorldHeight / this.zoom;
-                    const worldX = this.panX + (cx - 0.5) * vw;
-                    const worldY = this.panY + (cy - 0.5) * vh;
-
-                    this.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, this.zoom * (dist / this.lastPinchDist)));
-
-                    const nvw = this.virtualWorldWidth  / this.zoom;
-                    const nvh = this.virtualWorldHeight / this.zoom;
-                    this.panX = worldX - (cx - 0.5) * nvw;
-                    this.panY = worldY - (cy - 0.5) * nvh;
-
-                    // Also pan with midpoint movement between frames
-                    const dmx = midX - this.lastPinchMidX;
-                    const dmy = midY - this.lastPinchMidY;
-                    this.panX -= dmx * (this.virtualWorldWidth  / (this.zoom * rect.width));
-                    this.panY -= dmy * (this.virtualWorldHeight / (this.zoom * rect.height));
-
+                if (e.touches.length === 1 && this.isDragging) {
+                    const sx =
+                        this.virtualWorldWidth / (this.zoom * rect.width);
+                    const sy =
+                        this.virtualWorldHeight / (this.zoom * rect.height);
+                    this.panX =
+                        this.dragStartPanX -
+                        (e.touches[0].clientX - this.dragStartX) * sx;
+                    this.panY =
+                        this.dragStartPanY -
+                        (e.touches[0].clientY - this.dragStartY) * sy;
                     this.constrainPan();
                     this.applyZoomPan();
+                } else if (e.touches.length === 2) {
+                    const t0 = e.touches[0],
+                        t1 = e.touches[1];
+                    const dist = Math.hypot(
+                        t1.clientX - t0.clientX,
+                        t1.clientY - t0.clientY,
+                    );
+                    const midX = (t0.clientX + t1.clientX) / 2;
+                    const midY = (t0.clientY + t1.clientY) / 2;
+
+                    if (this.lastPinchDist > 0) {
+                        const cx = (midX - rect.left) / rect.width;
+                        const cy = (midY - rect.top) / rect.height;
+                        const vw = this.virtualWorldWidth / this.zoom;
+                        const vh = this.virtualWorldHeight / this.zoom;
+                        const worldX = this.panX + (cx - 0.5) * vw;
+                        const worldY = this.panY + (cy - 0.5) * vh;
+
+                        this.zoom = Math.max(
+                            ZOOM_MIN,
+                            Math.min(
+                                ZOOM_MAX,
+                                this.zoom * (dist / this.lastPinchDist),
+                            ),
+                        );
+
+                        const nvw = this.virtualWorldWidth / this.zoom;
+                        const nvh = this.virtualWorldHeight / this.zoom;
+                        this.panX = worldX - (cx - 0.5) * nvw;
+                        this.panY = worldY - (cy - 0.5) * nvh;
+
+                        // Also pan with midpoint movement between frames
+                        const dmx = midX - this.lastPinchMidX;
+                        const dmy = midY - this.lastPinchMidY;
+                        this.panX -=
+                            dmx *
+                            (this.virtualWorldWidth / (this.zoom * rect.width));
+                        this.panY -=
+                            dmy *
+                            (this.virtualWorldHeight /
+                                (this.zoom * rect.height));
+
+                        this.constrainPan();
+                        this.applyZoomPan();
+                    }
+
+                    this.lastPinchDist = dist;
+                    this.lastPinchMidX = midX;
+                    this.lastPinchMidY = midY;
                 }
+            },
+            { passive: false },
+        );
 
-                this.lastPinchDist = dist;
-                this.lastPinchMidX = midX;
-                this.lastPinchMidY = midY;
-            }
-        }, { passive: false });
-
-        canvas.addEventListener("touchend", (e) => {
-            if (e.touches.length === 0) {
-                this.isDragging = false;
-                this.lastPinchDist = 0;
-            } else if (e.touches.length === 1) {
-                this.isDragging = true;
-                this.dragStartX = e.touches[0].clientX;
-                this.dragStartY = e.touches[0].clientY;
-                this.dragStartPanX = this.panX;
-                this.dragStartPanY = this.panY;
-                this.lastPinchDist = 0;
-            }
-        }, { passive: false });
+        canvas.addEventListener(
+            "touchend",
+            (e) => {
+                if (e.touches.length === 0) {
+                    this.isDragging = false;
+                    this.lastPinchDist = 0;
+                } else if (e.touches.length === 1) {
+                    this.isDragging = true;
+                    this.dragStartX = e.touches[0].clientX;
+                    this.dragStartY = e.touches[0].clientY;
+                    this.dragStartPanX = this.panX;
+                    this.dragStartPanY = this.panY;
+                    this.lastPinchDist = 0;
+                }
+            },
+            { passive: false },
+        );
     }
 
     private wireCapture() {
-        document.getElementById("ol-screenshot-btn")
+        document
+            .getElementById("ol-screenshot-btn")
             ?.addEventListener("click", () => this.captureScreenshot());
-        document.getElementById("ol-record-btn")
+        document
+            .getElementById("ol-record-btn")
             ?.addEventListener("click", () => this.toggleRecording());
     }
 
     private captureScreenshot() {
         if (!this.canvas) return;
-        const flash = document.getElementById("ol-screenshot-flash") as HTMLElement | null;
-        if (flash) { flash.style.opacity = "0.7"; setTimeout(() => { flash.style.opacity = "0"; }, 150); }
+        const flash = document.getElementById(
+            "ol-screenshot-flash",
+        ) as HTMLElement | null;
+        if (flash) {
+            flash.style.opacity = "0.7";
+            setTimeout(() => {
+                flash.style.opacity = "0";
+            }, 150);
+        }
         this.canvas.toBlob((blob) => {
             if (!blob) return;
             const url = URL.createObjectURL(blob);
@@ -817,7 +949,9 @@ class EmbedApp {
             a.click();
             URL.revokeObjectURL(url);
             this.recordedChunks = [];
-            document.getElementById("ol-record-btn")?.classList.remove("recording");
+            document
+                .getElementById("ol-record-btn")
+                ?.classList.remove("recording");
         };
         this.mediaRecorder.start();
         document.getElementById("ol-record-btn")?.classList.add("recording");
@@ -847,7 +981,10 @@ class EmbedApp {
 
     destroy() {
         if (this.animationId) cancelAnimationFrame(this.animationId);
-        if (this.engine) { this.engine.free(); this.engine = null; }
+        if (this.engine) {
+            this.engine.free();
+            this.engine = null;
+        }
     }
 }
 
