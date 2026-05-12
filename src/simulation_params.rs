@@ -337,8 +337,8 @@ impl SimulationParams {
         // Clamp temperature to valid range (3°C to 160°C)
         let clamped_temp = temp.max(3.0).min(160.0);
 
-        // 1. Update drift speed: temp [3, 160] → drift [0, -120]
-        let drift = -((clamped_temp - 3.0) * 120.0) / 157.0;
+        // 1. Update drift speed: temp [3, 160] → drift [0, -60]
+        let drift = -((clamped_temp - 3.0) * 60.0) / 157.0;
         self.drift_x_per_second = drift;
 
         // 2. Update friction: stays high until ~80°C, then drops sharply toward max.
