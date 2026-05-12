@@ -343,21 +343,20 @@ canvas#ol-canvas {
 }
 #ol-controls {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px 18px;
+    flex-direction: row;
+    gap: 0;
     padding: 10px 14px;
     background: transparent;
     border-top: none;
-    align-items: center;
-    justify-content: center;
+    align-items: flex-end;
+    justify-content: space-evenly;
 }
 .ol-slider-group {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 3px;
-    flex: 1 1 45%;
-    max-width: 48%;
+    gap: 6px;
+    flex: 1 1 0;
 }
 .ol-slider-group label {
     color: #999;
@@ -366,6 +365,7 @@ canvas#ol-canvas {
     letter-spacing: 0.06em;
     white-space: nowrap;
     text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+    order: 3;
 }
 .ol-slider-group .ol-val {
     font-size: 12px;
@@ -373,12 +373,24 @@ canvas#ol-canvas {
     min-width: 3.5em;
     text-align: center;
     text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+    order: 2;
+}
+/* Vertical slider via writing-mode — native vertical, height = track length */
+.ol-slider-group .ol-slider-wrap {
+    order: 1;
+    width: 28px;
+    height: 240px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 .ol-slider-group input[type="range"] {
     -webkit-appearance: none;
     appearance: none;
-    width: 100%;
-    height: 6px;
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 6px;
+    height: 240px;
     border-radius: 3px;
     outline: none;
     cursor: pointer;
@@ -403,24 +415,41 @@ canvas#ol-canvas {
     cursor: pointer;
     box-shadow: 0 1px 3px rgba(0,0,0,0.5);
 }
+@media (pointer: coarse) {
+    .ol-slider-group .ol-slider-wrap {
+        width: 36px;
+    }
+    .ol-slider-group input[type="range"] {
+        width: 10px;
+        border-radius: 5px;
+    }
+    .ol-slider-group input[type="range"]::-webkit-slider-thumb {
+        width: 26px;
+        height: 26px;
+    }
+    .ol-slider-group input[type="range"]::-moz-range-thumb {
+        width: 26px;
+        height: 26px;
+    }
+}
 
 /* Temp: blauw (koud) → groen (optimaal) → geel → rood (te warm) */
-#ol-temp { background: linear-gradient(in oklch to right,
+#ol-temp { background: linear-gradient(in oklch to top,
     oklch(0.653 0.098 251) 49%, oklch(0.748 0.133 148) 58.6%,
     oklch(0.748 0.133 148) 71.3%, oklch(0.866 0.130 72.5) 77.7%,
     oklch(0.566 0.142 26.5) 85%); }
 #ol-temp::-webkit-slider-runnable-track { background: transparent; }
 #ol-temp::-moz-range-track { background: transparent; }
 
-/* Diepte (0–1000m): rood → geel → groen */
-#ol-pres { background: linear-gradient(in oklch to right,
+/* Diepte (0–1000m): groen (diep) onderaan → rood (oppervlak) bovenaan; slider omgekeerd (direction: ltr) */
+#ol-pres { direction: ltr; background: linear-gradient(in oklch to bottom,
     oklch(0.566 0.142 26.5) 20%, oklch(0.866 0.130 72.5) 35%,
     oklch(0.748 0.133 148) 50%); }
 #ol-pres::-webkit-slider-runnable-track { background: transparent; }
 #ol-pres::-moz-range-track { background: transparent; }
 
 /* pH (0–14): rood → groen → rood */
-#ol-ph { background: linear-gradient(in oklch to right,
+#ol-ph { background: linear-gradient(in oklch to top,
     oklch(0.566 0.142 26.5) 57.1%, oklch(0.866 0.130 72.5) 64.3%,
     oklch(0.748 0.133 148) 71.4%, oklch(0.748 0.133 148) 78.6%,
     oklch(0.866 0.130 72.5) 85.7%, oklch(0.566 0.142 26.5) 92%); }
@@ -428,7 +457,7 @@ canvas#ol-canvas {
 #ol-ph::-moz-range-track { background: transparent; }
 
 /* Elec (0–3 kJ): rood → groen → rood */
-#ol-elec { background: linear-gradient(in oklch to right,
+#ol-elec { background: linear-gradient(in oklch to top,
     oklch(0.566 0.142 26.5) 60%, oklch(0.866 0.130 72.5) 66.7%,
     oklch(0.748 0.133 148) 70%, oklch(0.748 0.133 148) 73.3%,
     oklch(0.866 0.130 72.5) 80%, oklch(0.566 0.142 26.5) 87%); }
@@ -471,24 +500,24 @@ function buildDOM() {
         </div>
         <div id="ol-controls">
             <div class="ol-slider-group">
+                <label>${t.depth}</label>
+                <span class="ol-val" id="ol-pres-val">1m</span>
+                <div class="ol-slider-wrap"><input type="range" id="ol-pres" min="0" max="1000" value="1" step="1" /></div>
+            </div>
+            <div class="ol-slider-group">
                 <label>${t.temp}</label>
-                <input type="range" id="ol-temp" min="3" max="160" value="20" step="1" />
                 <span class="ol-val" id="ol-temp-val">20°C</span>
+                <div class="ol-slider-wrap"><input type="range" id="ol-temp" min="3" max="160" value="20" step="1" /></div>
             </div>
             <div class="ol-slider-group">
                 <label>${t.ph}</label>
-                <input type="range" id="ol-ph" min="0" max="14" value="7" step="0.1" />
                 <span class="ol-val" id="ol-ph-val">7.0</span>
-            </div>
-            <div class="ol-slider-group">
-                <label>${t.depth}</label>
-                <input type="range" id="ol-pres" min="0" max="1000" value="1" step="1" />
-                <span class="ol-val" id="ol-pres-val">1m</span>
+                <div class="ol-slider-wrap"><input type="range" id="ol-ph" min="0" max="14" value="7" step="0.1" /></div>
             </div>
             <div class="ol-slider-group">
                 <label>${t.electricity}</label>
-                <input type="range" id="ol-elec" min="0" max="3" value="1.02" step="0.01" />
                 <span class="ol-val" id="ol-elec-val">1.02</span>
+                <div class="ol-slider-wrap"><input type="range" id="ol-elec" min="0" max="3" value="1.02" step="0.01" /></div>
             </div>
         </div>
     `;
