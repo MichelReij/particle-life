@@ -454,6 +454,20 @@ impl ParticleLifeEngine {
     }
 
     #[wasm_bindgen]
+    pub fn set_uv(&mut self, uv: f32) {
+        self.simulation_params.apply_uv(uv);
+    }
+
+    #[wasm_bindgen]
+    pub fn get_hypothesis(&self) -> String {
+        if self.simulation_params.is_wlp {
+            "wlp".to_string()
+        } else {
+            "htv".to_string()
+        }
+    }
+
+    #[wasm_bindgen]
     pub fn set_particle_opacity(&mut self, opacity: f32) {
         self.particle_system.particle_opacity = opacity.clamp(0.0, 1.0);
     }

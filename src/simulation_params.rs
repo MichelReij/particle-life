@@ -78,6 +78,14 @@ pub struct SimulationParams {
 
     // Cached base friction from temperature (before pressure modifier is applied)
     pub base_friction: f32,
+
+    // Active hypothesis: false = HTV (Hydrothermal Vents), true = WLP (Warm Little Ponds)
+    // Derived from pressure_level: WLP when pressure < 20m equivalent
+    pub is_wlp: bool,
+
+    // UV level for WLP mode (replaces pH as the 3rd environmental slider)
+    // UV-index scale 0–11
+    pub uv_level: f32,
 }
 
 impl SimulationParams {
@@ -145,6 +153,9 @@ impl SimulationParams {
             electrical_activity_level: 0.0,
 
             base_friction: 0.1,
+
+            is_wlp: false,
+            uv_level: 5.5, // Mid UV-index as default
         }
     }
 
@@ -332,8 +343,16 @@ impl SimulationParams {
     // These functions handle the complex mappings from user-friendly parameters
     // to internal simulation parameters, used by both WASM and native
 
-    // Set temperature and update all temperature-related simulation parameters
+    // Set temperature — dispatches to HTV or WLP variant based on active hypothesis
     pub fn apply_temperature(&mut self, temp: f32) {
+        if self.is_wlp {
+            self.apply_temperature_wlp(temp);
+        } else {
+            self.apply_temperature_htv(temp);
+        }
+    }
+
+    fn apply_temperature_htv(&mut self, temp: f32) {
         // Clamp temperature to valid range (3°C to 160°C)
         let clamped_temp = temp.max(3.0).min(160.0);
 
@@ -350,7 +369,7 @@ impl SimulationParams {
         let friction = 0.98 * (-4.6 * t).exp();
         self.base_friction = friction;
         // Apply pressure modifier so extreme depth also disrupts particle order
-        self.friction = friction * self.pressure_friction_modifier();
+        self.friction = friction * self.pressure_friction_modifier_htv();
 
         // 3. Update background color using HSL: temp [3, 160] → hue [200°, -10°]
         let (r, g, b) = Self::temperature_to_background_color(clamped_temp);
@@ -359,112 +378,148 @@ impl SimulationParams {
         self.background_color_b = b;
     }
 
+    // WLP: temp [10, 80°C], optimum 40–60°C (warm tidal pools)
+    fn apply_temperature_wlp(&mut self, temp: f32) {
+        let clamped_temp = temp.max(10.0).min(80.0);
+
+        // Drift: mild convection in shallow pools, much less than deep vents
+        let drift = -((clamped_temp - 10.0) * 20.0) / 70.0;
+        self.drift_x_per_second = drift;
+
+        // Friction: drops less aggressively — life in pools needs moderate viscosity
+        // At 10°C → ~0.90  |  40°C → ~0.55  |  80°C → ~0.20
+        let normalized_temp = (clamped_temp - 10.0) / 70.0;
+        let t = normalized_temp * normalized_temp;
+        let friction = 0.92 * (-3.5 * t).exp();
+        self.base_friction = friction;
+        self.friction = friction; // No pressure modifier in WLP
+
+        // Background: warmer blues/greens for sunlit surface pools
+        let (r, g, b) = Self::temperature_to_background_color_wlp(clamped_temp);
+        self.background_color_r = r;
+        self.background_color_g = g;
+        self.background_color_b = b;
+    }
+
+    // Set pH (HTV only) or UV (WLP) — dispatches based on active hypothesis
+    pub fn apply_ph(&mut self, ph: f32) {
+        self.ph = ph.max(0.0).min(14.0);
+        if !self.is_wlp {
+            self.recompute_cross_dependencies_htv();
+        }
+    }
+
+    pub fn apply_uv(&mut self, uv: f32) {
+        self.uv_level = uv.max(0.0).min(11.0);
+        if self.is_wlp {
+            self.recompute_cross_dependencies_wlp();
+        }
+    }
+
     // Set pressure and update all pressure-related simulation parameters
     pub fn apply_pressure(&mut self, pressure: f32) {
-        // Clamp pressure to valid range (0 to 1000 bar = ~10,000m depth)
         let clamped_pressure = pressure.max(0.0).min(1000.0);
         self.pressure_level = clamped_pressure;
 
-        // 1. Update force scale: pressure [0, 1000] → force_scale [100, 500]
+        // Determine active hypothesis: WLP when depth < 20m equivalent
+        self.is_wlp = clamped_pressure < 20.0;
+
+        if self.is_wlp {
+            self.apply_pressure_wlp(clamped_pressure);
+        } else {
+            self.apply_pressure_htv(clamped_pressure);
+        }
+    }
+
+    fn apply_pressure_htv(&mut self, clamped_pressure: f32) {
+        // force scale: pressure [0, 1000] → force_scale [100, 500]
         let force_scale = 100.0 + (clamped_pressure * 400.0) / 1000.0;
         self.force_scale = force_scale;
 
-        // 2. Update rSmooth: exponential mapping pressure [0, 1000] → rSmooth [20, 0.1]
+        // rSmooth: exponential [0, 1000] → [20, 0.1]
         let normalized_pressure = clamped_pressure / 1000.0;
         let r_smooth = 20.0 * (-5.3 * normalized_pressure).exp();
         self.r_smooth = r_smooth;
 
-        // Pressure also modifies friction — extreme depths drive friction toward chaos
-        self.friction = self.base_friction * self.pressure_friction_modifier();
+        // Pressure modifies friction — extreme depths drive friction toward chaos
+        self.friction = self.base_friction * self.pressure_friction_modifier_htv();
 
-        self.recompute_cross_dependencies();
+        self.recompute_cross_dependencies_htv();
     }
 
-    // Set pH and update all pH-related simulation parameters
-    // pH optimum for life (hydrothermal vent theory): ~10 (basic)
-    // Response curve: asymmetric Gaussian centred on 10, σ=3
-    pub fn apply_ph(&mut self, ph: f32) {
-        self.ph = ph.max(0.0).min(14.0);
-        self.recompute_cross_dependencies();
+    fn apply_pressure_wlp(&mut self, clamped_pressure: f32) {
+        // Shallow tidal pools: low pressure, moderate force scale
+        // pressure [0, 20] → force_scale [200, 250] (narrow range, gentle)
+        let normalized = clamped_pressure / 20.0;
+        self.force_scale = 200.0 + normalized * 50.0;
+
+        // rSmooth: tidal pools have moderate interaction radius
+        self.r_smooth = 8.0 - normalized * 3.0; // 8.0 at surface → 5.0 at 20m
+
+        // Friction stays close to base friction (no chaos from pressure in shallow pools)
+        self.friction = self.base_friction;
+
+        self.recompute_cross_dependencies_wlp();
     }
 
     // Set electrical activity and update all electrical-related simulation parameters
     pub fn apply_electrical_activity(&mut self, electrical_activity: f32) {
-        // Clamp electrical activity to valid range (0 to 3)
         let clamped_electrical = electrical_activity.max(0.0).min(3.0);
         self.electrical_activity_level = clamped_electrical;
 
-        // Update inter-type attraction scale: cubic mapping [0, 3] → interTypeAttractionScale [-1.0, 3.0]
         let normalized_electrical = clamped_electrical / 3.0;
         let cubic_value = normalized_electrical * normalized_electrical * normalized_electrical;
-        let inter_type_attraction_scale = -1.0 + cubic_value * 4.0;
-        self.inter_type_attraction_scale = inter_type_attraction_scale;
+        self.inter_type_attraction_scale = -1.0 + cubic_value * 4.0;
 
-        // Update lightning parameters based on electrical activity
-        // Lightning frequency: 0 at min activity, 1.0 at max activity
         self.lightning_frequency = normalized_electrical;
-
-        // Lightning intensity: 0.5 at min activity, 2.0 at max activity
         self.lightning_intensity = 0.5 + (normalized_electrical * 1.5);
-
-        // Lightning duration: 0.3 at min activity, 0.8 at max activity
         self.lightning_duration = 0.3 + (normalized_electrical * 0.5);
 
-        // Cross-dependency: electrical noise reduces interaction radius
-        self.recompute_cross_dependencies();
+        if self.is_wlp {
+            self.recompute_cross_dependencies_wlp();
+        } else {
+            self.recompute_cross_dependencies_htv();
+        }
     }
 
-    // Pressure friction modifier: Gaussian centred at 350 bar (σ=150).
-    // Returns 1.0 at optimal pressure, down to ~0.5 at surface (0 bar) or extreme depth (1000 bar).
-    // Low friction → chaos; this makes pressure a second driver of disorder.
-    fn pressure_friction_modifier(&self) -> f32 {
+    // HTV: Pressure friction modifier — Gaussian centred at 350 bar (σ=150).
+    fn pressure_friction_modifier_htv(&self) -> f32 {
         let pressure_quality =
             (-(self.pressure_level - 350.0).powi(2) / (2.0 * 150.0_f32.powi(2))).exp();
-        // modifier ∈ [0.5, 1.0]: optimal pressure preserves friction, extremes halve it
         0.5 + 0.5 * pressure_quality
     }
 
-    // Recompute parameters that depend on multiple sliders simultaneously.
-    // Called by apply_ph, apply_pressure, and apply_electrical_activity.
-    //
-    // Cross-dependencies (what makes finding the optimum hard):
-    //   inter_type_radius_scale  ← pH (positive) × electrical penalty (negative)
-    //   lenia_growth_mu          ← pressure (Gaussian peak ~350 bar) × pH quality
-    //   lenia_kernel_radius      ← pH quality only
-    //   lenia_growth_sigma       ← inverse pH quality (tight at pH 10, loose at extremes)
-    fn recompute_cross_dependencies(&mut self) {
-        // pH quality: TIGHT Gaussian, σ≈2.83 (variance=8), centred on pH 10
-        // pH 10 → q = 1.0  |  pH 7 → q ≈ 0.32  |  pH 14 → q ≈ 0.14  |  pH 0 → q ≈ 0.000003
-        // Neutral pH (7) is mediocre, extreme pH values are genuinely chaotic
+    // HTV cross-dependencies: pH + pressure + electrical drive Lenia and interaction radius.
+    fn recompute_cross_dependencies_htv(&mut self) {
         let ph_quality = (-(self.ph - 10.0).powi(2) / 8.0).exp();
-
-        // Electrical noise penalty on long-range interaction radius
-        // Max penalty at electrical=3: radius is reduced by 65%
         let elec_normalized = self.electrical_activity_level / 3.0;
         let elec_radius_penalty = 1.0 - 0.65 * elec_normalized;
-
-        // inter_type_radius_scale: pH drives it up, electrical noise drives it down
-        // At all-max (pH=14, elec=3): (0.1 + 0.14*1.9) * 0.35 ≈ 0.13  →  near-zero structure
-        // At optimal (pH=10, elec=0): (0.1 + 1.9) * 1.0 = 2.0  →  rich cross-type interaction
         self.inter_type_radius_scale = (0.1 + ph_quality * 1.9) * elec_radius_penalty;
 
-        // Pressure quality: TIGHT Gaussian, σ=150 bar, centred on 350 bar (~3500 m depth)
-        // 0 bar → q ≈ 0.07  |  350 bar → q = 1.0  |  1000 bar → q ≈ 0.0001
         let pressure_quality =
             (-(self.pressure_level - 350.0).powi(2) / (2.0 * 150.0_f32.powi(2))).exp();
-
-        // lenia_growth_mu: requires BOTH right pressure (~350 bar) AND right pH (~10) for maximum
         self.lenia_growth_mu = (0.05 + pressure_quality * 0.10) * (0.5 + 0.5 * ph_quality);
-
-        // lenia_kernel_radius: purely from pH — at optimal pH, Lenia interactions reach far
         self.lenia_kernel_radius = 30.0 + ph_quality * 70.0;
 
-        // lenia_growth_sigma: chaos when EITHER pH OR pressure is off-optimal
-        // Uses max() so that getting one wrong is enough to disrupt Lenia growth
-        let ph_chaos = 1.0 - ph_quality;
-        let pressure_chaos = 1.0 - pressure_quality;
-        let combined_chaos = ph_chaos.max(pressure_chaos);
-        // Range: 0.02 (fully optimal) → 0.16 (fully chaotic)
+        let combined_chaos = (1.0 - ph_quality).max(1.0 - pressure_quality);
+        self.lenia_growth_sigma = 0.02 + combined_chaos * 0.14;
+    }
+
+    // WLP cross-dependencies: UV replaces pH as the 3rd driver.
+    // Optimum UV for early life: ~6 (energetic enough, not yet DNA-damaging)
+    fn recompute_cross_dependencies_wlp(&mut self) {
+        // UV quality: Gaussian centred on UV 6, σ²=4
+        let uv_quality = (-(self.uv_level - 6.0).powi(2) / 4.0).exp();
+        let elec_normalized = self.electrical_activity_level / 3.0;
+        let elec_radius_penalty = 1.0 - 0.65 * elec_normalized;
+        self.inter_type_radius_scale = (0.1 + uv_quality * 1.9) * elec_radius_penalty;
+
+        // Lenia in shallow pools: UV + electrical drive growth
+        // Pressure quality is uniform in WLP (shallow = low pressure variance)
+        self.lenia_growth_mu = 0.05 + uv_quality * 0.12;
+        self.lenia_kernel_radius = 25.0 + uv_quality * 55.0;
+
+        let combined_chaos = (1.0 - uv_quality).max(elec_normalized * 0.5);
         self.lenia_growth_sigma = 0.02 + combined_chaos * 0.14;
     }
 
@@ -516,16 +571,23 @@ impl SimulationParams {
         self.viewport_center_y = clamped_offset_y + (viewport_height / 2.0);
     }
 
-    // Temperature-based background color mapping using standard HSL (static helper)
+    // HTV: temperature background — deep blue (cold) to red (hot)
     fn temperature_to_background_color(temp: f32) -> (f32, f32, f32) {
-        // Hue: 220 (blauw) → 0 (rood)
-        // Bereikt max blauw al bij 80°C, max rood bij 140°C
-        // Saturation en lightness zijn constant
         const S: f32 = 33.0;
         const L: f32 = 77.0;
         let hue_temp = temp.max(80.0).min(140.0);
         let normalized_hue = (hue_temp - 80.0) / (140.0 - 80.0);
         let hue = 220.0 + normalized_hue * (0.0 - 220.0); // 220 → 0
+        crate::buffer_utils::hsl_to_rgb(hue, S, L)
+    }
+
+    // WLP: temperature background — cyan/teal (cool pools) to warm amber (hot pools)
+    fn temperature_to_background_color_wlp(temp: f32) -> (f32, f32, f32) {
+        const S: f32 = 40.0;
+        const L: f32 = 80.0;
+        let hue_temp = temp.max(10.0).min(80.0);
+        let normalized_hue = (hue_temp - 10.0) / 70.0;
+        let hue = 185.0 + normalized_hue * (30.0 - 185.0); // cyan (185) → amber (30)
         crate::buffer_utils::hsl_to_rgb(hue, S, L)
     }
 

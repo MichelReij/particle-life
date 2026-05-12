@@ -28,6 +28,7 @@ const I18N: Record<
         playAnyway: string;
         temp: string;
         ph: string;
+        uv: string;
         depth: string;
         electricity: string;
     }
@@ -43,6 +44,7 @@ const I18N: Record<
         playAnyway: "Starten",
         temp: "Temperatuur",
         ph: "pH",
+        uv: "UV",
         depth: "Diepte (druk)",
         electricity: "Elektriciteit",
     },
@@ -57,6 +59,7 @@ const I18N: Record<
         playAnyway: "Play anyway",
         temp: "Temperature",
         ph: "pH",
+        uv: "UV",
         depth: "Sea depth",
         electricity: "Electricity",
     },
@@ -71,6 +74,7 @@ const I18N: Record<
         playAnyway: "Démarrer quand même",
         temp: "Température",
         ph: "pH",
+        uv: "UV",
         depth: "Profondeur",
         electricity: "Électricité",
     },
@@ -120,10 +124,13 @@ const SLIDER_STOPS: Record<string, Stop[]> = {
         [100, H_RED],
     ],
     "ol-pres": [
-        [0, H_RED],
-        [20.0, H_RED],
-        [35.0, H_YELLOW],
-        [50.0, H_GREEN],
+        [0, H_GREEN], // 0m — WLP optimum
+        [2.0, H_GREEN], // 20m — WLP grens
+        [5.0, H_YELLOW],
+        [15.0, H_RED], // 150m — diepste rood
+        [25.0, H_RED],
+        [38.0, H_YELLOW],
+        [50.0, H_GREEN], // 500m — HTV zone
         [100, H_GREEN],
     ],
     "ol-ph": [
@@ -146,10 +153,22 @@ const SLIDER_STOPS: Record<string, Stop[]> = {
         [87.0, H_RED],
         [100, H_RED],
     ],
+    // UV-index 0–11: UV 0-3 safe (green), 4-6 moderate (yellow), 7-8 high (orange), 9-11 extreme (red)
+    // Optimum for early life ~5-7 (energetic but not destructive)
+    "ol-ph-wlp": [
+        [0, H_GREEN],
+        [27.0, H_GREEN], // UV 3
+        [45.0, H_YELLOW], // UV 5
+        [54.5, H_GREEN], // UV 6 optimum
+        [63.5, H_YELLOW], // UV 7
+        [72.5, H_RED], // UV 8
+        [100, H_RED],
+    ],
 };
 
-function updateThumbColor(slider: HTMLInputElement) {
-    const stops = SLIDER_STOPS[slider.id];
+function updateThumbColor(slider: HTMLInputElement, stopsKey?: string) {
+    const key = stopsKey ?? slider.id;
+    const stops = SLIDER_STOPS[key];
     if (!stops) return;
     const pct =
         ((parseFloat(slider.value) - parseFloat(slider.min)) /
@@ -441,9 +460,12 @@ canvas#ol-canvas {
 #ol-temp::-webkit-slider-runnable-track { background: transparent; }
 #ol-temp::-moz-range-track { background: transparent; }
 
-/* Diepte (0–1000m): groen (diep) onderaan → rood (oppervlak) bovenaan; slider omgekeerd (direction: ltr) */
+/* Diepte (0–1000m): twee groene zones (0–20m = WLP, 400–1000m = HTV), rood/geel daartussen */
 #ol-pres { direction: ltr; background: linear-gradient(in oklch to bottom,
-    oklch(0.566 0.142 26.5) 20%, oklch(0.866 0.130 72.5) 35%,
+    oklch(0.748 0.133 148) 2%,
+    oklch(0.866 0.130 72.5) 5%,
+    oklch(0.566 0.142 26.5) 15%, oklch(0.566 0.142 26.5) 25%,
+    oklch(0.866 0.130 72.5) 38%,
     oklch(0.748 0.133 148) 50%); }
 #ol-pres::-webkit-slider-runnable-track { background: transparent; }
 #ol-pres::-moz-range-track { background: transparent; }
@@ -529,6 +551,7 @@ class EmbedApp {
     private animationId: number | null = null;
     private engineBusy = false;
     private lastTime = 0;
+    private activeHypothesis: "htv" | "wlp" = "htv";
 
     private zoom = 1.0;
     private panX = WORLD_CENTER_X;
@@ -699,7 +722,12 @@ class EmbedApp {
             "ol-ph-val",
             (v) => v.toFixed(1),
             (v) => {
-                if (this.engine && !this.engineBusy) this.engine.set_ph(v);
+                if (!this.engine || this.engineBusy) return;
+                if (this.activeHypothesis === "wlp") {
+                    this.engine.set_uv(v);
+                } else {
+                    this.engine.set_ph(v);
+                }
             },
         );
 
@@ -711,6 +739,7 @@ class EmbedApp {
                 if (this.engine && !this.engineBusy) {
                     this.engine.set_pressure(v);
                     this.engine.set_particle_count_from_pressure(v);
+                    this.applyHypothesis(v < 20 ? "wlp" : "htv");
                 }
             },
         );
@@ -724,6 +753,51 @@ class EmbedApp {
                     this.engine.set_electrical_activity(v);
             },
         );
+    }
+
+    private applyHypothesis(hypothesis: "htv" | "wlp") {
+        if (hypothesis === this.activeHypothesis) return;
+        this.activeHypothesis = hypothesis;
+
+        const t = I18N[getLang()];
+        const label = document.querySelector(
+            "#ol-controls .ol-slider-group:nth-child(2) label",
+        );
+        const slider = document.getElementById(
+            "ol-ph",
+        ) as HTMLInputElement | null;
+        const val = document.getElementById("ol-ph-val");
+
+        if (hypothesis === "wlp") {
+            if (label) label.textContent = t.uv;
+            if (slider) {
+                slider.min = "0";
+                slider.max = "11";
+                slider.step = "0.1";
+            }
+            if (val)
+                val.textContent = slider
+                    ? parseFloat(slider.value).toFixed(1) + " UV"
+                    : "–";
+        } else {
+            if (label) label.textContent = t.ph;
+            if (slider) {
+                slider.min = "0";
+                slider.max = "14";
+                slider.step = "0.1";
+            }
+            if (val)
+                val.textContent = slider
+                    ? parseFloat(slider.value).toFixed(1)
+                    : "–";
+        }
+
+        // Re-apply slider stops gradient for the new mode
+        if (slider)
+            updateThumbColor(
+                slider,
+                hypothesis === "wlp" ? "ol-ph-wlp" : "ol-ph",
+            );
     }
 
     private applyZoomPan() {
