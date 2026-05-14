@@ -21,6 +21,7 @@ bytemuck = { version = "1.0", features = ["derive"] }
 futures = "0.3"
 # hsluv removed — replaced with standard HSL (richer, more dramatic colours)
 rand = { version = "0.8", features = ["small_rng"] }
+palette = { version = "0.7", default-features = false, features = ["std"] }
 raw-window-handle = "0.6"
 fundsp = { version = "0.23", default-features = false, features = ["std"] }
 

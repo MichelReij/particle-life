@@ -10,6 +10,13 @@ import {
     ZOOM_MIN,
     ZOOM_MAX,
 } from "./config";
+import {
+    OKLCH_L,
+    OKLCH_C,
+    H_RED,
+    WLP_DEPTH_THRESHOLD,
+    SLIDERS,
+} from "./gen/life_params";
 
 const WORLD_CENTER_X = VIRTUAL_WORLD_WIDTH / 2;
 const WORLD_CENTER_Y = VIRTUAL_WORLD_HEIGHT / 2;
@@ -83,15 +90,6 @@ const I18N: Record<
 // Gradient stop: [percentage 0-100, H] — L and C are constant across all sliders
 type Stop = [number, number];
 
-const OKLCH_L = 0.72; // lightness
-const OKLCH_C = 0.13; // chroma
-
-// Hue anchors in OKLCH
-const H_RED = 26.5;
-const H_YELLOW = 72.5;
-const H_GREEN = 148.0;
-const H_BLUE = 251.0;
-
 function gradientColor(pct: number, stops: Stop[]): string {
     if (pct <= stops[0][0])
         return `oklch(${OKLCH_L} ${OKLCH_C} ${stops[0][1]})`;
@@ -112,58 +110,16 @@ function gradientColor(pct: number, stops: Stop[]): string {
     return `oklch(${OKLCH_L} ${OKLCH_C} ${H_RED})`;
 }
 
-// Stops per slider: [percentage, H] — only hue varies, L and C are constant
+// Slider stops indexed by slider-id: sourced from generated life_params.ts
+// SLIDERS[0]=depth, [1]=temp, [2]=pH/UV, [3]=elec
 const SLIDER_STOPS: Record<string, Stop[]> = {
-    "ol-temp": [
-        [0, H_BLUE],
-        [49.0, H_BLUE],
-        [58.6, H_GREEN],
-        [71.3, H_GREEN],
-        [77.7, H_YELLOW],
-        [85.0, H_RED],
-        [100, H_RED],
-    ],
-    "ol-pres": [
-        [0, H_GREEN], // 0m — WLP optimum
-        [2.0, H_GREEN], // 20m — WLP grens
-        [5.0, H_YELLOW],
-        [15.0, H_RED], // 150m — diepste rood
-        [25.0, H_RED],
-        [38.0, H_YELLOW],
-        [50.0, H_GREEN], // 500m — HTV zone
-        [100, H_GREEN],
-    ],
-    "ol-ph": [
-        [0, H_RED],
-        [57.1, H_RED],
-        [64.3, H_YELLOW],
-        [71.4, H_GREEN],
-        [78.6, H_GREEN],
-        [85.7, H_YELLOW],
-        [92.0, H_RED],
-        [100, H_RED],
-    ],
-    "ol-elec": [
-        [0, H_RED],
-        [60.0, H_RED],
-        [66.7, H_YELLOW],
-        [70.0, H_GREEN],
-        [73.3, H_GREEN],
-        [80.0, H_YELLOW],
-        [87.0, H_RED],
-        [100, H_RED],
-    ],
-    // UV-index 0–11: UV 0-3 safe (green), 4-6 moderate (yellow), 7-8 high (orange), 9-11 extreme (red)
-    // Optimum for early life ~5-7 (energetic but not destructive)
-    "ol-ph-wlp": [
-        [0, H_GREEN],
-        [27.0, H_GREEN], // UV 3
-        [45.0, H_YELLOW], // UV 5
-        [54.5, H_GREEN], // UV 6 optimum
-        [63.5, H_YELLOW], // UV 7
-        [72.5, H_RED], // UV 8
-        [100, H_RED],
-    ],
+    "ol-pres":    SLIDERS[0].htv.stops as Stop[],
+    "ol-temp":    SLIDERS[1].htv.stops as Stop[],
+    "ol-temp-wlp": SLIDERS[1].wlp.stops as Stop[],
+    "ol-ph":      SLIDERS[2].htv.stops as Stop[],
+    "ol-ph-wlp":  SLIDERS[2].wlp.stops as Stop[],
+    "ol-elec":    SLIDERS[3].htv.stops as Stop[],
+    "ol-elec-wlp": SLIDERS[3].wlp.stops as Stop[],
 };
 
 function updateThumbColor(slider: HTMLInputElement, stopsKey?: string) {
@@ -397,7 +353,7 @@ canvas#ol-canvas {
 /* Vertical slider via writing-mode — native vertical, height = track length */
 .ol-slider-group .ol-slider-wrap {
     order: 1;
-    width: 28px;
+    width: 34px;
     height: 240px;
     display: flex;
     align-items: center;
@@ -408,9 +364,10 @@ canvas#ol-canvas {
     appearance: none;
     writing-mode: vertical-lr;
     direction: rtl;
-    width: 6px;
+    width: 12px;
     height: 240px;
-    border-radius: 3px;
+    border-radius: 6px;
+    border: 4px solid #000C;
     outline: none;
     cursor: pointer;
     margin: 0;
@@ -421,7 +378,7 @@ canvas#ol-canvas {
     height: 16px;
     border-radius: 50%;
     background: var(--thumb-color, #4aaff0);
-    border: none;
+    border: 4px solid #000C;
     cursor: pointer;
     box-shadow: 0 1px 3px rgba(0,0,0,0.5);
 }
@@ -430,7 +387,7 @@ canvas#ol-canvas {
     height: 16px;
     border-radius: 50%;
     background: var(--thumb-color, #4aaff0);
-    border: none;
+    border: 4px solid #000C;
     cursor: pointer;
     box-shadow: 0 1px 3px rgba(0,0,0,0.5);
 }
@@ -452,37 +409,25 @@ canvas#ol-canvas {
     }
 }
 
-/* Temp: blauw (koud) → groen (optimaal) → geel → rood (te warm) */
-#ol-temp { background: linear-gradient(in oklch to top,
-    oklch(0.653 0.098 251) 49%, oklch(0.748 0.133 148) 58.6%,
-    oklch(0.748 0.133 148) 71.3%, oklch(0.866 0.130 72.5) 77.7%,
-    oklch(0.566 0.142 26.5) 85%); }
+/* Temp HTV */
+#ol-temp { background: ${SLIDERS[1].htv.gradient}; }
 #ol-temp::-webkit-slider-runnable-track { background: transparent; }
 #ol-temp::-moz-range-track { background: transparent; }
 
-/* Diepte (0–1000m): twee groene zones (0–20m = WLP, 400–1000m = HTV), rood/geel daartussen */
-#ol-pres { direction: ltr; background: linear-gradient(in oklch to bottom,
-    oklch(0.748 0.133 148) 2%,
-    oklch(0.866 0.130 72.5) 5%,
-    oklch(0.566 0.142 26.5) 15%, oklch(0.566 0.142 26.5) 25%,
-    oklch(0.866 0.130 72.5) 38%,
-    oklch(0.748 0.133 148) 50%); }
+/* Diepte — direction:ltr omdat de slider omgekeerd is (0 bovenaan) */
+#ol-pres { direction: ltr; background: ${SLIDERS[0].htv.gradient.replace("to top", "to bottom")}; }
 #ol-pres::-webkit-slider-runnable-track { background: transparent; }
 #ol-pres::-moz-range-track { background: transparent; }
 
-/* pH (0–14): rood → groen → rood */
-#ol-ph { background: linear-gradient(in oklch to top,
-    oklch(0.566 0.142 26.5) 57.1%, oklch(0.866 0.130 72.5) 64.3%,
-    oklch(0.748 0.133 148) 71.4%, oklch(0.748 0.133 148) 78.6%,
-    oklch(0.866 0.130 72.5) 85.7%, oklch(0.566 0.142 26.5) 92%); }
+/* pH HTV */
+#ol-ph { background: ${SLIDERS[2].htv.gradient}; }
+/* UV WLP */
+#ol-ph.wlp { background: ${SLIDERS[2].wlp.gradient}; }
 #ol-ph::-webkit-slider-runnable-track { background: transparent; }
 #ol-ph::-moz-range-track { background: transparent; }
 
-/* Elec (0–3 kJ): rood → groen → rood */
-#ol-elec { background: linear-gradient(in oklch to top,
-    oklch(0.566 0.142 26.5) 60%, oklch(0.866 0.130 72.5) 66.7%,
-    oklch(0.748 0.133 148) 70%, oklch(0.748 0.133 148) 73.3%,
-    oklch(0.866 0.130 72.5) 80%, oklch(0.566 0.142 26.5) 87%); }
+/* Elec */
+#ol-elec { background: ${SLIDERS[3].htv.gradient}; }
 #ol-elec::-webkit-slider-runnable-track { background: transparent; }
 #ol-elec::-moz-range-track { background: transparent; }
 `;
@@ -682,6 +627,7 @@ class EmbedApp {
             valId: string,
             format: (v: number) => string,
             apply: (v: number) => void,
+            stopsKey?: () => string,
         ) => {
             const slider = document.getElementById(
                 id,
@@ -693,7 +639,7 @@ class EmbedApp {
             const update = () => {
                 const v = parseFloat(slider.value);
                 if (display) display.textContent = format(v);
-                updateThumbColor(slider);
+                updateThumbColor(slider, stopsKey ? stopsKey() : undefined);
                 if (display)
                     display.style.color =
                         slider.style.getPropertyValue("--thumb-color");
@@ -715,12 +661,13 @@ class EmbedApp {
                     this.engine.set_rules_lerp_duration(Math.round(dur));
                 }
             },
+            () => (this.activeHypothesis === "wlp" ? "ol-temp-wlp" : "ol-temp"),
         );
 
         wire(
             "ol-ph",
             "ol-ph-val",
-            (v) => v.toFixed(1),
+            (v) => this.activeHypothesis === "wlp" ? v.toFixed(1) + " UV" : v.toFixed(1),
             (v) => {
                 if (!this.engine || this.engineBusy) return;
                 if (this.activeHypothesis === "wlp") {
@@ -729,6 +676,7 @@ class EmbedApp {
                     this.engine.set_ph(v);
                 }
             },
+            () => this.activeHypothesis === "wlp" ? "ol-ph-wlp" : "ol-ph",
         );
 
         wire(
@@ -739,10 +687,21 @@ class EmbedApp {
                 if (this.engine && !this.engineBusy) {
                     this.engine.set_pressure(v);
                     this.engine.set_particle_count_from_pressure(v);
-                    this.applyHypothesis(v < 20 ? "wlp" : "htv");
+                    this.applyHypothesis(v < WLP_DEPTH_THRESHOLD ? "wlp" : "htv");
                 }
             },
         );
+
+        // Clamp depth slider: snap to 0 on blur when value < 50m
+        const presSlider = document.getElementById(
+            "ol-pres",
+        ) as HTMLInputElement | null;
+        presSlider?.addEventListener("blur", () => {
+            if (presSlider && parseFloat(presSlider.value) < 50) {
+                presSlider.value = "0";
+                presSlider.dispatchEvent(new Event("input"));
+            }
+        });
 
         wire(
             "ol-elec",
@@ -760,44 +719,81 @@ class EmbedApp {
         this.activeHypothesis = hypothesis;
 
         const t = I18N[getLang()];
-        const label = document.querySelector(
-            "#ol-controls .ol-slider-group:nth-child(2) label",
+
+        // --- pH / UV slider ---
+        const phLabel = document.querySelector(
+            "#ol-controls .ol-slider-group:nth-child(3) label",
         );
-        const slider = document.getElementById(
+        const phSlider = document.getElementById(
             "ol-ph",
         ) as HTMLInputElement | null;
-        const val = document.getElementById("ol-ph-val");
+        const phVal = document.getElementById("ol-ph-val");
 
-        if (hypothesis === "wlp") {
-            if (label) label.textContent = t.uv;
-            if (slider) {
-                slider.min = "0";
-                slider.max = "11";
-                slider.step = "0.1";
-            }
-            if (val)
-                val.textContent = slider
-                    ? parseFloat(slider.value).toFixed(1) + " UV"
-                    : "–";
-        } else {
-            if (label) label.textContent = t.ph;
-            if (slider) {
-                slider.min = "0";
-                slider.max = "14";
-                slider.step = "0.1";
-            }
-            if (val)
-                val.textContent = slider
-                    ? parseFloat(slider.value).toFixed(1)
-                    : "–";
-        }
+        if (phSlider) {
+            // Normalise position before changing range so the handle doesn't jump
+            const oldMin = parseFloat(phSlider.min);
+            const oldMax = parseFloat(phSlider.max);
+            const normalized =
+                (parseFloat(phSlider.value) - oldMin) / (oldMax - oldMin);
 
-        // Re-apply slider stops gradient for the new mode
-        if (slider)
+            if (hypothesis === "wlp") {
+                phSlider.min = "0";
+                phSlider.max = "11";
+                phSlider.step = "0.1";
+                if (phLabel) phLabel.textContent = t.uv;
+            } else {
+                phSlider.min = "0";
+                phSlider.max = "14";
+                phSlider.step = "0.1";
+                if (phLabel) phLabel.textContent = t.ph;
+            }
+
+            const newMin = parseFloat(phSlider.min);
+            const newMax = parseFloat(phSlider.max);
+            phSlider.value = String(
+                (normalized * (newMax - newMin) + newMin).toFixed(1),
+            );
+
+            const v = parseFloat(phSlider.value);
+            if (phVal)
+                phVal.textContent =
+                    hypothesis === "wlp" ? v.toFixed(1) + " UV" : v.toFixed(1);
+
+            if (hypothesis === "wlp") {
+                phSlider.style.background = SLIDERS[2].wlp.gradient;
+            } else {
+                phSlider.style.background = "";
+            }
             updateThumbColor(
-                slider,
+                phSlider,
                 hypothesis === "wlp" ? "ol-ph-wlp" : "ol-ph",
             );
+        }
+
+        // --- Temperatuur-gradient aanpassen aan optimum hypothese ---
+        const tempSlider = document.getElementById(
+            "ol-temp",
+        ) as HTMLInputElement | null;
+        if (tempSlider) {
+            if (hypothesis === "wlp") {
+                tempSlider.style.background = SLIDERS[1].wlp.gradient;
+            } else {
+                tempSlider.style.background = "";
+            }
+            updateThumbColor(
+                tempSlider,
+                hypothesis === "wlp" ? "ol-temp-wlp" : "ol-temp",
+            );
+            const tempVal = document.getElementById("ol-temp-val");
+            if (tempVal)
+                tempVal.style.color =
+                    tempSlider.style.getPropertyValue("--thumb-color");
+
+            // Achtergrondkleur direct bijwerken zonder te wachten op sliderbeweging
+            if (this.engine && !this.engineBusy) {
+                this.engine.set_temperature(parseFloat(tempSlider.value));
+            }
+        }
     }
 
     private applyZoomPan() {

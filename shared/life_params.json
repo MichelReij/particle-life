@@ -1,0 +1,161 @@
+{
+  "comment": "Single source of truth for all slider parameter definitions. Edit here; run codegen.js to regenerate.",
+  "oklch": {
+    "l": 0.66,
+    "c": 0.13,
+    "h_blue":   251.0,
+    "h_green":  148.0,
+    "h_yellow":  72.5,
+    "h_red":     16.5
+  },
+  "wlp_depth_threshold": 20,
+  "sliders": [
+    {
+      "index": 0,
+      "hypothesis": "DUAL",
+      "min": 0,
+      "max": 1000,
+      "step": 1,
+      "htv": {
+        "labels": { "nl": "Diepte (druk)", "en": "Depth (pressure)", "fr": "Profondeur (pression)" },
+        "units":  { "nl": "m", "en": "m", "fr": "m" },
+        "ranges": [
+          { "min":   0, "max":   20, "color": "green" },
+          { "min":  20, "max":  150, "color": "transition" },
+          { "min": 150, "max":  300, "color": "red" },
+          { "min": 300, "max":  450, "color": "transition" },
+          { "min": 450, "max": 1000, "color": "green" }
+        ],
+        "css_stops": [
+          [   0, "green"],
+          [  20, "green"],
+          [  50, "yellow"],
+          [ 150, "red"],
+          [ 300, "red"],
+          [ 380, "yellow"],
+          [ 500, "green"],
+          [1000, "green"]
+        ]
+      },
+      "wlp": {
+        "labels": { "nl": "Diepte (druk)", "en": "Depth (pressure)", "fr": "Profondeur (pression)" },
+        "units":  { "nl": "m", "en": "m", "fr": "m" },
+        "ranges": [
+          { "min":   0, "max":   20, "color": "green" },
+          { "min":  20, "max":  150, "color": "transition" },
+          { "min": 150, "max":  300, "color": "red" },
+          { "min": 300, "max":  450, "color": "transition" },
+          { "min": 450, "max": 1000, "color": "green" }
+        ],
+        "css_stops": [
+          [   0, "green"],
+          [  20, "green"],
+          [  50, "yellow"],
+          [ 150, "red"],
+          [ 300, "red"],
+          [ 380, "yellow"],
+          [ 500, "green"],
+          [1000, "green"]
+        ]
+      }
+    },
+    {
+      "index": 1,
+      "min": 3,
+      "max": 160,
+      "step": 1,
+      "htv": {
+        "labels": { "nl": "Temperatuur", "en": "Temperature", "fr": "Température" },
+        "units":  { "nl": "°C", "en": "°C", "fr": "°C" },
+        "ranges": [
+          { "min":   3, "max":  80, "color": "blue" },
+          { "min":  80, "max":  95, "color": "transition" },
+          { "min":  95, "max": 115, "color": "green" },
+          { "min": 115, "max": 125, "color": "transition" },
+          { "min": 125, "max": 160, "color": "red" }
+        ]
+      },
+      "wlp": {
+        "labels": { "nl": "Temperatuur", "en": "Temperature", "fr": "Température" },
+        "units":  { "nl": "°C", "en": "°C", "fr": "°C" },
+        "ranges": [
+          { "min":  3, "max":  30, "color": "blue" },
+          { "min": 30, "max":  50, "color": "green" },
+          { "min": 50, "max":  70, "color": "transition" },
+          { "min": 70, "max": 160, "color": "red" }
+        ]
+      }
+    },
+    {
+      "index": 2,
+      "htv": {
+        "min": 0,
+        "max": 14,
+        "step": 0.1,
+        "labels": { "nl": "Zuurtegraad", "en": "Acidity", "fr": "Acidité" },
+        "units":  { "nl": "pH", "en": "pH", "fr": "pH" },
+        "ranges": [
+          { "min":  0.0, "max":  8.0, "color": "red" },
+          { "min":  8.0, "max":  9.0, "color": "transition" },
+          { "min":  9.0, "max": 11.0, "color": "green" },
+          { "min": 11.0, "max": 12.0, "color": "transition" },
+          { "min": 12.0, "max": 14.0, "color": "red" }
+        ]
+      },
+      "wlp": {
+        "min": 0,
+        "max": 11,
+        "step": 0.1,
+        "uv_optimum": 6.0,
+        "uv_sigma_sq": 4.0,
+        "labels": { "nl": "UV", "en": "UV", "fr": "UV" },
+        "units":  { "nl": "UV-index", "en": "UV-index", "fr": "indice UV" },
+        "ranges": [
+          { "min":  0, "max":  4, "color": "red" },
+          { "min":  4, "max":  5, "color": "transition" },
+          { "min":  5, "max":  7, "color": "green" },
+          { "min":  7, "max":  8, "color": "transition" },
+          { "min":  8, "max": 11, "color": "red" }
+        ],
+        "css_stops": [
+          [  0, "red"],
+          [  4, "yellow"],
+          [  6, "green"],
+          [  8, "yellow"],
+          [ 11, "red"]
+        ]
+      }
+    },
+    {
+      "index": 3,
+      "htv": {
+        "min": 0,
+        "max": 3,
+        "step": 0.01,
+        "labels": { "nl": "Elektrische activiteit", "en": "Electrical activity", "fr": "Activité électrique" },
+        "units":  { "nl": "kJ/m²/dag", "en": "kJ/m²/day", "fr": "kJ/m²/jour" },
+        "ranges": [
+          { "min": 0.0, "max": 1.8, "color": "red" },
+          { "min": 1.8, "max": 2.0, "color": "transition" },
+          { "min": 2.0, "max": 2.2, "color": "green" },
+          { "min": 2.2, "max": 2.4, "color": "transition" },
+          { "min": 2.4, "max": 3.0, "color": "red" }
+        ]
+      },
+      "wlp": {
+        "min": 0,
+        "max": 3,
+        "step": 0.01,
+        "labels": { "nl": "Elektrische activiteit", "en": "Electrical activity", "fr": "Activité électrique" },
+        "units":  { "nl": "kJ/m²/dag", "en": "kJ/m²/day", "fr": "kJ/m²/jour" },
+        "ranges": [
+          { "min": 0.0, "max": 1.8, "color": "red" },
+          { "min": 1.8, "max": 2.0, "color": "transition" },
+          { "min": 2.0, "max": 2.2, "color": "green" },
+          { "min": 2.2, "max": 2.4, "color": "transition" },
+          { "min": 2.4, "max": 3.0, "color": "red" }
+        ]
+      }
+    }
+  ]
+}

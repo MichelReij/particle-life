@@ -11,17 +11,20 @@
     "type": "commonjs",
     "main": "src/main.ts",
     "scripts": {
-        "build": "webpack",
+        "codegen": "node shared/codegen.js",
+        "build": "node shared/codegen.js && webpack",
         "build:prod": "webpack --mode production",
         "build:rust": "./build-wasm.sh",
         "start": "webpack serve",
         "dev": "lsof -ti :3000 | xargs kill -9 2>/dev/null; sleep 0.5; webpack serve"
     },
     "dependencies": {
+        "culori": "^4.0.2",
         "typescript": "^4.5.0"
     },
     "devDependencies": {
         "@babel/core": "^7.27.1",
+        "@types/culori": "^4.0.1",
         "@types/node": "^22.15.29",
         "@webgpu/types": "^0.1.60",
         "babel-loader": "^10.0.0",
