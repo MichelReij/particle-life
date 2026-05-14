@@ -27,6 +27,17 @@ pub const FPS_SAMPLE_COUNT: usize = 10; // Number of samples for moving average
 pub const FPS_UPDATE_INTERVAL: f32 = 0.5; // Update interval in seconds
 pub const FPS_CONSOLE_INTERVAL: f32 = 3.0; // Console output interval in seconds
 
+/// Electrical activity green zones per hypothese (kJ/m²/day, schaal 0–3)
+/// HTV: elektromagnetische gradiënten in hydrothermale spleten, optimum 0.9–1.4
+pub const ELEC_GREEN_MIN_HTV: f32 = 0.9;
+pub const ELEC_GREEN_MAX_HTV: f32 = 1.4;
+pub const ELEC_OPTIMUM_HTV: f32 = (ELEC_GREEN_MIN_HTV + ELEC_GREEN_MAX_HTV) / 2.0; // 1.15
+pub const ELEC_SIGMA_SQ_HTV: f32 = 0.09; // σ=0.30 → kwaliteit ≈ 0.5 aan de grenzen van het groene gebied
+
+/// WLP: bliksem en UV-geïnduceerde elektrische activiteit in ondiepe poelen, optimum ~2.0
+pub const ELEC_OPTIMUM_WLP: f32 = 2.0;
+pub const ELEC_SIGMA_SQ_WLP: f32 = 0.09; // zelfde breedte als HTV voor symmetrische groene zones
+
 /// Zoom configuration - maximum 12x zoom capability with direct canvas rendering
 /// The efficient direct-to-canvas pipeline allows for high zoom levels while maintaining quality
 pub const ZOOM_MIN: f32 = 1.0;

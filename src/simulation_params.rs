@@ -467,24 +467,45 @@ impl SimulationParams {
         self.recompute_cross_dependencies_wlp();
     }
 
-    // Set electrical activity and update all electrical-related simulation parameters
+    // Set electrical activity — dispatches naar HTV of WLP variant op basis van actieve hypothese
     pub fn apply_electrical_activity(&mut self, electrical_activity: f32) {
-        let clamped_electrical = electrical_activity.max(0.0).min(3.0);
-        self.electrical_activity_level = clamped_electrical;
-
-        let normalized_electrical = clamped_electrical / 3.0;
-        let cubic_value = normalized_electrical * normalized_electrical * normalized_electrical;
-        self.inter_type_attraction_scale = -1.0 + cubic_value * 4.0;
-
-        self.lightning_frequency = normalized_electrical;
-        self.lightning_intensity = 0.5 + (normalized_electrical * 1.5);
-        self.lightning_duration = 0.3 + (normalized_electrical * 0.5);
-
         if self.is_wlp {
-            self.recompute_cross_dependencies_wlp();
+            self.apply_electrical_activity_wlp(electrical_activity);
         } else {
-            self.recompute_cross_dependencies_htv();
+            self.apply_electrical_activity_htv(electrical_activity);
         }
+    }
+
+    // HTV: elektromagnetische gradiënten in hydrothermale spleten, optimum 0.9–1.4 kJ/m²/dag
+    // Gaussiaanse kwaliteitsfunctie gecentreerd op ELEC_OPTIMUM_HTV (1.15).
+    // Bij optimum: inter_type_attraction_scale=3.0, lightning op maximum.
+    fn apply_electrical_activity_htv(&mut self, electrical_activity: f32) {
+        let clamped = electrical_activity.max(0.0).min(3.0);
+        self.electrical_activity_level = clamped;
+
+        let quality = (-(clamped - ELEC_OPTIMUM_HTV).powi(2) / ELEC_SIGMA_SQ_HTV).exp();
+        self.inter_type_attraction_scale = -1.0 + quality * 4.0;
+        self.lightning_frequency = quality;
+        self.lightning_intensity = 0.5 + quality * 1.5;
+        self.lightning_duration = 0.3 + quality * 0.5;
+
+        self.recompute_cross_dependencies_htv();
+    }
+
+    // WLP: bliksem en UV-geïnduceerde elektrische activiteit, optimum ~2.0 kJ/m²/dag
+    // Gaussiaanse kwaliteitsfunctie gecentreerd op ELEC_OPTIMUM_WLP (2.0).
+    // Symmetrisch met HTV: bij optimum dezelfde secundaire waarden.
+    fn apply_electrical_activity_wlp(&mut self, electrical_activity: f32) {
+        let clamped = electrical_activity.max(0.0).min(3.0);
+        self.electrical_activity_level = clamped;
+
+        let quality = (-(clamped - ELEC_OPTIMUM_WLP).powi(2) / ELEC_SIGMA_SQ_WLP).exp();
+        self.inter_type_attraction_scale = -1.0 + quality * 4.0;
+        self.lightning_frequency = quality;
+        self.lightning_intensity = 0.5 + quality * 1.5;
+        self.lightning_duration = 0.3 + quality * 0.5;
+
+        self.recompute_cross_dependencies_wlp();
     }
 
     // HTV: Pressure friction modifier — Gaussian centred at 350 bar (σ=150).
@@ -495,10 +516,13 @@ impl SimulationParams {
     }
 
     // HTV cross-dependencies: pH + pressure + electrical drive Lenia and interaction radius.
+    // elec_quality: Gaussiaans op ELEC_OPTIMUM_HTV (1.15) — bij optimum penalty=1.0, radius_scale=2.0
     fn recompute_cross_dependencies_htv(&mut self) {
         let ph_quality = (-(self.ph - 10.0).powi(2) / 8.0).exp();
-        let elec_normalized = self.electrical_activity_level / 3.0;
-        let elec_radius_penalty = 1.0 - 0.65 * elec_normalized;
+        let elec_quality =
+            (-(self.electrical_activity_level - ELEC_OPTIMUM_HTV).powi(2) / ELEC_SIGMA_SQ_HTV)
+                .exp();
+        let elec_radius_penalty = 0.5 + 0.5 * elec_quality;
         self.inter_type_radius_scale = (0.1 + ph_quality * 1.9) * elec_radius_penalty;
 
         let pressure_quality =
@@ -511,24 +535,25 @@ impl SimulationParams {
     }
 
     // WLP cross-dependencies: UV vervangt pH als derde driver.
-    // Optimum UV voor vroeg leven: ~6 (energierijk maar nog niet DNA-schadelijk).
-    // Gekalibreerd op HTV-optimum (1000 bar / pH=10 / electrical=2.0):
-    //   lenia_growth_mu=0.05, lenia_kernel_radius=100, lenia_growth_sigma=0.16
+    // Optimum UV: ~6 | Optimum electrical: ELEC_OPTIMUM_WLP (2.0)
+    // Symmetrisch met HTV: bij beide optima identieke secundaire parameterwaarden.
     fn recompute_cross_dependencies_wlp(&mut self) {
         // UV quality: Gaussiaans gecentreerd op UV 6, σ²=4
         let uv_quality = (-(self.uv_level - 6.0).powi(2) / 4.0).exp();
-        let elec_normalized = self.electrical_activity_level / 3.0;
-        let elec_radius_penalty = 1.0 - 0.65 * elec_normalized;
+
+        // elec_quality: Gaussiaans op ELEC_OPTIMUM_WLP (2.0) — bij optimum penalty=1.0, radius_scale=2.0
+        let elec_quality =
+            (-(self.electrical_activity_level - ELEC_OPTIMUM_WLP).powi(2) / ELEC_SIGMA_SQ_WLP)
+                .exp();
+        let elec_radius_penalty = 0.5 + 0.5 * elec_quality;
         self.inter_type_radius_scale = (0.1 + uv_quality * 1.9) * elec_radius_penalty;
 
-        // lenia_growth_mu: bij UV=6 (uv_quality=1) → 0.05 + 0 = 0.05 (= HTV bij 1000 bar)
-        // Slechte UV verhoogt mu (meer chaotische groei); optimale UV = geconcentreerde groei
+        // lenia_growth_mu: bij UV=6 → 0.05 (= HTV bij 1000 bar); slechte UV → hogere mu
         self.lenia_growth_mu = 0.05 + (1.0 - uv_quality) * 0.10;
         self.lenia_kernel_radius = 30.0 + uv_quality * 70.0;
 
-        // combined_chaos: bij electrical=2.0 → (0.667 * 1.5).min(1.0) = 1.0 → sigma=0.16 (= HTV bij 1000 bar)
-        let combined_chaos = (elec_normalized * 1.5).min(1.0);
-        self.lenia_growth_sigma = 0.02 + combined_chaos * 0.14;
+        // combined_chaos = elec_quality: bij electrical=2.0 → 1.0 → sigma=0.16 (= HTV bij 1000 bar)
+        self.lenia_growth_sigma = 0.02 + elec_quality * 0.14;
     }
 
     /// Converteert een lineaire sliderwaarde [ZOOM_MIN, ZOOM_MAX] naar een
