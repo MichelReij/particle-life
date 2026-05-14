@@ -378,23 +378,26 @@ impl SimulationParams {
         self.background_color_b = b;
     }
 
-    // WLP: temp [10, 80°C], optimum 40–60°C (warm tidal pools)
+    // WLP: temp [10, 80°C], optimum ~50°C (warm tidal pools)
+    // Gekalibreerd op HTV: bij 50°C produceert WLP dezelfde friction (≈0.169) als HTV bij 100°C.
+    // Zelfde curve-vorm als HTV (A=0.98, kwadratische normalisatie), ingangsdomein herschaald.
     fn apply_temperature_wlp(&mut self, temp: f32) {
         let clamped_temp = temp.max(10.0).min(80.0);
 
-        // Drift: mild convection in shallow pools, much less than deep vents
-        let drift = -((clamped_temp - 10.0) * 20.0) / 70.0;
+        // Drift: zelfde orde als HTV bij optimum — convectie in ondiepe poelen ook merkbaar
+        // Bij 50°C: -(40 * 65) / 70 ≈ -37.1 px/s (= HTV bij 100°C)
+        let drift = -((clamped_temp - 10.0) * 65.0) / 70.0;
         self.drift_x_per_second = drift;
 
-        // Friction: drops less aggressively — life in pools needs moderate viscosity
-        // At 10°C → ~0.90  |  40°C → ~0.55  |  80°C → ~0.20
+        // Friction: zelfde A en curve-exponent als HTV zodat groene zone overeenkomt
+        // Bij 10°C → ~0.98  |  50°C → ~0.169  |  80°C → ~0.005
         let normalized_temp = (clamped_temp - 10.0) / 70.0;
         let t = normalized_temp * normalized_temp;
-        let friction = 0.92 * (-3.5 * t).exp();
+        let friction = 0.98 * (-5.4 * t).exp();
         self.base_friction = friction;
-        self.friction = friction; // No pressure modifier in WLP
+        self.friction = friction; // WLP: geen drukmodifier
 
-        // Background: warmer blues/greens for sunlit surface pools
+        // Background: warme blauw-groenen voor belicht oppervlaktewater
         let (r, g, b) = Self::temperature_to_background_color_wlp(clamped_temp);
         self.background_color_r = r;
         self.background_color_g = g;
@@ -447,16 +450,20 @@ impl SimulationParams {
         self.recompute_cross_dependencies_htv();
     }
 
+    // WLP: pressure [0, 20 bar], optimum ~10 bar
+    // Gekalibreerd op HTV: bij 10 bar (normalized=0.5) produceert WLP dezelfde
+    // force_scale (240) en r_smooth (≈3.13) als HTV bij 350 bar.
     fn apply_pressure_wlp(&mut self, clamped_pressure: f32) {
-        // Shallow tidal pools: low pressure, moderate force scale
-        // pressure [0, 20] → force_scale [200, 250] (narrow range, gentle)
         let normalized = clamped_pressure / 20.0;
-        self.force_scale = 200.0 + normalized * 50.0;
 
-        // rSmooth: tidal pools have moderate interaction radius
-        self.r_smooth = 8.0 - normalized * 3.0; // 8.0 at surface → 5.0 at 20m
+        // force_scale: bij normalized=0.5 → 220 + 0.5*40 = 240 (= HTV bij 350 bar)
+        self.force_scale = 220.0 + normalized * 40.0;
 
-        // Friction stays close to base friction (no chaos from pressure in shallow pools)
+        // r_smooth: zelfde exponentiële formule als HTV, inputdomein herschaald via factor 0.7
+        // zodat bij normalized=0.5: 20 * exp(-5.3 * 0.35) ≈ 3.13 (= HTV bij 350 bar)
+        self.r_smooth = 20.0 * (-5.3 * normalized * 0.7).exp();
+
+        // Druk in WLP geeft geen frictiechaos — ondiepe poelen zijn stabiel
         self.friction = self.base_friction;
 
         self.recompute_cross_dependencies_wlp();
@@ -505,19 +512,21 @@ impl SimulationParams {
         self.lenia_growth_sigma = 0.02 + combined_chaos * 0.14;
     }
 
-    // WLP cross-dependencies: UV replaces pH as the 3rd driver.
-    // Optimum UV for early life: ~6 (energetic enough, not yet DNA-damaging)
+    // WLP cross-dependencies: UV vervangt pH als derde driver.
+    // Optimum UV voor vroeg leven: ~6 (energierijk maar nog niet DNA-schadelijk).
+    // Gekalibreerd op HTV: bij UV=6 (uv_quality=1) produceert WLP dezelfde Lenia-waarden
+    // als HTV bij pH=10 (ph_quality=1): lenia_growth_mu=0.15, lenia_kernel_radius=100.
     fn recompute_cross_dependencies_wlp(&mut self) {
-        // UV quality: Gaussian centred on UV 6, σ²=4
+        // UV quality: Gaussiaans gecentreerd op UV 6, σ²=4
         let uv_quality = (-(self.uv_level - 6.0).powi(2) / 4.0).exp();
         let elec_normalized = self.electrical_activity_level / 3.0;
         let elec_radius_penalty = 1.0 - 0.65 * elec_normalized;
         self.inter_type_radius_scale = (0.1 + uv_quality * 1.9) * elec_radius_penalty;
 
-        // Lenia in shallow pools: UV + electrical drive growth
-        // Pressure quality is uniform in WLP (shallow = low pressure variance)
-        self.lenia_growth_mu = 0.05 + uv_quality * 0.12;
-        self.lenia_kernel_radius = 25.0 + uv_quality * 55.0;
+        // Lenia: zelfde coëfficiënten als HTV zodat groene zone overeenkomt
+        // Bij UV=6: mu = 0.05 + 0.10 = 0.15, radius = 30 + 70 = 100
+        self.lenia_growth_mu = 0.05 + uv_quality * 0.10;
+        self.lenia_kernel_radius = 30.0 + uv_quality * 70.0;
 
         let combined_chaos = (1.0 - uv_quality).max(elec_normalized * 0.5);
         self.lenia_growth_sigma = 0.02 + combined_chaos * 0.14;
