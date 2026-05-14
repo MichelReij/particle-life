@@ -1430,7 +1430,7 @@ function initializeEnvironmentalSliders(): void {
             const newValue = parseFloat((event.target as HTMLInputElement).value);
             temperature = newValue;
             tempValueDisplay.textContent = newValue.toString();
-            updateThumbColor(tempSlider);
+            updateThumbColor(tempSlider, activeHypothesis === "wlp" ? "ol-temp-wlp" : "tempSlider");
             syncValueColor(tempSlider, "tempValue");
             saveToLocalStorage(STORAGE_KEYS.temperature, newValue);
             updateDriftAndFrictionFromTemperature(newValue);
@@ -1457,7 +1457,7 @@ function initializeEnvironmentalSliders(): void {
             const newValue = parseFloat((event.target as HTMLInputElement).value);
             electricalActivity = newValue;
             elecValueDisplay.textContent = newValue.toFixed(2);
-            updateThumbColor(elecSlider);
+            updateThumbColor(elecSlider, activeHypothesis === "wlp" ? "ol-elec-wlp" : "elecSlider");
             syncValueColor(elecSlider, "elecValue");
             saveToLocalStorage(STORAGE_KEYS.electricalActivity, newValue);
             updateParametersFromElectricalActivity(newValue);
@@ -1482,7 +1482,7 @@ function initializeEnvironmentalSliders(): void {
             const newValue = parseFloat((event.target as HTMLInputElement).value);
             ph = newValue;
             phValueDisplay.textContent = newValue.toFixed(1);
-            updateThumbColor(phSlider);
+            updateThumbColor(phSlider, activeHypothesis === "wlp" ? "ol-ph-wlp" : "phSlider");
             syncValueColor(phSlider, "phValue");
             saveToLocalStorage(STORAGE_KEYS.ph, newValue);
             updateParametersFromPH(newValue);
