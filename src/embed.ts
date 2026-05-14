@@ -10,13 +10,8 @@ import {
     ZOOM_MIN,
     ZOOM_MAX,
 } from "./config";
-import {
-    OKLCH_L,
-    OKLCH_C,
-    H_RED,
-    WLP_DEPTH_THRESHOLD,
-    SLIDERS,
-} from "./gen/life_params";
+import { WLP_DEPTH_THRESHOLD, SLIDERS } from "./gen/life_params";
+import { updateThumbColor } from "./color-utils";
 
 const WORLD_CENTER_X = VIRTUAL_WORLD_WIDTH / 2;
 const WORLD_CENTER_Y = VIRTUAL_WORLD_HEIGHT / 2;
@@ -87,51 +82,9 @@ const I18N: Record<
     },
 };
 
-// Gradient stop: [percentage 0-100, H] — L and C are constant across all sliders
-type Stop = [number, number];
-
-function gradientColor(pct: number, stops: Stop[]): string {
-    if (pct <= stops[0][0])
-        return `oklch(${OKLCH_L} ${OKLCH_C} ${stops[0][1]})`;
-    if (pct >= stops[stops.length - 1][0])
-        return `oklch(${OKLCH_L} ${OKLCH_C} ${stops[stops.length - 1][1]})`;
-    for (let i = 0; i < stops.length - 1; i++) {
-        const [p0, h0] = stops[i];
-        const [p1, h1] = stops[i + 1];
-        if (pct >= p0 && pct <= p1) {
-            const t = (pct - p0) / (p1 - p0);
-            // Shortest-path hue interpolation
-            let dh = h1 - h0;
-            if (dh > 180) dh -= 360;
-            if (dh < -180) dh += 360;
-            return `oklch(${OKLCH_L} ${OKLCH_C} ${(h0 + t * dh).toFixed(1)})`;
-        }
-    }
-    return `oklch(${OKLCH_L} ${OKLCH_C} ${H_RED})`;
-}
-
 // Slider stops indexed by slider-id: sourced from generated life_params.ts
-// SLIDERS[0]=depth, [1]=temp, [2]=pH/UV, [3]=elec
-const SLIDER_STOPS: Record<string, Stop[]> = {
-    "ol-pres":    SLIDERS[0].htv.stops as Stop[],
-    "ol-temp":    SLIDERS[1].htv.stops as Stop[],
-    "ol-temp-wlp": SLIDERS[1].wlp.stops as Stop[],
-    "ol-ph":      SLIDERS[2].htv.stops as Stop[],
-    "ol-ph-wlp":  SLIDERS[2].wlp.stops as Stop[],
-    "ol-elec":    SLIDERS[3].htv.stops as Stop[],
-    "ol-elec-wlp": SLIDERS[3].wlp.stops as Stop[],
-};
-
-function updateThumbColor(slider: HTMLInputElement, stopsKey?: string) {
-    const key = stopsKey ?? slider.id;
-    const stops = SLIDER_STOPS[key];
-    if (!stops) return;
-    const pct =
-        ((parseFloat(slider.value) - parseFloat(slider.min)) /
-            (parseFloat(slider.max) - parseFloat(slider.min))) *
-        100;
-    slider.style.setProperty("--thumb-color", gradientColor(pct, stops));
-}
+// SLIDERS[0]=depth, [1]=temp, [2]=pH/UV, [3]=elec — aangevuld in color-utils.ts
+// ol-pres, ol-temp etc. zijn al geregistreerd; extra aliases hier niet nodig.
 
 function getLang(): Lang {
     const wrap = document.getElementById("ol-wrap");

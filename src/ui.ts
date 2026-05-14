@@ -5,6 +5,7 @@
 // This module handles all HTML/DOM interactions, slider controls, and localStorage
 
 import { SimulationParams, BoundaryMode } from "./particle-life-types";
+import { updateThumbColor, applySliderGradient } from "./color-utils";
 // import { Joy } from "./lib/joy";
 declare var Joy: any; // Temporary fix for Joy library
 import {
@@ -15,7 +16,6 @@ import {
     CANVAS_WIDTH_U32,
     CANVAS_HEIGHT_U32,
 } from "./config";
-
 // Environmental parameters for the UI controls
 let temperature = 20; // Default temperature
 let electricalActivity = 1.02; // Default electrical activity
@@ -1359,22 +1359,19 @@ function initializeEnvironmentalSliders(): void {
     const tempValueDisplay = document.getElementById("tempValue");
 
     if (tempSlider && tempValueDisplay) {
-        temperature = loadFromLocalStorage(
-            STORAGE_KEYS.temperature,
-            temperature,
-        );
+        temperature = loadFromLocalStorage(STORAGE_KEYS.temperature, temperature);
         tempSlider.value = temperature.toString();
         tempValueDisplay.textContent = temperature.toString();
+        applySliderGradient(tempSlider, "tempSlider");
+        updateThumbColor(tempSlider);
 
-        // Apply initial temperature-based parameters on page load
         updateDriftAndFrictionFromTemperature(temperature);
 
         tempSlider.addEventListener("input", (event) => {
-            const newValue = parseFloat(
-                (event.target as HTMLInputElement).value,
-            );
+            const newValue = parseFloat((event.target as HTMLInputElement).value);
             temperature = newValue;
             tempValueDisplay.textContent = newValue.toString();
+            updateThumbColor(tempSlider);
             saveToLocalStorage(STORAGE_KEYS.temperature, newValue);
             updateDriftAndFrictionFromTemperature(newValue);
         });
@@ -1387,22 +1384,19 @@ function initializeEnvironmentalSliders(): void {
     const elecValueDisplay = document.getElementById("elecValue");
 
     if (elecSlider && elecValueDisplay) {
-        electricalActivity = loadFromLocalStorage(
-            STORAGE_KEYS.electricalActivity,
-            electricalActivity,
-        );
+        electricalActivity = loadFromLocalStorage(STORAGE_KEYS.electricalActivity, electricalActivity);
         elecSlider.value = electricalActivity.toString();
         elecValueDisplay.textContent = electricalActivity.toFixed(2);
+        applySliderGradient(elecSlider, "elecSlider");
+        updateThumbColor(elecSlider);
 
-        // Apply initial electrical activity-based parameters on page load
         updateParametersFromElectricalActivity(electricalActivity);
 
         elecSlider.addEventListener("input", (event) => {
-            const newValue = parseFloat(
-                (event.target as HTMLInputElement).value,
-            );
+            const newValue = parseFloat((event.target as HTMLInputElement).value);
             electricalActivity = newValue;
             elecValueDisplay.textContent = newValue.toFixed(2);
+            updateThumbColor(elecSlider);
             saveToLocalStorage(STORAGE_KEYS.electricalActivity, newValue);
             updateParametersFromElectricalActivity(newValue);
         });
@@ -1416,16 +1410,16 @@ function initializeEnvironmentalSliders(): void {
         ph = loadFromLocalStorage(STORAGE_KEYS.ph, ph);
         phSlider.value = ph.toString();
         phValueDisplay.textContent = ph.toFixed(1);
+        applySliderGradient(phSlider, "phSlider");
+        updateThumbColor(phSlider);
 
-        // Apply initial pH-based parameters on page load
         updateParametersFromPH(ph);
 
         phSlider.addEventListener("input", (event) => {
-            const newValue = parseFloat(
-                (event.target as HTMLInputElement).value,
-            );
+            const newValue = parseFloat((event.target as HTMLInputElement).value);
             ph = newValue;
             phValueDisplay.textContent = newValue.toFixed(1);
+            updateThumbColor(phSlider);
             saveToLocalStorage(STORAGE_KEYS.ph, newValue);
             updateParametersFromPH(newValue);
         });
@@ -1439,21 +1433,20 @@ function initializeEnvironmentalSliders(): void {
 
     if (presSlider && presValueDisplay) {
         pressure = loadFromLocalStorage(STORAGE_KEYS.pressure, pressure);
-        // Invert slider position: top = surface (0 bar), bottom = max depth (1000 bar)
+        // Invert: slider staat omgekeerd (top = oppervlak = 0m, bottom = max diepte)
         presSlider.value = (1000 - pressure).toString();
-        presValueDisplay.textContent = Math.round(pressure * 10) + "m";
+        presValueDisplay.textContent = Math.round(pressure) + "m";
+        applySliderGradient(presSlider, "presSlider", "to bottom");
+        updateThumbColor(presSlider, "presSlider", true);
 
-        // Apply initial pressure-based parameters on page load
         updateParametersFromPressure(pressure);
 
         presSlider.addEventListener("input", (event) => {
-            const sliderValue = parseFloat(
-                (event.target as HTMLInputElement).value,
-            );
-            // Invert: slider at top (1000) = 0 bar surface, slider at bottom (0) = 1000 bar depth
+            const sliderValue = parseFloat((event.target as HTMLInputElement).value);
             const newValue = 1000 - sliderValue;
             pressure = newValue;
-            presValueDisplay.textContent = Math.round(newValue * 10) + "m";
+            presValueDisplay.textContent = Math.round(newValue) + "m";
+            updateThumbColor(presSlider, "presSlider", true);
             saveToLocalStorage(STORAGE_KEYS.pressure, newValue);
             updateParametersFromPressure(newValue);
         });

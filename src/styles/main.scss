@@ -59,14 +59,13 @@ input[type="button"] {
 
             &.vertical-slider {
                 writing-mode: vertical-lr;
-                direction   : rtl; // Makes the slider go from bottom (low) to top (high)
+                direction   : rtl;
                 width       : 20px;
                 height      : 200px;
             }
 
             width        : 200px;
             height       : 20px;
-            background   : #999;
             outline      : none;
             opacity      : 0.8;
             transition   : opacity 0.2s;
@@ -78,17 +77,16 @@ input[type="button"] {
                 opacity: 1;
             }
 
-            // Firefox specific styles
             &::-moz-range-track {
                 width        : 20px;
                 height       : 200px;
-                background   : #999;
+                background   : transparent;
                 border-radius: 10px;
                 border       : none;
             }
 
             &::-moz-range-thumb {
-                background   : #4CAF50;
+                background   : var(--thumb-color, #4CAF50);
                 cursor       : pointer;
                 border-radius: 50%;
                 border       : 2px solid #fff;
@@ -97,11 +95,10 @@ input[type="button"] {
                 box-shadow   : 0 2px 4px rgba(0, 0, 0, 0.3);
             }
 
-            // Webkit specific styles
             &::-webkit-slider-track {
                 width        : 20px;
                 height       : 200px;
-                background   : #999;
+                background   : transparent;
                 border-radius: 10px;
                 border       : none;
             }
@@ -111,7 +108,7 @@ input[type="button"] {
                 appearance        : none;
                 width             : 24px;
                 height            : 24px;
-                background        : #4CAF50;
+                background        : var(--thumb-color, #4CAF50);
                 cursor            : pointer;
                 border-radius     : 50%;
                 border            : 2px solid #fff;
@@ -181,7 +178,6 @@ input[type="button"] {
             max-height   : 1080px;
             display      : block;
             border-radius: 50%;
-            border       : 5px solid #e3c463;
         }
     }
 
