@@ -68,6 +68,7 @@ input[type="button"] {
             opacity      : 0.8;
             transition   : opacity 0.2s;
             border-radius: 10px;
+            border       : 4px solid #000C;
             margin       : 15px 0;
             cursor       : pointer;
 
@@ -87,7 +88,7 @@ input[type="button"] {
                 background   : var(--thumb-color, #4CAF50);
                 cursor       : pointer;
                 border-radius: 50%;
-                border       : 2px solid #fff;
+                border       : 4px solid #000C;
                 width        : 24px;
                 height       : 24px;
                 box-shadow   : 0 2px 4px rgba(0, 0, 0, 0.3);
@@ -109,7 +110,7 @@ input[type="button"] {
                 background        : var(--thumb-color, #4CAF50);
                 cursor            : pointer;
                 border-radius     : 50%;
-                border            : 2px solid #fff;
+                border            : 4px solid #000C;
                 box-shadow        : 0 2px 4px rgba(0, 0, 0, 0.3);
             }
         }
