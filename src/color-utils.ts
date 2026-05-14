@@ -62,6 +62,12 @@ export function updateThumbColor(
     slider.style.setProperty("--thumb-color", gradientColor(pct, stops));
 }
 
+// Zet de kleur van een waarde-display gelijk aan de thumb-kleur van de slider.
+export function syncValueColor(slider: HTMLInputElement, displayId: string): void {
+    const display = document.getElementById(displayId);
+    if (display) display.style.color = slider.style.getPropertyValue("--thumb-color");
+}
+
 // Zet de CSS gradient-achtergrond op een slider op basis van de stops.
 export function applySliderGradient(
     slider: HTMLInputElement,

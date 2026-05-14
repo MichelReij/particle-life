@@ -5,7 +5,7 @@
 // This module handles all HTML/DOM interactions, slider controls, and localStorage
 
 import { SimulationParams, BoundaryMode } from "./particle-life-types";
-import { updateThumbColor, applySliderGradient } from "./color-utils";
+import { updateThumbColor, applySliderGradient, syncValueColor } from "./color-utils";
 import { WLP_DEPTH_THRESHOLD, SLIDERS } from "./gen/life_params";
 // import { Joy } from "./lib/joy";
 declare var Joy: any; // Temporary fix for Joy library
@@ -1353,11 +1353,6 @@ function initializeLeniaControls(simParams: SimulationParams): void {
 }
 
 let activeHypothesis: "htv" | "wlp" = "htv";
-
-function syncValueColor(slider: HTMLInputElement, displayId: string): void {
-    const display = document.getElementById(displayId);
-    if (display) display.style.color = slider.style.getPropertyValue("--thumb-color");
-}
 
 // Werkt gradients en thumb-kleuren altijd bij op basis van actieve hypothese.
 function refreshHypothesisColors(): void {
