@@ -10,10 +10,11 @@
 
 html,
 body {
-    margin       : 0; // remove default margin
-    height       : 100%; // make body fill the browser window
-    display      : flex;
-    place-content: center center;
+    margin           : 0;
+    height           : 100%;
+    display          : flex;
+    place-content    : center center;
+    background-color : #202225;
 }
 
 button,
@@ -31,16 +32,11 @@ input[type="button"] {
     grid-template-columns: max-content 1fr 1fr 1fr 1fr max-content;
     grid-template-areas  :
         "zoom canvas canvas canvas canvas joystick"
-        " fps  temp   pres    uv    elec    tbd   ";
-    column-gap      : 3rem;
-    row-gap         : 2rem;
-    color           : #dddddd;
-    background-color: #202225;
-    padding         : 5rem;
-    border-radius   : 10rem;
-    margin-top      : 5rem;
-    box-shadow      : 1rem 1rem 2rem rgba(0, 0, 0, 0.5);
-    height          : max-content;
+        " fps  pres   temp    ph    elec    tbd   ";
+    column-gap: 3rem;
+    row-gap   : 2rem;
+    color     : #dddddd;
+    padding   : 5rem;
 
     .slider-container {
         display        : flex;
@@ -154,16 +150,10 @@ input[type="button"] {
 
     #Pres {
         grid-area: pres;
-
-
     }
 
-    #UV {
-        grid-area: uv;
-
-        #uvValue::after {
-            content: " MJ/m²/day";
-        }
+    #pH {
+        grid-area: ph;
     }
 
 

@@ -6,6 +6,7 @@
 
 import { SimulationParams, BoundaryMode } from "./particle-life-types";
 import { updateThumbColor, applySliderGradient } from "./color-utils";
+import { WLP_DEPTH_THRESHOLD, SLIDERS } from "./gen/life_params";
 // import { Joy } from "./lib/joy";
 declare var Joy: any; // Temporary fix for Joy library
 import {
@@ -1351,6 +1352,48 @@ function initializeLeniaControls(simParams: SimulationParams): void {
     }
 }
 
+let activeHypothesis: "htv" | "wlp" = "htv";
+
+function applyHypothesis(hypothesis: "htv" | "wlp"): void {
+    if (hypothesis === activeHypothesis) return;
+    activeHypothesis = hypothesis;
+
+    const tempSlider = document.getElementById("tempSlider") as HTMLInputElement | null;
+    if (tempSlider) {
+        if (hypothesis === "wlp") {
+            tempSlider.style.background = SLIDERS[1].wlp.gradient;
+            updateThumbColor(tempSlider, "ol-temp-wlp");
+        } else {
+            applySliderGradient(tempSlider, "tempSlider");
+            updateThumbColor(tempSlider, "tempSlider");
+        }
+    }
+
+    const phSlider  = document.getElementById("phSlider")  as HTMLInputElement | null;
+    const phLabel   = document.getElementById("phLabel")   as HTMLElement | null;
+    const phVal     = document.getElementById("phValue");
+    if (phSlider) {
+        const oldMin = parseFloat(phSlider.min);
+        const oldMax = parseFloat(phSlider.max);
+        const normalized = (parseFloat(phSlider.value) - oldMin) / (oldMax - oldMin);
+
+        if (hypothesis === "wlp") {
+            phSlider.min = "0"; phSlider.max = "11"; phSlider.step = "0.1";
+            if (phLabel) phLabel.textContent = "UV";
+            phSlider.style.background = SLIDERS[2].wlp.gradient;
+            updateThumbColor(phSlider, "ol-ph-wlp");
+        } else {
+            phSlider.min = "0"; phSlider.max = "14"; phSlider.step = "0.1";
+            if (phLabel) phLabel.textContent = "pH";
+            applySliderGradient(phSlider, "phSlider");
+            updateThumbColor(phSlider, "phSlider");
+        }
+        const newMax = parseFloat(phSlider.max);
+        phSlider.value = (normalized * newMax).toFixed(1);
+        if (phVal) phVal.textContent = phSlider.value;
+    }
+}
+
 function initializeEnvironmentalSliders(): void {
     // Temperature Slider
     const tempSlider = document.getElementById(
@@ -1449,7 +1492,12 @@ function initializeEnvironmentalSliders(): void {
             updateThumbColor(presSlider, "presSlider", true);
             saveToLocalStorage(STORAGE_KEYS.pressure, newValue);
             updateParametersFromPressure(newValue);
+            applyHypothesis(newValue < WLP_DEPTH_THRESHOLD ? "wlp" : "htv");
         });
+
+        // Apply initial hypothesis
+        activeHypothesis = "htv";
+        applyHypothesis(pressure < WLP_DEPTH_THRESHOLD ? "wlp" : "htv");
     }
 }
 
