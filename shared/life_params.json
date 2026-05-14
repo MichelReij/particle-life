@@ -135,11 +135,11 @@
         "labels": { "nl": "Elektrische activiteit", "en": "Electrical activity", "fr": "Activité électrique" },
         "units":  { "nl": "kJ/m²/dag", "en": "kJ/m²/day", "fr": "kJ/m²/jour" },
         "ranges": [
-          { "min": 0.0, "max": 1.8, "color": "red" },
-          { "min": 1.8, "max": 2.0, "color": "transition" },
-          { "min": 2.0, "max": 2.2, "color": "green" },
-          { "min": 2.2, "max": 2.4, "color": "transition" },
-          { "min": 2.4, "max": 3.0, "color": "red" }
+          { "min": 0.0, "max": 0.7, "color": "red" },
+          { "min": 0.7, "max": 0.9, "color": "transition" },
+          { "min": 0.9, "max": 1.4, "color": "green" },
+          { "min": 1.4, "max": 1.6, "color": "transition" },
+          { "min": 1.6, "max": 3.0, "color": "red" }
         ]
       },
       "wlp": {

@@ -49,7 +49,7 @@ static const slider_def_t SLIDER_DEFS_HTV[NUM_SLIDERS] = {
     { 0.0f, 3.0f, 0.01f,
       "Elektrische activiteit", "Electrical activity", "Activité électrique",
       "kJ/m²/dag", "kJ/m²/day", "kJ/m²/jour",
-      { 1.8f, 2.0f, 2.2f, 2.4f } },
+      { 0.7f, 0.9f, 1.4f, 1.6f } },
 };
 
 static const slider_def_t SLIDER_DEFS_WLP[NUM_SLIDERS] = {

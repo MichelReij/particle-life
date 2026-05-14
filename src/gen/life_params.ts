@@ -76,8 +76,8 @@ export const SLIDERS: { htv: SliderVariant; wlp: SliderVariant }[] = [
             min: 0, max: 3, step: 0.01,
             label: {"nl":"Elektrische activiteit","en":"Electrical activity","fr":"Activité électrique"},
             unit: {"nl":"kJ/m²/dag","en":"kJ/m²/day","fr":"kJ/m²/jour"},
-            stops: [[0,16.5],[60,16.5],[66.66666666666666,148],[73.33333333333334,148],[80,16.5],[100,16.5]],
-            gradient: "linear-gradient(in oklch to top, oklch(0.66 0.13 16.5) 0.0%, oklch(0.66 0.13 16.5) 60.0%, oklch(0.66 0.13 148) 66.7%, oklch(0.66 0.13 148) 73.3%, oklch(0.66 0.13 16.5) 80.0%, oklch(0.66 0.13 16.5) 100.0%)",
+            stops: [[0,16.5],[23.333333333333332,16.5],[30,148],[46.666666666666664,148],[53.333333333333336,16.5],[100,16.5]],
+            gradient: "linear-gradient(in oklch to top, oklch(0.66 0.13 16.5) 0.0%, oklch(0.66 0.13 16.5) 23.3%, oklch(0.66 0.13 148) 30.0%, oklch(0.66 0.13 148) 46.7%, oklch(0.66 0.13 16.5) 53.3%, oklch(0.66 0.13 16.5) 100.0%)",
         },
         wlp: {
             min: 0, max: 3, step: 0.01,
