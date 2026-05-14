@@ -131,7 +131,7 @@ De embed (`src/embed.ts`) is volledig zelfstandig:
 - Injecteert zijn eigen CSS in `<head>`
 - Bouwt de DOM op in `#ol-wrap`
 - Leidt het WASM-pad af van `document.currentScript.src` — werkt op elke WordPress-pagina
-- Bevat alleen de 4 hoofdsliders (temperatuur, pH, zeedepte, elektrische activiteit)
+- Bevat alleen de 4 hoofdsliders (temperatuur, pH, diepte (druk), elektrische activiteit)
 - Zoom via muiswiel en pinch-to-zoom; pan via muisdrag en touch-drag
 
 ---
