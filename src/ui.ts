@@ -99,14 +99,14 @@ export function loadFromLocalStorage(
 // === Parameter Mapping Functions ===
 // Particle count constants (moved from deleted particle-lenia.ts)
 const MAX_PARTICLES = 6400;
-const MIN_PARTICLES = 1600;
+const MIN_PARTICLES = 3200;
 
 /**
  * Convert pressure value to particle count
- * Pressure range: 0-1000 bar -> Particle count: 1600-6400
+ * Pressure range: 0-1000 bar -> Particle count: 3200-6400
  */
 function pressureToParticleCount(pressure: number): number {
-    // Linear mapping from pressure (0-1000 bar) to particle count (1600-6400)
+    // Linear mapping from pressure (0-1000 bar) to particle count (3200-6400)
     const normalized = pressure / 1000; // Normalize to 0-1
     return Math.round(
         MIN_PARTICLES + normalized * (MAX_PARTICLES - MIN_PARTICLES),
