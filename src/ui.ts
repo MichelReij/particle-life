@@ -1354,6 +1354,11 @@ function initializeLeniaControls(simParams: SimulationParams): void {
 
 let activeHypothesis: "htv" | "wlp" = "htv";
 
+function syncValueColor(slider: HTMLInputElement, displayId: string): void {
+    const display = document.getElementById(displayId);
+    if (display) display.style.color = slider.style.getPropertyValue("--thumb-color");
+}
+
 function applyHypothesis(hypothesis: "htv" | "wlp"): void {
     if (hypothesis === activeHypothesis) return;
     activeHypothesis = hypothesis;
@@ -1367,6 +1372,7 @@ function applyHypothesis(hypothesis: "htv" | "wlp"): void {
             applySliderGradient(tempSlider, "tempSlider");
             updateThumbColor(tempSlider, "tempSlider");
         }
+        syncValueColor(tempSlider, "tempValue");
     }
 
     const phSlider  = document.getElementById("phSlider")  as HTMLInputElement | null;
@@ -1391,6 +1397,7 @@ function applyHypothesis(hypothesis: "htv" | "wlp"): void {
         const newMax = parseFloat(phSlider.max);
         phSlider.value = (normalized * newMax).toFixed(1);
         if (phVal) phVal.textContent = phSlider.value;
+        syncValueColor(phSlider, "phValue");
     }
 }
 
@@ -1407,6 +1414,7 @@ function initializeEnvironmentalSliders(): void {
         tempValueDisplay.textContent = temperature.toString();
         applySliderGradient(tempSlider, "tempSlider");
         updateThumbColor(tempSlider);
+        syncValueColor(tempSlider, "tempValue");
 
         updateDriftAndFrictionFromTemperature(temperature);
 
@@ -1415,6 +1423,7 @@ function initializeEnvironmentalSliders(): void {
             temperature = newValue;
             tempValueDisplay.textContent = newValue.toString();
             updateThumbColor(tempSlider);
+            syncValueColor(tempSlider, "tempValue");
             saveToLocalStorage(STORAGE_KEYS.temperature, newValue);
             updateDriftAndFrictionFromTemperature(newValue);
         });
@@ -1432,6 +1441,7 @@ function initializeEnvironmentalSliders(): void {
         elecValueDisplay.textContent = electricalActivity.toFixed(2);
         applySliderGradient(elecSlider, "elecSlider");
         updateThumbColor(elecSlider);
+        syncValueColor(elecSlider, "elecValue");
 
         updateParametersFromElectricalActivity(electricalActivity);
 
@@ -1440,6 +1450,7 @@ function initializeEnvironmentalSliders(): void {
             electricalActivity = newValue;
             elecValueDisplay.textContent = newValue.toFixed(2);
             updateThumbColor(elecSlider);
+            syncValueColor(elecSlider, "elecValue");
             saveToLocalStorage(STORAGE_KEYS.electricalActivity, newValue);
             updateParametersFromElectricalActivity(newValue);
         });
@@ -1455,6 +1466,7 @@ function initializeEnvironmentalSliders(): void {
         phValueDisplay.textContent = ph.toFixed(1);
         applySliderGradient(phSlider, "phSlider");
         updateThumbColor(phSlider);
+        syncValueColor(phSlider, "phValue");
 
         updateParametersFromPH(ph);
 
@@ -1463,6 +1475,7 @@ function initializeEnvironmentalSliders(): void {
             ph = newValue;
             phValueDisplay.textContent = newValue.toFixed(1);
             updateThumbColor(phSlider);
+            syncValueColor(phSlider, "phValue");
             saveToLocalStorage(STORAGE_KEYS.ph, newValue);
             updateParametersFromPH(newValue);
         });
@@ -1481,6 +1494,7 @@ function initializeEnvironmentalSliders(): void {
         presValueDisplay.textContent = Math.round(pressure) + "m";
         applySliderGradient(presSlider, "presSlider", "to bottom");
         updateThumbColor(presSlider, "presSlider", true);
+        syncValueColor(presSlider, "presValue");
 
         updateParametersFromPressure(pressure);
 
@@ -1490,6 +1504,7 @@ function initializeEnvironmentalSliders(): void {
             pressure = newValue;
             presValueDisplay.textContent = Math.round(newValue) + "m";
             updateThumbColor(presSlider, "presSlider", true);
+            syncValueColor(presSlider, "presValue");
             saveToLocalStorage(STORAGE_KEYS.pressure, newValue);
             updateParametersFromPressure(newValue);
             applyHypothesis(newValue < WLP_DEPTH_THRESHOLD ? "wlp" : "htv");
