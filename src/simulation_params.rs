@@ -379,21 +379,20 @@ impl SimulationParams {
     }
 
     // WLP: temp [10, 80°C], optimum ~50°C (warm tidal pools)
-    // Gekalibreerd op HTV: bij 50°C produceert WLP dezelfde friction (≈0.169) als HTV bij 100°C.
-    // Zelfde curve-vorm als HTV (A=0.98, kwadratische normalisatie), ingangsdomein herschaald.
+    // Gekalibreerd op HTV-optimum (1000 bar / 110°C): bij 50°C produceert WLP
+    // dezelfde friction (0.058) en drift (−40.9 px/s) als HTV bij 110°C.
     fn apply_temperature_wlp(&mut self, temp: f32) {
         let clamped_temp = temp.max(10.0).min(80.0);
 
-        // Drift: zelfde orde als HTV bij optimum — convectie in ondiepe poelen ook merkbaar
-        // Bij 50°C: -(40 * 65) / 70 ≈ -37.1 px/s (= HTV bij 100°C)
-        let drift = -((clamped_temp - 10.0) * 65.0) / 70.0;
+        // Drift: bij 50°C → -(40 * 71.6) / 70 ≈ -40.9 px/s (= HTV bij 110°C)
+        let drift = -((clamped_temp - 10.0) * 71.6) / 70.0;
         self.drift_x_per_second = drift;
 
-        // Friction: zelfde A en curve-exponent als HTV zodat groene zone overeenkomt
-        // Bij 10°C → ~0.98  |  50°C → ~0.169  |  80°C → ~0.005
+        // Friction: bij 50°C → 0.98 * exp(-8.66 * 0.326) ≈ 0.058 (= HTV bij 110°C + 1000 bar)
+        // Bij 10°C → ~0.98  |  50°C → ~0.058  |  80°C → ~0.003
         let normalized_temp = (clamped_temp - 10.0) / 70.0;
         let t = normalized_temp * normalized_temp;
-        let friction = 0.98 * (-5.4 * t).exp();
+        let friction = 0.98 * (-8.66 * t).exp();
         self.base_friction = friction;
         self.friction = friction; // WLP: geen drukmodifier
 
@@ -451,17 +450,16 @@ impl SimulationParams {
     }
 
     // WLP: pressure [0, 20 bar], optimum ~10 bar
-    // Gekalibreerd op HTV: bij 10 bar (normalized=0.5) produceert WLP dezelfde
-    // force_scale (240) en r_smooth (≈3.13) als HTV bij 350 bar.
+    // Gekalibreerd op HTV-optimum (1000 bar): bij 10 bar (normalized=0.5) produceert WLP
+    // dezelfde force_scale (500) en r_smooth (0.10) als HTV bij 1000 bar.
     fn apply_pressure_wlp(&mut self, clamped_pressure: f32) {
         let normalized = clamped_pressure / 20.0;
 
-        // force_scale: bij normalized=0.5 → 220 + 0.5*40 = 240 (= HTV bij 350 bar)
-        self.force_scale = 220.0 + normalized * 40.0;
+        // force_scale: bij normalized=0.5 → 400 + 0.5*200 = 500 (= HTV bij 1000 bar)
+        self.force_scale = 400.0 + normalized * 200.0;
 
-        // r_smooth: zelfde exponentiële formule als HTV, inputdomein herschaald via factor 0.7
-        // zodat bij normalized=0.5: 20 * exp(-5.3 * 0.35) ≈ 3.13 (= HTV bij 350 bar)
-        self.r_smooth = 20.0 * (-5.3 * normalized * 0.7).exp();
+        // r_smooth: bij normalized=0.5 → 20 * exp(-10.6 * 0.5) = 20 * exp(-5.3) ≈ 0.10 (= HTV bij 1000 bar)
+        self.r_smooth = 20.0 * (-10.6 * normalized).exp();
 
         // Druk in WLP geeft geen frictiechaos — ondiepe poelen zijn stabiel
         self.friction = self.base_friction;
@@ -514,8 +512,8 @@ impl SimulationParams {
 
     // WLP cross-dependencies: UV vervangt pH als derde driver.
     // Optimum UV voor vroeg leven: ~6 (energierijk maar nog niet DNA-schadelijk).
-    // Gekalibreerd op HTV: bij UV=6 (uv_quality=1) produceert WLP dezelfde Lenia-waarden
-    // als HTV bij pH=10 (ph_quality=1): lenia_growth_mu=0.15, lenia_kernel_radius=100.
+    // Gekalibreerd op HTV-optimum (1000 bar / pH=10 / electrical=2.0):
+    //   lenia_growth_mu=0.05, lenia_kernel_radius=100, lenia_growth_sigma=0.16
     fn recompute_cross_dependencies_wlp(&mut self) {
         // UV quality: Gaussiaans gecentreerd op UV 6, σ²=4
         let uv_quality = (-(self.uv_level - 6.0).powi(2) / 4.0).exp();
@@ -523,12 +521,13 @@ impl SimulationParams {
         let elec_radius_penalty = 1.0 - 0.65 * elec_normalized;
         self.inter_type_radius_scale = (0.1 + uv_quality * 1.9) * elec_radius_penalty;
 
-        // Lenia: zelfde coëfficiënten als HTV zodat groene zone overeenkomt
-        // Bij UV=6: mu = 0.05 + 0.10 = 0.15, radius = 30 + 70 = 100
-        self.lenia_growth_mu = 0.05 + uv_quality * 0.10;
+        // lenia_growth_mu: bij UV=6 (uv_quality=1) → 0.05 + 0 = 0.05 (= HTV bij 1000 bar)
+        // Slechte UV verhoogt mu (meer chaotische groei); optimale UV = geconcentreerde groei
+        self.lenia_growth_mu = 0.05 + (1.0 - uv_quality) * 0.10;
         self.lenia_kernel_radius = 30.0 + uv_quality * 70.0;
 
-        let combined_chaos = (1.0 - uv_quality).max(elec_normalized * 0.5);
+        // combined_chaos: bij electrical=2.0 → (0.667 * 1.5).min(1.0) = 1.0 → sigma=0.16 (= HTV bij 1000 bar)
+        let combined_chaos = (elec_normalized * 1.5).min(1.0);
         self.lenia_growth_sigma = 0.02 + combined_chaos * 0.14;
     }
 
