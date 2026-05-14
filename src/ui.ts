@@ -1407,6 +1407,9 @@ function applyHypothesis(hypothesis: "htv" | "wlp"): void {
     }
 
     refreshHypothesisColors();
+
+    // Achtergrondkleur direct bijwerken, net als in embed na hypothesis-switch.
+    updateDriftAndFrictionFromTemperature(temperature);
 }
 
 function initializeEnvironmentalSliders(): void {
