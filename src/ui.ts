@@ -1359,46 +1359,59 @@ function syncValueColor(slider: HTMLInputElement, displayId: string): void {
     if (display) display.style.color = slider.style.getPropertyValue("--thumb-color");
 }
 
-function applyHypothesis(hypothesis: "htv" | "wlp"): void {
-    if (hypothesis === activeHypothesis) return;
-    activeHypothesis = hypothesis;
+// Werkt gradients en thumb-kleuren altijd bij op basis van actieve hypothese.
+function refreshHypothesisColors(): void {
+    const isWlp = activeHypothesis === "wlp";
 
     const tempSlider = document.getElementById("tempSlider") as HTMLInputElement | null;
     if (tempSlider) {
-        if (hypothesis === "wlp") {
-            tempSlider.style.background = SLIDERS[1].wlp.gradient;
-            updateThumbColor(tempSlider, "ol-temp-wlp");
-        } else {
-            applySliderGradient(tempSlider, "tempSlider");
-            updateThumbColor(tempSlider, "tempSlider");
-        }
+        tempSlider.style.background = isWlp ? SLIDERS[1].wlp.gradient : SLIDERS[1].htv.gradient;
+        updateThumbColor(tempSlider, isWlp ? "ol-temp-wlp" : "tempSlider");
         syncValueColor(tempSlider, "tempValue");
     }
 
-    const phSlider  = document.getElementById("phSlider")  as HTMLInputElement | null;
-    const phLabel   = document.getElementById("phLabel")   as HTMLElement | null;
-    const phVal     = document.getElementById("phValue");
+    const phSlider = document.getElementById("phSlider") as HTMLInputElement | null;
     if (phSlider) {
-        const oldMin = parseFloat(phSlider.min);
-        const oldMax = parseFloat(phSlider.max);
-        const normalized = (parseFloat(phSlider.value) - oldMin) / (oldMax - oldMin);
-
-        if (hypothesis === "wlp") {
-            phSlider.min = "0"; phSlider.max = "11"; phSlider.step = "0.1";
-            if (phLabel) phLabel.textContent = "UV";
-            phSlider.style.background = SLIDERS[2].wlp.gradient;
-            updateThumbColor(phSlider, "ol-ph-wlp");
-        } else {
-            phSlider.min = "0"; phSlider.max = "14"; phSlider.step = "0.1";
-            if (phLabel) phLabel.textContent = "pH";
-            applySliderGradient(phSlider, "phSlider");
-            updateThumbColor(phSlider, "phSlider");
-        }
-        const newMax = parseFloat(phSlider.max);
-        phSlider.value = (normalized * newMax).toFixed(1);
-        if (phVal) phVal.textContent = phSlider.value;
+        phSlider.style.background = isWlp ? SLIDERS[2].wlp.gradient : SLIDERS[2].htv.gradient;
+        updateThumbColor(phSlider, isWlp ? "ol-ph-wlp" : "phSlider");
         syncValueColor(phSlider, "phValue");
     }
+
+    const elecSlider = document.getElementById("elecSlider") as HTMLInputElement | null;
+    if (elecSlider) {
+        elecSlider.style.background = isWlp ? SLIDERS[3].wlp.gradient : SLIDERS[3].htv.gradient;
+        updateThumbColor(elecSlider, isWlp ? "ol-elec-wlp" : "elecSlider");
+        syncValueColor(elecSlider, "elecValue");
+    }
+}
+
+function applyHypothesis(hypothesis: "htv" | "wlp"): void {
+    const switching = hypothesis !== activeHypothesis;
+    activeHypothesis = hypothesis;
+
+    // pH/UV label en range alleen wisselen bij een echte hypothese-switch.
+    if (switching) {
+        const phSlider = document.getElementById("phSlider") as HTMLInputElement | null;
+        const phLabel  = document.getElementById("phLabel")  as HTMLElement | null;
+        const phVal    = document.getElementById("phValue");
+        if (phSlider) {
+            const oldMin = parseFloat(phSlider.min);
+            const oldMax = parseFloat(phSlider.max);
+            const normalized = (parseFloat(phSlider.value) - oldMin) / (oldMax - oldMin);
+            if (hypothesis === "wlp") {
+                phSlider.min = "0"; phSlider.max = "11"; phSlider.step = "0.1";
+                if (phLabel) phLabel.textContent = "UV";
+            } else {
+                phSlider.min = "0"; phSlider.max = "14"; phSlider.step = "0.1";
+                if (phLabel) phLabel.textContent = "pH";
+            }
+            const newMax = parseFloat(phSlider.max);
+            phSlider.value = (normalized * newMax).toFixed(1);
+            if (phVal) phVal.textContent = phSlider.value;
+        }
+    }
+
+    refreshHypothesisColors();
 }
 
 function initializeEnvironmentalSliders(): void {
@@ -1510,8 +1523,8 @@ function initializeEnvironmentalSliders(): void {
             applyHypothesis(newValue < WLP_DEPTH_THRESHOLD ? "wlp" : "htv");
         });
 
-        // Apply initial hypothesis
-        activeHypothesis = "htv";
+        // Stel initiële hypothese in (activeHypothesis op "htv" zodat switching altijd loopt)
+        activeHypothesis = pressure < WLP_DEPTH_THRESHOLD ? "htv" : "wlp";
         applyHypothesis(pressure < WLP_DEPTH_THRESHOLD ? "wlp" : "htv");
     }
 }
