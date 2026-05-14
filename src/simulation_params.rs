@@ -484,9 +484,9 @@ impl SimulationParams {
         let norm = (clamped / ELEC_GREEN_MAX_HTV).min(1.0);
         let cubic = norm * norm * norm;
         self.inter_type_attraction_scale = -1.0 + cubic * 4.0;
-        self.lightning_frequency = norm;
-        self.lightning_intensity = 0.5 + norm * 1.5;
-        self.lightning_duration = 0.3 + norm * 0.5;
+        self.lightning_frequency = 0.0;
+        self.lightning_intensity = 0.0;
+        self.lightning_duration = 0.0;
 
         self.recompute_cross_dependencies_htv();
     }
