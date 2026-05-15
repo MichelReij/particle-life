@@ -295,10 +295,10 @@ input[type="button"] {
     }
 }
 
+#circle-btn,
 #audio-btn {
     position       : absolute;
     bottom         : 10px;
-    left           : 58px;
     background     : none;
     border         : none;
     color          : var(--accent-color);
@@ -320,44 +320,12 @@ input[type="button"] {
 
     &:hover  { opacity: 1; }
     &:active { transform: scale(0.88); }
-
-    &.audio-on {
-        color  : var(--accent-color);
-        opacity: 1;
-    }
 }
 
-#circle-btn {
-    position       : absolute;
-    bottom         : 10px;
-    left           : 10px;
-    background     : none;
-    border         : none;
-    color          : var(--accent-color);
-    font-size      : 0;
-    width          : 40px;
-    height         : 40px;
-    cursor         : pointer;
-    display        : flex;
-    align-items    : center;
-    justify-content: center;
-    transition     : opacity 0.15s, transform 0.1s;
-    z-index        : 10;
-    opacity        : 0.85;
+#circle-btn { left: 10px; }
+#audio-btn  { left: 58px; }
 
-    .material-symbols-outlined {
-        font-size  : 32px;
-        line-height: 1;
-    }
-
-    &:hover  { opacity: 1; }
-    &:active { transform: scale(0.88); }
-
-    &.circle-off {
-        color  : var(--primary-color);
-        opacity: 0.6;
-    }
-}
+#audio-btn.audio-on { opacity: 1; }
 
 #rec-indicator {
     position      : absolute;

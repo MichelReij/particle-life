@@ -500,10 +500,8 @@ class App {
         this.isCircleCanvas = !this.isCircleCanvas;
         const canvas = document.getElementById("canvas") as HTMLCanvasElement;
         if (canvas) canvas.style.borderRadius = this.isCircleCanvas ? "50%" : "0";
-        const btn = document.getElementById("circle-btn");
-        const icon = btn?.querySelector(".material-symbols-outlined");
+        const icon = document.getElementById("circle-btn")?.querySelector(".material-symbols-outlined");
         if (icon) icon.textContent = this.isCircleCanvas ? "check_circle" : "cancel";
-        btn?.classList.toggle("circle-off", !this.isCircleCanvas);
     }
 
     private toggleAudio() {
