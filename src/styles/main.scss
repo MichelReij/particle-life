@@ -58,12 +58,12 @@ input[type="button"] {
             &.vertical-slider {
                 writing-mode: vertical-lr;
                 direction   : rtl;
-                width       : 20px;
+                width       : 8px;
                 height      : 200px;
             }
 
             width        : 200px;
-            height       : 20px;
+            height       : 8px;
             outline      : none;
             opacity      : 0.8;
             transition   : opacity 0.2s;
@@ -77,7 +77,7 @@ input[type="button"] {
             }
 
             &::-moz-range-track {
-                width        : 20px;
+                width        : 8px;
                 height       : 200px;
                 background   : transparent;
                 border-radius: 10px;
@@ -95,7 +95,7 @@ input[type="button"] {
             }
 
             &::-webkit-slider-track {
-                width        : 20px;
+                width        : 8px;
                 height       : 200px;
                 background   : transparent;
                 border-radius: 10px;
