@@ -127,6 +127,11 @@ input[type="button"] {
     #Zoom {
         grid-area: zoom;
 
+        input[type="range"] {
+            --thumb-color: var(--accent-color);
+            background   : var(--accent-color);
+        }
+
         #zoomValue::after {
             content: "x";
         }
