@@ -328,18 +328,6 @@ fn calculate_anti_sticking_force(pos: vec2<f32>) -> vec2<f32> {
         }
     }
 
-    // Vertical anti-sticking: push particles away from top and bottom edges
-    // (top/bottom are real walls in boundary_mode 2; wrap mode has no real walls but a gentle
-    // push doesn't hurt since wrapping instantly corrects any overshoot)
-    if (dist_top < anti_stick_zone) {
-        let strength = (anti_stick_zone - dist_top) / anti_stick_zone;
-        repulsion_force.y += strength * strength * 25.0;
-    }
-    if (dist_bottom < anti_stick_zone) {
-        let strength = (anti_stick_zone - dist_bottom) / anti_stick_zone;
-        repulsion_force.y -= strength * strength * 25.0;
-    }
-
     return repulsion_force;
 }
 
@@ -894,7 +882,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let is_out_of_bounds = particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width || particle_p.pos.y < 0.0 || particle_p.pos.y >= sim_params.virtual_world_height;
 
         // Additional respawn condition for particles stuck near Y edges
-        let y_margin = 10.0;
+        let y_margin = 5.0;
         let is_near_y_edge = particle_p.pos.y < y_margin || particle_p.pos.y > (sim_params.virtual_world_height - y_margin);
 
         if (is_out_of_bounds || is_near_y_edge) {
