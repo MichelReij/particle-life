@@ -407,6 +407,11 @@ class App {
             .getElementById("record-btn")
             ?.addEventListener("click", () => this.toggleRecording());
 
+        // Circle / square canvas toggle
+        document
+            .getElementById("circle-btn")
+            ?.addEventListener("click", () => this.toggleCircleCanvas());
+
         // Keyboard shortcuts: S = screenshot, V = toggle video recording, A = audio toggle
         document.addEventListener("keydown", (e: KeyboardEvent) => {
             if (
@@ -487,6 +492,18 @@ class App {
 
         this.animationId = requestAnimationFrame(animate);
         console.log("✅ Rust simulation animation loop started");
+    }
+
+    private isCircleCanvas = true;
+
+    private toggleCircleCanvas() {
+        this.isCircleCanvas = !this.isCircleCanvas;
+        const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+        if (canvas) canvas.style.borderRadius = this.isCircleCanvas ? "50%" : "0";
+        const btn = document.getElementById("circle-btn");
+        const icon = btn?.querySelector(".material-symbols-outlined");
+        if (icon) icon.textContent = this.isCircleCanvas ? "check_circle" : "cancel";
+        btn?.classList.toggle("circle-off", !this.isCircleCanvas);
     }
 
     private toggleAudio() {
