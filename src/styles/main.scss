@@ -179,16 +179,8 @@ input[type="button"] {
         }
     }
 
-    #fps-controls {
-        grid-area      : fps;
-        display        : flex;
-        flex-direction : column;
-        align-items    : center;
-        justify-content: center;
-        gap            : 0.5rem;
-    }
-
     #fps-display {
+        grid-area  : fps;
         color      : #E3C463;
         font-family: Arial, sans-serif;
         font-size  : large;
@@ -199,38 +191,6 @@ input[type="button"] {
             color      : var(--primary-color);
             font-weight: normal;
         }
-    }
-
-    #audio-btn,
-    #circle-btn {
-        position       : static;
-        background     : none;
-        border         : none;
-        color          : var(--accent-color);
-        font-size      : 0;
-        width          : 40px;
-        height         : 40px;
-        cursor         : pointer;
-        display        : flex;
-        align-items    : center;
-        justify-content: center;
-        transition     : opacity 0.15s, transform 0.1s;
-        opacity        : 0.85;
-
-        .material-symbols-outlined {
-            font-size  : 32px;
-            line-height: 1;
-        }
-
-        &:hover  { opacity: 1; }
-        &:active { transform: scale(0.88); }
-    }
-
-    #audio-btn.audio-on { opacity: 1; }
-
-    #circle-btn.circle-off {
-        color  : var(--primary-color);
-        opacity: 0.6;
     }
 
 
@@ -332,6 +292,70 @@ input[type="button"] {
     &.recording {
         color  : #ff5555;
         opacity: 1;
+    }
+}
+
+#audio-btn {
+    position       : absolute;
+    bottom         : 10px;
+    left           : 58px;
+    background     : none;
+    border         : none;
+    color          : var(--accent-color);
+    font-size      : 0;
+    width          : 40px;
+    height         : 40px;
+    cursor         : pointer;
+    display        : flex;
+    align-items    : center;
+    justify-content: center;
+    transition     : opacity 0.15s, transform 0.1s;
+    z-index        : 10;
+    opacity        : 0.85;
+
+    .material-symbols-outlined {
+        font-size  : 32px;
+        line-height: 1;
+    }
+
+    &:hover  { opacity: 1; }
+    &:active { transform: scale(0.88); }
+
+    &.audio-on {
+        color  : var(--accent-color);
+        opacity: 1;
+    }
+}
+
+#circle-btn {
+    position       : absolute;
+    bottom         : 10px;
+    left           : 10px;
+    background     : none;
+    border         : none;
+    color          : var(--accent-color);
+    font-size      : 0;
+    width          : 40px;
+    height         : 40px;
+    cursor         : pointer;
+    display        : flex;
+    align-items    : center;
+    justify-content: center;
+    transition     : opacity 0.15s, transform 0.1s;
+    z-index        : 10;
+    opacity        : 0.85;
+
+    .material-symbols-outlined {
+        font-size  : 32px;
+        line-height: 1;
+    }
+
+    &:hover  { opacity: 1; }
+    &:active { transform: scale(0.88); }
+
+    &.circle-off {
+        color  : var(--primary-color);
+        opacity: 0.6;
     }
 }
 
