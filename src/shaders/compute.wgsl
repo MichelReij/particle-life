@@ -253,14 +253,14 @@ fn calculate_edge_damping_factor(pos: vec2<f32>) -> f32 {
         min_edge_dist = min(min(dist_left, dist_right), min(dist_top, dist_bottom));
     }
     else if (sim_params.drift_x_per_second > 0.0) {
-        // Drifting right - particles exit RIGHT, so NO damping near RIGHT edge (exit side)
-        // Only apply very gentle damping near LEFT edge to prevent any accumulation there
-        min_edge_dist = dist_left;
+        // Drifting right: exit=RIGHT, spawn=LEFT. Dampen near EXIT (right) so
+        // departing particles aren't pulled back. Leave spawn side (left) undampened.
+        min_edge_dist = dist_right;
     }
     else {
-        // Drifting left - particles exit LEFT, so NO damping near LEFT edge (exit side)
-        // Only apply very gentle damping near RIGHT edge to prevent any accumulation there
-        min_edge_dist = dist_right;
+        // Drifting left: exit=LEFT, spawn=RIGHT. Dampen near EXIT (left) so
+        // departing particles aren't pulled back. Leave spawn side (right) undampened.
+        min_edge_dist = dist_left;
     }
 
     // Multi-zone damping with exponential fall-off for better anti-sticking
@@ -304,24 +304,25 @@ fn calculate_anti_sticking_force(pos: vec2<f32>) -> vec2<f32> {
 
     var repulsion_force = vec2<f32>(0.0, 0.0);
 
-    // DISABLE anti-sticking forces when drift is active
-    // Drift naturally handles particle distribution, anti-sticking interferes
     if (abs(sim_params.drift_x_per_second) < 0.1) {
-        // Only apply anti-sticking when there's no significant drift
-        // Apply gentle repulsion from all edges to prevent accumulation
+        // No drift: repel from both horizontal edges symmetrically
         if (dist_left < anti_stick_zone) {
             let strength = (anti_stick_zone - dist_left) / anti_stick_zone;
-            let force_magnitude = strength * strength * 25.0;
-            // Very gentle
-            repulsion_force.x += force_magnitude;
-            // Push away from left edge
+            repulsion_force.x += strength * strength * 25.0;
         }
         if (dist_right < anti_stick_zone) {
             let strength = (anti_stick_zone - dist_right) / anti_stick_zone;
-            let force_magnitude = strength * strength * 25.0;
-            // Very gentle
-            repulsion_force.x -= force_magnitude;
-            // Push away from right edge
+            repulsion_force.x -= strength * strength * 25.0;
+        }
+    } else {
+        // During drift, push particles away from the SPAWN edge so they don't linger there.
+        // Spawn edge = LEFT when drifting right, RIGHT when drifting left.
+        let spawn_dist = select(dist_right, dist_left, sim_params.drift_x_per_second > 0.0);
+        // Direction away from spawn edge = same as drift direction
+        let push_dir = sign(sim_params.drift_x_per_second);
+        if (spawn_dist < anti_stick_zone) {
+            let strength = (anti_stick_zone - spawn_dist) / anti_stick_zone;
+            repulsion_force.x += push_dir * strength * strength * 35.0;
         }
     }
 
