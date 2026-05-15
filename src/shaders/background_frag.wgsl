@@ -57,7 +57,7 @@ struct SimParams {
     viewport_radius: f32,
 
     // Padding to ensure 16-byte alignment (3 × f32 = 12 bytes)
-    _viewport_padding1: f32,
+    night_alpha: f32,
     _viewport_padding2: f32,
     _viewport_padding3: f32,
 }

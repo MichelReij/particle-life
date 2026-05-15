@@ -87,6 +87,9 @@ pub struct SimulationParams {
     // UV level for WLP mode (replaces pH as the 3rd environmental slider)
     // UV-index scale 0–11
     pub uv_level: f32,
+
+    // Day/night cycle overlay alpha (0.0 = day, 0.5 = full night). WLP only.
+    pub night_alpha: f32,
 }
 
 impl SimulationParams {
@@ -157,6 +160,7 @@ impl SimulationParams {
 
             is_wlp: false,
             uv_level: 5.5,       // Mid UV-index as default
+            night_alpha: 0.0,
             temperature_level: 20.0,
         }
     }
@@ -329,8 +333,7 @@ impl SimulationParams {
         buffer.extend_from_slice(&self.viewport_height.to_le_bytes()); // 43
         buffer.extend_from_slice(&self.viewport_radius.to_le_bytes()); // 44
 
-        // Padding to ensure 16-byte alignment (3 × f32 = 12 bytes)
-        buffer.extend_from_slice(&0.0f32.to_le_bytes()); // 45 - padding
+        buffer.extend_from_slice(&self.night_alpha.to_le_bytes()); // 45 - night overlay alpha
         buffer.extend_from_slice(&0.0f32.to_le_bytes()); // 46 - padding
         buffer.extend_from_slice(&0.0f32.to_le_bytes()); // 47 - padding
 
@@ -342,6 +345,32 @@ impl SimulationParams {
     }
 
     // === CENTRAL CONVERSION FUNCTIONS ===
+    // Day/night cycle for WLP. Call once per frame with current sim time.
+    // Cycle: 40s day → 5s fade-in → 10s night → 5s fade-out → repeat (60s total)
+    pub fn update_night_alpha(&mut self) {
+        if !self.is_wlp {
+            self.night_alpha = 0.0;
+            return;
+        }
+        const DAY: f32      = 40.0;
+        const FADE_IN: f32  =  5.0;
+        const NIGHT: f32    = 10.0;
+        const FADE_OUT: f32 =  5.0;
+        const CYCLE: f32    = DAY + FADE_IN + NIGHT + FADE_OUT; // 60s
+        const MAX_ALPHA: f32 = 0.5; // #0008
+
+        let t = self.time % CYCLE;
+        self.night_alpha = if t < DAY {
+            0.0
+        } else if t < DAY + FADE_IN {
+            (t - DAY) / FADE_IN * MAX_ALPHA
+        } else if t < DAY + FADE_IN + NIGHT {
+            MAX_ALPHA
+        } else {
+            (1.0 - (t - DAY - FADE_IN - NIGHT) / FADE_OUT) * MAX_ALPHA
+        };
+    }
+
     // These functions handle the complex mappings from user-friendly parameters
     // to internal simulation parameters, used by both WASM and native
 

@@ -301,6 +301,7 @@ impl ParticleLifeEngine {
         self.current_time += delta_time;
         self.simulation_params.set_time(self.current_time);
         self.simulation_params.set_delta_time(delta_time);
+        self.simulation_params.update_night_alpha();
 
         // Debug deltaTime and particle count correlation every 300 frames (5 seconds)
         if self.frame_count % 300 == 0 {

@@ -191,6 +191,7 @@ pub struct WebGpuRenderer {
     scene_sampler: wgpu::Sampler,
 
     background_render_pipeline: wgpu::RenderPipeline,
+    night_render_pipeline: wgpu::RenderPipeline,
     grid_render_pipeline: wgpu::RenderPipeline,
     render_pipeline: wgpu::RenderPipeline,
     glow_render_pipeline: wgpu::RenderPipeline,
@@ -205,6 +206,7 @@ pub struct WebGpuRenderer {
     lightning_compute_bind_group: wgpu::BindGroup,
     lightning_render_bind_group: wgpu::BindGroup,
     background_render_bind_group: wgpu::BindGroup,
+    night_render_bind_group: wgpu::BindGroup,
     grid_render_bind_group: wgpu::BindGroup,
     fisheye_render_bind_group: wgpu::BindGroup,
     zoom_render_bind_group: wgpu::BindGroup,
@@ -570,6 +572,11 @@ impl WebGpuRenderer {
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: sim_params_buffer.as_entire_binding() }],
         });
 
+        let night_render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Night BG"), layout: &post_processing_uniform_bgl,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: sim_params_buffer.as_entire_binding() }],
+        });
+
         let grid_render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Grid BG"), layout: &post_processing_uniform_bgl,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: sim_params_buffer.as_entire_binding() }],
@@ -628,6 +635,7 @@ impl WebGpuRenderer {
         let bg_vert         = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("BG Vert"),  source: wgpu::ShaderSource::Wgsl(include_str!("shaders/background_vert.wgsl").into()) });
         let bg_frag         = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("BG Frag"),  source: wgpu::ShaderSource::Wgsl(include_str!("shaders/background_frag.wgsl").into()) });
         let grid_frag       = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Grid"),     source: wgpu::ShaderSource::Wgsl(include_str!("shaders/grid_frag.wgsl").into()) });
+        let night_frag      = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Night"),    source: wgpu::ShaderSource::Wgsl(include_str!("shaders/night_frag.wgsl").into()) });
         let fisheye_frag    = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Fisheye"),  source: wgpu::ShaderSource::Wgsl(include_str!("shaders/fisheye_frag.wgsl").into()) });
         let zoom_frag       = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Zoom"),     source: wgpu::ShaderSource::Wgsl(include_str!("shaders/zoom_frag.wgsl").into()) });
         let lc_shader       = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("LC"),       source: wgpu::ShaderSource::Wgsl(include_str!("shaders/lightning_compute.wgsl").into()) });
@@ -700,8 +708,9 @@ impl WebGpuRenderer {
             })
         };
 
-        let background_render_pipeline = make_fullscreen_pipeline("Background", &pp_uniform_pl, &bg_frag, None);
-        let grid_render_pipeline       = make_fullscreen_pipeline("Grid",       &pp_uniform_pl, &grid_frag, Some(alpha_blend));
+        let background_render_pipeline = make_fullscreen_pipeline("Background", &pp_uniform_pl, &bg_frag,   None);
+        let night_render_pipeline      = make_fullscreen_pipeline("Night",      &pp_uniform_pl, &night_frag, Some(alpha_blend));
+        let grid_render_pipeline       = make_fullscreen_pipeline("Grid",       &pp_uniform_pl, &grid_frag,  Some(alpha_blend));
         let fisheye_render_pipeline    = make_fullscreen_pipeline("Fisheye",    &pp_texture_pl, &fisheye_frag, None);
         let zoom_render_pipeline       = make_fullscreen_pipeline("Zoom",       &zoom_pl,       &zoom_frag, None);
 
@@ -751,6 +760,7 @@ impl WebGpuRenderer {
             intermediate_texture_view,
             scene_sampler,
             background_render_pipeline,
+            night_render_pipeline,
             grid_render_pipeline,
             render_pipeline,
             glow_render_pipeline,
@@ -764,6 +774,7 @@ impl WebGpuRenderer {
             lightning_compute_bind_group,
             lightning_render_bind_group,
             background_render_bind_group,
+            night_render_bind_group,
             grid_render_bind_group,
             fisheye_render_bind_group,
             zoom_render_bind_group,
@@ -827,10 +838,6 @@ impl WebGpuRenderer {
         { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Background"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
           p.set_pipeline(&self.background_render_pipeline); p.set_bind_group(0, &self.background_render_bind_group, &[]); p.draw(0..6, 0..1); }
 
-        // Grid
-        { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Grid"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
-          p.set_pipeline(&self.grid_render_pipeline); p.set_bind_group(0, &self.grid_render_bind_group, &[]); p.draw(0..6, 0..1); }
-
         // Glow
         { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Glow"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
           p.set_pipeline(&self.glow_render_pipeline); p.set_bind_group(0, &self.render_bind_groups[out_idx], &[]);
@@ -843,7 +850,15 @@ impl WebGpuRenderer {
           p.set_vertex_buffer(0, self.particle_buffers[out_idx].slice(..)); p.set_vertex_buffer(1, self.quad_vertex_buffer.slice(..));
           p.draw(0..4, 0..particle_system.get_active_count()); }
 
-        // Lightning
+        // Night overlay (WLP only; alpha=0 during day so pass is essentially free then)
+        { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Night"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
+          p.set_pipeline(&self.night_render_pipeline); p.set_bind_group(0, &self.night_render_bind_group, &[]); p.draw(0..6, 0..1); }
+
+        // Grid (above night overlay)
+        { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Grid"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
+          p.set_pipeline(&self.grid_render_pipeline); p.set_bind_group(0, &self.grid_render_bind_group, &[]); p.draw(0..6, 0..1); }
+
+        // Lightning (above night overlay)
         { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Lightning"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
           p.set_pipeline(&self.lightning_render_pipeline); p.set_bind_group(0, &self.lightning_render_bind_group, &[]); p.draw(0..6, 0..1); }
 
