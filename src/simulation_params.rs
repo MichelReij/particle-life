@@ -613,23 +613,54 @@ impl SimulationParams {
     }
 
     // HTV: temperature background — deep blue (cold) to red (hot)
+    // HTV: achtergrondkleur via OKLCH — zelfde hue-stops als de temperatuurslider.
+    // Bereiken uit life_params.json: blauw(3–80°C) → groen(95–115°C) → rood(125–160°C)
     fn temperature_to_background_color(temp: f32) -> (f32, f32, f32) {
-        const S: f32 = 33.0;
-        const L: f32 = 77.0;
-        let hue_temp = temp.max(80.0).min(140.0);
-        let normalized_hue = (hue_temp - 80.0) / (140.0 - 80.0);
-        let hue = 220.0 + normalized_hue * (0.0 - 220.0); // 220 → 0
-        crate::buffer_utils::hsl_to_rgb(hue, S, L)
+        use crate::life_params_gen::{H_BLUE, H_GREEN, H_RED, BACKGROUND_L_HTV, BACKGROUND_C_HTV};
+        let hue = Self::temp_to_hue_htv(temp, H_BLUE, H_GREEN, H_RED);
+        crate::buffer_utils::oklch_to_srgb(BACKGROUND_L_HTV, BACKGROUND_C_HTV, hue)
     }
 
-    // WLP: temperature background — cyan/teal (cool pools) to warm amber (hot pools)
+    // WLP: achtergrondkleur via OKLCH — zelfde hue-stops als de temperatuurslider.
+    // Bereiken uit life_params.json: blauw(3–30°C) → groen(30–50°C) → rood(70–160°C)
     fn temperature_to_background_color_wlp(temp: f32) -> (f32, f32, f32) {
-        const S: f32 = 40.0;
-        const L: f32 = 80.0;
-        let hue_temp = temp.max(10.0).min(80.0);
-        let normalized_hue = (hue_temp - 10.0) / 70.0;
-        let hue = 185.0 + normalized_hue * (30.0 - 185.0); // cyan (185) → amber (30)
-        crate::buffer_utils::hsl_to_rgb(hue, S, L)
+        use crate::life_params_gen::{H_BLUE, H_GREEN, H_RED, BACKGROUND_L_WLP, BACKGROUND_C_WLP};
+        let hue = Self::temp_to_hue_wlp(temp, H_BLUE, H_GREEN, H_RED);
+        crate::buffer_utils::oklch_to_srgb(BACKGROUND_L_WLP, BACKGROUND_C_WLP, hue)
+    }
+
+    // HTV hue-interpolatie: blauw(3–80) → groen(95–115) → rood(125–160)
+    fn temp_to_hue_htv(temp: f32, h_blue: f32, h_green: f32, h_red: f32) -> f32 {
+        let t = temp.clamp(3.0, 160.0);
+        if t <= 80.0 {
+            h_blue
+        } else if t <= 95.0 {
+            let n = (t - 80.0) / (95.0 - 80.0);
+            h_blue + n * (h_green - h_blue)
+        } else if t <= 115.0 {
+            h_green
+        } else if t <= 125.0 {
+            let n = (t - 115.0) / (125.0 - 115.0);
+            h_green + n * (h_red - h_green)
+        } else {
+            h_red
+        }
+    }
+
+    // WLP hue-interpolatie: blauw(3–30) → groen(30–50) → rood(70–160)
+    fn temp_to_hue_wlp(temp: f32, h_blue: f32, h_green: f32, h_red: f32) -> f32 {
+        let t = temp.clamp(3.0, 160.0);
+        if t <= 30.0 {
+            h_blue
+        } else if t <= 50.0 {
+            let n = (t - 30.0) / (50.0 - 30.0);
+            h_blue + n * (h_green - h_blue)
+        } else if t <= 70.0 {
+            let n = (t - 50.0) / (70.0 - 50.0);
+            h_green + n * (h_red - h_green)
+        } else {
+            h_red
+        }
     }
 
     // Pressure-based particle count mapping

@@ -6,7 +6,11 @@
     "h_blue":   251.0,
     "h_green":  148.0,
     "h_yellow":  72.5,
-    "h_red":     16.5
+    "h_red":     16.5,
+    "background_l_htv": 0.80,
+    "background_c_htv": 0.04,
+    "background_l_wlp": 0.86,
+    "background_c_wlp": 0.04
   },
   "wlp_depth_threshold": 20,
   "sliders": [

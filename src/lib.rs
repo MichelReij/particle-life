@@ -17,6 +17,8 @@ use rand::{Rng, SeedableRng};
 
 mod buffer_utils;
 pub mod config;
+#[path = "../shared/gen/life_params.rs"]
+pub mod life_params_gen;
 mod interaction_rules;
 mod particle_system;
 mod shader_constants;

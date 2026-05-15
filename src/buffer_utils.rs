@@ -65,6 +65,35 @@ pub fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
     (r1 + m, g1 + m, b1 + m)
 }
 
+/// OKLCH → sRGB (geclampt naar [0, 1]).
+/// l: [0, 1]  c: [0, ∞)  h_deg: [0, 360)  →  (r, g, b): [0, 1]
+pub fn oklch_to_srgb(l: f32, c: f32, h_deg: f32) -> (f32, f32, f32) {
+    let h = h_deg * std::f32::consts::PI / 180.0;
+    let a = c * h.cos();
+    let b = c * h.sin();
+
+    // OkLab → LMS (cube roots)
+    let l_ = l + 0.3963377774 * a + 0.2158037573 * b;
+    let m_ = l - 0.1055613458 * a - 0.0638541728 * b;
+    let s_ = l - 0.0894841775 * a - 1.2914855480 * b;
+
+    let lms_l = l_ * l_ * l_;
+    let lms_m = m_ * m_ * m_;
+    let lms_s = s_ * s_ * s_;
+
+    // LMS → linear sRGB
+    let r_lin =  4.0767416621 * lms_l - 3.3077115913 * lms_m + 0.2309699292 * lms_s;
+    let g_lin = -1.2684380046 * lms_l + 2.6097574011 * lms_m - 0.3413193965 * lms_s;
+    let b_lin = -0.0041960863 * lms_l - 0.7034186147 * lms_m + 1.7076147010 * lms_s;
+
+    // Linear sRGB → gamma-encoded sRGB
+    let gamma = |v: f32| -> f32 {
+        let v = v.clamp(0.0, 1.0);
+        if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+    };
+    (gamma(r_lin), gamma(g_lin), gamma(b_lin))
+}
+
 // Calculate background color based on drift speed
 pub fn calculate_background_color_from_drift(drift_x_per_second: f32) -> [f32; 3] {
     let normalized_abs_drift = (drift_x_per_second.abs() / 80.0).min(1.0);
