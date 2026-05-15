@@ -75,6 +75,7 @@ pub struct SimulationParams {
     pub ph: f32,                        // pH scale 0-14, optimum for life ~10
     pub pressure_level: f32,            // bar (0-1000), ~0-10000m depth
     pub electrical_activity_level: f32, // 0-3
+    pub temperature_level: f32,         // °C, opgeslagen voor herberekening bij hypothesewisseling
 
     // Cached base friction from temperature (before pressure modifier is applied)
     pub base_friction: f32,
@@ -155,7 +156,8 @@ impl SimulationParams {
             base_friction: 0.1,
 
             is_wlp: false,
-            uv_level: 5.5, // Mid UV-index as default
+            uv_level: 5.5,       // Mid UV-index as default
+            temperature_level: 20.0,
         }
     }
 
@@ -345,6 +347,7 @@ impl SimulationParams {
 
     // Set temperature — dispatches to HTV or WLP variant based on active hypothesis
     pub fn apply_temperature(&mut self, temp: f32) {
+        self.temperature_level = temp;
         if self.is_wlp {
             self.apply_temperature_wlp(temp);
         } else {
@@ -423,13 +426,26 @@ impl SimulationParams {
         let clamped_pressure = pressure.max(0.0).min(1000.0);
         self.pressure_level = clamped_pressure;
 
-        // Determine active hypothesis: WLP when depth < 20m equivalent
+        let was_wlp = self.is_wlp;
         self.is_wlp = clamped_pressure < 20.0;
 
         if self.is_wlp {
             self.apply_pressure_wlp(clamped_pressure);
         } else {
             self.apply_pressure_htv(clamped_pressure);
+        }
+
+        // Bij hypothesewisseling achtergrondkleur direct aanpassen op basis van huidige temperatuur
+        if self.is_wlp != was_wlp {
+            let temp = self.temperature_level;
+            let (r, g, b) = if self.is_wlp {
+                Self::temperature_to_background_color_wlp(temp)
+            } else {
+                Self::temperature_to_background_color(temp)
+            };
+            self.background_color_r = r;
+            self.background_color_g = g;
+            self.background_color_b = b;
         }
     }
 
