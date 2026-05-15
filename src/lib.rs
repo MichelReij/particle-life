@@ -764,6 +764,9 @@ impl ParticleLifeEngine {
         self.simulation_params.current_zoom_level
     }
 
+    /// Night overlay alpha: 0.0 = full day, 0.8 = full night. WLP only.
+    /// Use this to drive external lighting (e.g. neopixels on the globe).
+    #[wasm_bindgen] pub fn get_night_alpha(&self) -> f32 { self.simulation_params.night_alpha }
     #[wasm_bindgen] pub fn get_drift_x_per_second(&self) -> f32 { self.simulation_params.drift_x_per_second }
     #[wasm_bindgen] pub fn get_friction(&self) -> f32 { self.simulation_params.friction }
     #[wasm_bindgen] pub fn get_force_scale(&self) -> f32 { self.simulation_params.force_scale }

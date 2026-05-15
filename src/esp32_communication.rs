@@ -104,6 +104,9 @@ pub struct ESP32SharedState {
     pub pending_lightning_events: Vec<ESP32LightningEvent>, // Queue of lightning events to send
     pub last_logged_data: Option<ESP32SensorData>, // For throttling log output
     pub last_log_time: Instant,                    // For periodic logging
+    pub pending_night_alpha: Option<f32>,          // Set when night_alpha needs to be sent
+    pub last_sent_night_alpha: f32,                // Track last sent value to avoid redundant sends
+    pub last_night_send_time: Instant,             // For periodic night heartbeat
 }
 
 impl Default for ESP32SharedState {
@@ -115,6 +118,9 @@ impl Default for ESP32SharedState {
             pending_lightning_events: Vec::new(),
             last_logged_data: None,
             last_log_time: Instant::now(),
+            pending_night_alpha: None,
+            last_sent_night_alpha: -1.0, // force first send
+            last_night_send_time: Instant::now(),
         }
     }
 }
@@ -194,6 +200,18 @@ impl ESP32Manager {
                 },
                 intensity
             );
+        }
+    }
+
+    // Queue a night_alpha update for UART transmission.
+    // Only queues when the value changed by ≥ 0.01 or a 1-second heartbeat is due.
+    pub fn update_night_alpha(&self, alpha: f32) {
+        if let Ok(mut state) = self.shared_state.lock() {
+            let changed = (alpha - state.last_sent_night_alpha).abs() >= 0.01;
+            let heartbeat = state.last_night_send_time.elapsed().as_secs_f32() >= 1.0;
+            if changed || heartbeat {
+                state.pending_night_alpha = Some(alpha);
+            }
         }
     }
 
@@ -280,6 +298,9 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
 
                     // Check for pending lightning events to send
                     send_pending_lightning_events(serial_port, &shared_state);
+
+                    // Send pending night alpha update
+                    send_pending_night_alpha(serial_port, &shared_state);
 
                     // Small delay to prevent excessive CPU usage
                     thread::sleep(Duration::from_millis(16)); // ~60 FPS polling rate
@@ -1280,6 +1301,41 @@ fn send_pending_lightning_events(
                 println!("❌ ESP32: Failed to send lightning event: {}", e);
                 break; // Stop sending if there's an error
             }
+        }
+    }
+}
+
+// Send pending night_alpha to ESP32 as a 4-byte binary NightPacket (0xBD + u16 BE + 0xCE)
+fn send_pending_night_alpha(
+    port: &mut Box<dyn SerialPort>,
+    shared_state: &Arc<Mutex<ESP32SharedState>>,
+) {
+    let alpha_to_send = {
+        if let Ok(mut state) = shared_state.lock() {
+            if let Some(alpha) = state.pending_night_alpha.take() {
+                state.last_sent_night_alpha = alpha;
+                state.last_night_send_time = Instant::now();
+                Some(alpha)
+            } else {
+                None
+            }
+        } else {
+            return;
+        }
+    };
+
+    if let Some(alpha) = alpha_to_send {
+        // Normalize: alpha 0.0–0.8 → raw 0–4095 (12-bit)
+        let raw = ((alpha / 0.8) * 4095.0).clamp(0.0, 4095.0) as u16;
+        let packet: [u8; 4] = [
+            0xBD,
+            ((raw >> 8) & 0xFF) as u8,
+            (raw & 0xFF) as u8,
+            0xCE,
+        ];
+        match port.write_all(&packet) {
+            Ok(()) => println!("🌙 ESP32: Night alpha {:.3} (raw {}) sent", alpha, raw),
+            Err(e) => println!("❌ ESP32: Failed to send night packet: {}", e),
         }
     }
 }

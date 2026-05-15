@@ -353,11 +353,11 @@ impl SimulationParams {
             return;
         }
         const DAY: f32      = 40.0;
-        const FADE_IN: f32  =  5.0;
-        const NIGHT: f32    = 10.0;
-        const FADE_OUT: f32 =  5.0;
-        const CYCLE: f32    = DAY + FADE_IN + NIGHT + FADE_OUT; // 60s
-        const MAX_ALPHA: f32 = 0.5; // #0008
+        const FADE_IN: f32  = 10.0;  // 7 / 0.7
+        const NIGHT: f32    = 20.0;  // 14 / 0.7
+        const FADE_OUT: f32 = 10.0;  // 7 / 0.7
+        const CYCLE: f32    = DAY + FADE_IN + NIGHT + FADE_OUT; // 80s
+        const MAX_ALPHA: f32 = 0.8; // #000c
 
         let t = self.time % CYCLE;
         self.night_alpha = if t < DAY {

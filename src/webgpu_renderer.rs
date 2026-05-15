@@ -838,6 +838,10 @@ impl WebGpuRenderer {
         { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Background"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
           p.set_pipeline(&self.background_render_pipeline); p.set_bind_group(0, &self.background_render_bind_group, &[]); p.draw(0..6, 0..1); }
 
+        // Grid (below particles)
+        { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Grid"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
+          p.set_pipeline(&self.grid_render_pipeline); p.set_bind_group(0, &self.grid_render_bind_group, &[]); p.draw(0..6, 0..1); }
+
         // Glow
         { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Glow"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
           p.set_pipeline(&self.glow_render_pipeline); p.set_bind_group(0, &self.render_bind_groups[out_idx], &[]);
@@ -853,10 +857,6 @@ impl WebGpuRenderer {
         // Night overlay (WLP only; alpha=0 during day so pass is essentially free then)
         { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Night"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
           p.set_pipeline(&self.night_render_pipeline); p.set_bind_group(0, &self.night_render_bind_group, &[]); p.draw(0..6, 0..1); }
-
-        // Grid (above night overlay)
-        { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Grid"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
-          p.set_pipeline(&self.grid_render_pipeline); p.set_bind_group(0, &self.grid_render_bind_group, &[]); p.draw(0..6, 0..1); }
 
         // Lightning (above night overlay)
         { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Lightning"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });

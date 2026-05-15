@@ -57,5 +57,45 @@ var<uniform> sim_params: SimParams;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
-    return vec4<f32>(0.0, 0.0, 0.0, sim_params.night_alpha);
+    // night_alpha == 0 means HTV mode or full day — skip entirely
+    if sim_params.night_alpha <= 0.0 {
+        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    }
+
+    // A night band sweeps right→left over 20s (5s fade-in + 10s night + 5s fade-out).
+    // The band has two parallel fuzzy edges of equal width:
+    //   tx_eve  = avondschemering (leading/right edge, day→night)
+    //   tx_morn = ochtendschemer  (trailing/left edge, night→day)
+    //
+    // core_width = 1.0 means the full-darkness core equals the canvas width.
+    // band_width = core_width + 2*fuzz so that at peak night both schemering zones
+    // sit exactly outside the canvas edges (and the viewer sees only uniform darkness).
+    let cycle      = 60.0;
+    let day        = 40.0;
+    let non_day    = 40.0;  // 28 / 0.7 ≈ 40s
+    let fuzz       = 0.45;  // half-width of each schemering zone (1.5× previous 0.30)
+    let core_width = 1.5;   // 1.5× canvas width
+    let band_width = core_width + 2.0 * fuzz;
+
+    let t        = sim_params.time % (day + non_day);
+    let t_non    = max(t - day, 0.0);
+
+    // Start: tx_morn = 1+fuzz (morning edge just off-screen right, entire band off-screen)
+    // End:   tx_eve  = -fuzz  (evening edge just off-screen left,  entire band off-screen)
+    // Total travel = 1 + 2*fuzz + band_width
+    let travel   = 1.0 + 2.0 * fuzz + band_width;
+    let tx_eve   = (1.0 + fuzz + band_width) - (t_non / non_day) * travel;
+    let tx_morn  = tx_eve - band_width;
+
+    let px       = frag_coord.x / sim_params.canvas_render_width;
+
+    // avond: 1 left of tx_eve (night side), 0 right (day side)
+    // — smoothstep requires edge0 < edge1, so use 1-smoothstep with correct order
+    let eve_side  = 1.0 - smoothstep(tx_eve  - fuzz, tx_eve  + fuzz, px);
+    // ochtend: 1 right of tx_morn (night side), 0 left (day side)
+    let morn_side = smoothstep(tx_morn - fuzz, tx_morn + fuzz, px);
+
+    let night = eve_side * morn_side;
+
+    return vec4<f32>(0.0, 0.0, 0.0, night * 0.8);
 }

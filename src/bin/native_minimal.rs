@@ -60,6 +60,7 @@ struct MinimalNativeApp {
     lightning_start_time: f32,
     lightning_communicated: bool,
     next_poll_time: std::time::Instant,
+    last_night_alpha_sent: f32,
 }
 
 impl Default for MinimalNativeApp {
@@ -109,6 +110,7 @@ impl Default for MinimalNativeApp {
             lightning_start_time: 0.0,
             lightning_communicated: false,
             next_poll_time: std::time::Instant::now(),
+            last_night_alpha_sent: -1.0,
         }
     }
 }
@@ -238,7 +240,11 @@ impl ApplicationHandler for MinimalNativeApp {
                 self.current_time += delta_time;
                 self.simulation_params.set_time(self.current_time);
                 self.simulation_params.set_delta_time(delta_time);
+                self.simulation_params.update_night_alpha();
                 self.interaction_rules = self.rule_evolution.tick(delta_time, &mut self.rng).clone();
+
+                // Stuur night_alpha naar ESP32 via UART
+                self.communicate_night_alpha_to_esp32();
 
                 // Sonificatie update
                 let (gpu_type_ref, gpu_global_ref) = if self.simulation_params.current_zoom_level > 5.0 {
@@ -391,6 +397,14 @@ impl MinimalNativeApp {
                 if is_super { 1.0 } else { 0.7 },
             );
         }
+    }
+
+    fn communicate_night_alpha_to_esp32(&mut self) {
+        let alpha = self.simulation_params.night_alpha;
+        if let Some(esp32) = &self.esp32_manager {
+            esp32.update_night_alpha(alpha);
+        }
+        self.last_night_alpha_sent = alpha;
     }
 }
 
