@@ -12,7 +12,6 @@
     "background_l_wlp": 0.86,
     "background_c_wlp": 0.04
   },
-  "wlp_depth_threshold": 20,
   "sliders": [
     {
       "index": 0,
@@ -21,6 +20,9 @@
       "max": 1000,
       "step": 1,
       "htv": {
+        "param": "pressure",
+        "optimum": 0,
+        "snap_to_min_threshold": 50,
         "labels": { "nl": "Diepte (druk)", "en": "Depth (pressure)", "fr": "Profondeur (pression)" },
         "units":  { "nl": "m", "en": "m", "fr": "m" },
         "ranges": [
@@ -42,6 +44,9 @@
         ]
       },
       "wlp": {
+        "param": "pressure",
+        "optimum": 0,
+        "snap_to_min_threshold": 50,
         "labels": { "nl": "Diepte (druk)", "en": "Depth (pressure)", "fr": "Profondeur (pression)" },
         "units":  { "nl": "m", "en": "m", "fr": "m" },
         "ranges": [
@@ -69,6 +74,8 @@
       "max": 160,
       "step": 1,
       "htv": {
+        "param": "temperature",
+        "optimum": 105,
         "labels": { "nl": "Temperatuur", "en": "Temperature", "fr": "Température" },
         "units":  { "nl": "°C", "en": "°C", "fr": "°C" },
         "ranges": [
@@ -80,6 +87,8 @@
         ]
       },
       "wlp": {
+        "param": "temperature",
+        "optimum": 40,
         "labels": { "nl": "Temperatuur", "en": "Temperature", "fr": "Température" },
         "units":  { "nl": "°C", "en": "°C", "fr": "°C" },
         "ranges": [
@@ -93,9 +102,11 @@
     {
       "index": 2,
       "htv": {
+        "param": "ph",
         "min": 0,
         "max": 14,
         "step": 0.1,
+        "optimum": 10,
         "labels": { "nl": "Zuurtegraad", "en": "Acidity", "fr": "Acidité" },
         "units":  { "nl": "pH", "en": "pH", "fr": "pH" },
         "ranges": [
@@ -107,11 +118,12 @@
         ]
       },
       "wlp": {
+        "param": "uv",
         "min": 0,
         "max": 11,
         "step": 0.1,
-        "uv_optimum": 6.0,
-        "uv_sigma_sq": 4.0,
+        "optimum": 6.0,
+        "sigma_sq": 4.0,
         "labels": { "nl": "UV", "en": "UV", "fr": "UV" },
         "units":  { "nl": "UV-index", "en": "UV-index", "fr": "indice UV" },
         "ranges": [
@@ -133,9 +145,11 @@
     {
       "index": 3,
       "htv": {
+        "param": "electricity",
         "min": 0,
         "max": 3,
         "step": 0.01,
+        "optimum": 1.15,
         "labels": { "nl": "Elektrische activiteit", "en": "Electrical activity", "fr": "Activité électrique" },
         "units":  { "nl": "kJ/m²/dag", "en": "kJ/m²/day", "fr": "kJ/m²/jour" },
         "ranges": [
@@ -147,9 +161,11 @@
         ]
       },
       "wlp": {
+        "param": "electricity",
         "min": 0,
         "max": 3,
         "step": 0.01,
+        "optimum": 2.1,
         "labels": { "nl": "Elektrische activiteit", "en": "Electrical activity", "fr": "Activité électrique" },
         "units":  { "nl": "kJ/m²/dag", "en": "kJ/m²/day", "fr": "kJ/m²/jour" },
         "ranges": [

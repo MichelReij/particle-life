@@ -4,6 +4,7 @@
 #define LIFE_PARAMS_H
 
 #include <stdint.h>
+#include <math.h>
 
 /* OkLCH colour constants — single source of truth from life_params.json */
 #define OKLCH_L   0.66f
@@ -14,7 +15,6 @@
 #define H_RED     16.5f
 
 #define NUM_SLIDERS 4
-#define WLP_DEPTH_THRESHOLD 20.0f
 
 typedef enum { HYPO_HTV = 0, HYPO_WLP = 1 } hypothesis_t;
 
@@ -27,6 +27,8 @@ typedef struct {
     const char *label_nl, *label_en, *label_fr;
     const char *unit_nl,  *unit_en,  *unit_fr;
     colour_zone_t zone;
+    float optimum;           /* optimal physical value */
+    float snap_to_min_threshold; /* snap to min when value < this; NAN = disabled */
 } slider_def_t;
 
 static const slider_def_t SLIDER_DEFS_HTV[NUM_SLIDERS] = {
@@ -34,22 +36,26 @@ static const slider_def_t SLIDER_DEFS_HTV[NUM_SLIDERS] = {
     { 0.0f, 1000.0f, 1.0f,
       "Diepte (druk)", "Depth (pressure)", "Profondeur (pression)",
       "m", "m", "m",
-      { 0.0f, 0.0f, 1000.0f, 450.0f } },
+      { 0.0f, 0.0f, 1000.0f, 450.0f },
+      0.0f, 50.0f },
     /* slider 1 */
     { 3.0f, 160.0f, 1.0f,
       "Temperatuur", "Temperature", "Température",
       "°C", "°C", "°C",
-      { 80.0f, 95.0f, 115.0f, 125.0f } },
+      { 80.0f, 95.0f, 115.0f, 125.0f },
+      105.0f, NAN },
     /* slider 2 */
     { 0.0f, 14.0f, 0.1f,
       "Zuurtegraad", "Acidity", "Acidité",
       "pH", "pH", "pH",
-      { 8.0f, 9.0f, 11.0f, 12.0f } },
+      { 8.0f, 9.0f, 11.0f, 12.0f },
+      10.0f, NAN },
     /* slider 3 */
     { 0.0f, 3.0f, 0.01f,
       "Elektrische activiteit", "Electrical activity", "Activité électrique",
       "kJ/m²/dag", "kJ/m²/day", "kJ/m²/jour",
-      { 0.7f, 0.9f, 1.4f, 1.6f } },
+      { 0.7f, 0.9f, 1.4f, 1.6f },
+      1.15f, NAN },
 };
 
 static const slider_def_t SLIDER_DEFS_WLP[NUM_SLIDERS] = {
@@ -57,28 +63,94 @@ static const slider_def_t SLIDER_DEFS_WLP[NUM_SLIDERS] = {
     { 0.0f, 1000.0f, 1.0f,
       "Diepte (druk)", "Depth (pressure)", "Profondeur (pression)",
       "m", "m", "m",
-      { 0.0f, 0.0f, 1000.0f, 450.0f } },
+      { 0.0f, 0.0f, 1000.0f, 450.0f },
+      0.0f, 50.0f },
     /* slider 1 */
     { 3.0f, 160.0f, 1.0f,
       "Temperatuur", "Temperature", "Température",
       "°C", "°C", "°C",
-      { 3.0f, 30.0f, 50.0f, 70.0f } },
+      { 3.0f, 30.0f, 50.0f, 70.0f },
+      40.0f, NAN },
     /* slider 2 */
     { 0.0f, 11.0f, 0.1f,
       "UV", "UV", "UV",
       "UV-index", "UV-index", "indice UV",
-      { 4.0f, 5.0f, 7.0f, 8.0f } },
+      { 4.0f, 5.0f, 7.0f, 8.0f },
+      6.0f, NAN },
     /* slider 3 */
     { 0.0f, 3.0f, 0.01f,
       "Elektrische activiteit", "Electrical activity", "Activité électrique",
       "kJ/m²/dag", "kJ/m²/day", "kJ/m²/jour",
-      { 1.8f, 2.0f, 2.2f, 2.4f } },
+      { 1.8f, 2.0f, 2.2f, 2.4f },
+      2.1f, NAN },
 };
 
-#define UV_OPTIMUM  6f
-#define UV_SIGMA_SQ 4f
+#define UV_SIGMA_SQ 4.0f
 
 #define SLIDER_DEF(hyp, idx) \
     ((hyp) == HYPO_WLP ? SLIDER_DEFS_WLP[(idx)] : SLIDER_DEFS_HTV[(idx)])
+
+typedef enum {
+    LIFE_PARAM_PRESSURE = 0,
+    LIFE_PARAM_TEMPERATURE = 1,
+    LIFE_PARAM_PH = 2,
+    LIFE_PARAM_UV = 3,
+    LIFE_PARAM_ELECTRICITY = 4,
+} life_param_t;
+
+/* Physical slider index → parameter for HTV */
+static const life_param_t SLIDER_PARAM_MAP_HTV[NUM_SLIDERS] = {
+    LIFE_PARAM_PRESSURE, /* slider 0 */
+    LIFE_PARAM_TEMPERATURE, /* slider 1 */
+    LIFE_PARAM_PH, /* slider 2 */
+    LIFE_PARAM_ELECTRICITY, /* slider 3 */
+};
+
+/* Physical slider index → parameter for WLP */
+static const life_param_t SLIDER_PARAM_MAP_WLP[NUM_SLIDERS] = {
+    LIFE_PARAM_PRESSURE, /* slider 0 */
+    LIFE_PARAM_TEMPERATURE, /* slider 1 */
+    LIFE_PARAM_UV, /* slider 2 */
+    LIFE_PARAM_ELECTRICITY, /* slider 3 */
+};
+
+static const float SLIDER_PHYS_MIN_HTV[NUM_SLIDERS] = {
+    0.0f /* slider 0: pressure */, 3.0f /* slider 1: temperature */, 0.0f /* slider 2: ph */, 0.0f /* slider 3: electricity */
+};
+static const float SLIDER_PHYS_MAX_HTV[NUM_SLIDERS] = {
+    1000.0f /* slider 0: pressure */, 160.0f /* slider 1: temperature */, 14.0f /* slider 2: ph */, 3.0f /* slider 3: electricity */
+};
+
+static const float SLIDER_PHYS_MIN_WLP[NUM_SLIDERS] = {
+    0.0f /* slider 0: pressure */, 3.0f /* slider 1: temperature */, 0.0f /* slider 2: uv */, 0.0f /* slider 3: electricity */
+};
+static const float SLIDER_PHYS_MAX_WLP[NUM_SLIDERS] = {
+    1000.0f /* slider 0: pressure */, 160.0f /* slider 1: temperature */, 11.0f /* slider 2: uv */, 3.0f /* slider 3: electricity */
+};
+
+static const float SLIDER_OPTIMUM_HTV[NUM_SLIDERS] = {
+    0.0f /* slider 0: pressure */, 105.0f /* slider 1: temperature */, 10.0f /* slider 2: ph */, 1.15f /* slider 3: electricity */
+};
+static const float SLIDER_SNAP_THRESHOLD_HTV[NUM_SLIDERS] = {
+    50.0f /* slider 0: pressure */, NAN /* slider 1: temperature */, NAN /* slider 2: ph */, NAN /* slider 3: electricity */
+};
+
+static const float SLIDER_OPTIMUM_WLP[NUM_SLIDERS] = {
+    0.0f /* slider 0: pressure */, 40.0f /* slider 1: temperature */, 6.0f /* slider 2: uv */, 2.1f /* slider 3: electricity */
+};
+static const float SLIDER_SNAP_THRESHOLD_WLP[NUM_SLIDERS] = {
+    50.0f /* slider 0: pressure */, NAN /* slider 1: temperature */, NAN /* slider 2: uv */, NAN /* slider 3: electricity */
+};
+
+#define SLIDER_PARAM(hyp, idx) \
+    ((hyp) == HYPO_WLP ? SLIDER_PARAM_MAP_WLP[(idx)] : SLIDER_PARAM_MAP_HTV[(idx)])
+#define SLIDER_PHYS_MIN(hyp, idx) \
+    ((hyp) == HYPO_WLP ? SLIDER_PHYS_MIN_WLP[(idx)] : SLIDER_PHYS_MIN_HTV[(idx)])
+#define SLIDER_PHYS_MAX(hyp, idx) \
+    ((hyp) == HYPO_WLP ? SLIDER_PHYS_MAX_WLP[(idx)] : SLIDER_PHYS_MAX_HTV[(idx)])
+#define SLIDER_OPTIMUM(hyp, idx) \
+    ((hyp) == HYPO_WLP ? SLIDER_OPTIMUM_WLP[(idx)] : SLIDER_OPTIMUM_HTV[(idx)])
+#define SLIDER_SNAP_THRESHOLD(hyp, idx) \
+    ((hyp) == HYPO_WLP ? SLIDER_SNAP_THRESHOLD_WLP[(idx)] : SLIDER_SNAP_THRESHOLD_HTV[(idx)])
 
 #endif /* LIFE_PARAMS_H */

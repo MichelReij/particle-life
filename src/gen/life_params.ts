@@ -8,7 +8,6 @@ export const H_GREEN  = 148;
 export const H_YELLOW = 72.5;
 export const H_RED    = 16.5;
 
-export const WLP_DEPTH_THRESHOLD = 20;
 
 export type Stop = [number, number]; // [percent, hue]
 
@@ -20,6 +19,8 @@ export interface SliderVariant {
     unit: Record<string, string>;
     stops: Stop[];
     gradient: string; // CSS linear-gradient string
+    optimum: number | null;
+    snapToMinThreshold: number | null;
 }
 
 export const SLIDERS: { htv: SliderVariant; wlp: SliderVariant }[] = [
@@ -30,6 +31,8 @@ export const SLIDERS: { htv: SliderVariant; wlp: SliderVariant }[] = [
             unit: {"nl":"m","en":"m","fr":"m"},
             stops: [[0,148],[2,148],[5,72.5],[15,16.5],[30,16.5],[38,72.5],[50,148],[100,148]],
             gradient: "linear-gradient(in oklch to top, oklch(0.66 0.13 148) 0.0%, oklch(0.66 0.13 148) 2.0%, oklch(0.66 0.13 72.5) 5.0%, oklch(0.66 0.13 16.5) 15.0%, oklch(0.66 0.13 16.5) 30.0%, oklch(0.66 0.13 72.5) 38.0%, oklch(0.66 0.13 148) 50.0%, oklch(0.66 0.13 148) 100.0%)",
+            optimum: 0,
+            snapToMinThreshold: 50,
         },
         wlp: {
             min: 0, max: 1000, step: 1,
@@ -37,6 +40,8 @@ export const SLIDERS: { htv: SliderVariant; wlp: SliderVariant }[] = [
             unit: {"nl":"m","en":"m","fr":"m"},
             stops: [[0,148],[2,148],[5,72.5],[15,16.5],[30,16.5],[38,72.5],[50,148],[100,148]],
             gradient: "linear-gradient(in oklch to top, oklch(0.66 0.13 148) 0.0%, oklch(0.66 0.13 148) 2.0%, oklch(0.66 0.13 72.5) 5.0%, oklch(0.66 0.13 16.5) 15.0%, oklch(0.66 0.13 16.5) 30.0%, oklch(0.66 0.13 72.5) 38.0%, oklch(0.66 0.13 148) 50.0%, oklch(0.66 0.13 148) 100.0%)",
+            optimum: 0,
+            snapToMinThreshold: 50,
         },
     },
     {
@@ -46,6 +51,8 @@ export const SLIDERS: { htv: SliderVariant; wlp: SliderVariant }[] = [
             unit: {"nl":"°C","en":"°C","fr":"°C"},
             stops: [[0,251],[49.044585987261144,251],[58.59872611464968,148],[71.3375796178344,148],[77.70700636942675,16.5],[100,16.5]],
             gradient: "linear-gradient(in oklch to top, oklch(0.66 0.13 251) 0.0%, oklch(0.66 0.13 251) 49.0%, oklch(0.66 0.13 148) 58.6%, oklch(0.66 0.13 148) 71.3%, oklch(0.66 0.13 16.5) 77.7%, oklch(0.66 0.13 16.5) 100.0%)",
+            optimum: 105,
+            snapToMinThreshold: null,
         },
         wlp: {
             min: 3, max: 160, step: 1,
@@ -53,6 +60,8 @@ export const SLIDERS: { htv: SliderVariant; wlp: SliderVariant }[] = [
             unit: {"nl":"°C","en":"°C","fr":"°C"},
             stops: [[0,251],[17.197452229299362,251],[29.936305732484076,148],[42.675159235668794,16.5],[100,16.5]],
             gradient: "linear-gradient(in oklch to top, oklch(0.66 0.13 251) 0.0%, oklch(0.66 0.13 251) 17.2%, oklch(0.66 0.13 148) 29.9%, oklch(0.66 0.13 16.5) 42.7%, oklch(0.66 0.13 16.5) 100.0%)",
+            optimum: 40,
+            snapToMinThreshold: null,
         },
     },
     {
@@ -62,6 +71,8 @@ export const SLIDERS: { htv: SliderVariant; wlp: SliderVariant }[] = [
             unit: {"nl":"pH","en":"pH","fr":"pH"},
             stops: [[0,16.5],[57.14285714285714,16.5],[64.28571428571429,148],[78.57142857142857,148],[85.71428571428571,16.5],[100,16.5]],
             gradient: "linear-gradient(in oklch to top, oklch(0.66 0.13 16.5) 0.0%, oklch(0.66 0.13 16.5) 57.1%, oklch(0.66 0.13 148) 64.3%, oklch(0.66 0.13 148) 78.6%, oklch(0.66 0.13 16.5) 85.7%, oklch(0.66 0.13 16.5) 100.0%)",
+            optimum: 10,
+            snapToMinThreshold: null,
         },
         wlp: {
             min: 0, max: 11, step: 0.1,
@@ -69,6 +80,8 @@ export const SLIDERS: { htv: SliderVariant; wlp: SliderVariant }[] = [
             unit: {"nl":"UV-index","en":"UV-index","fr":"indice UV"},
             stops: [[0,16.5],[36.36363636363637,72.5],[54.54545454545454,148],[72.72727272727273,72.5],[100,16.5]],
             gradient: "linear-gradient(in oklch to top, oklch(0.66 0.13 16.5) 0.0%, oklch(0.66 0.13 72.5) 36.4%, oklch(0.66 0.13 148) 54.5%, oklch(0.66 0.13 72.5) 72.7%, oklch(0.66 0.13 16.5) 100.0%)",
+            optimum: 6,
+            snapToMinThreshold: null,
         },
     },
     {
@@ -78,6 +91,8 @@ export const SLIDERS: { htv: SliderVariant; wlp: SliderVariant }[] = [
             unit: {"nl":"kJ/m²/dag","en":"kJ/m²/day","fr":"kJ/m²/jour"},
             stops: [[0,16.5],[23.333333333333332,16.5],[30,148],[46.666666666666664,148],[53.333333333333336,16.5],[100,16.5]],
             gradient: "linear-gradient(in oklch to top, oklch(0.66 0.13 16.5) 0.0%, oklch(0.66 0.13 16.5) 23.3%, oklch(0.66 0.13 148) 30.0%, oklch(0.66 0.13 148) 46.7%, oklch(0.66 0.13 16.5) 53.3%, oklch(0.66 0.13 16.5) 100.0%)",
+            optimum: 1.15,
+            snapToMinThreshold: null,
         },
         wlp: {
             min: 0, max: 3, step: 0.01,
@@ -85,9 +100,10 @@ export const SLIDERS: { htv: SliderVariant; wlp: SliderVariant }[] = [
             unit: {"nl":"kJ/m²/dag","en":"kJ/m²/day","fr":"kJ/m²/jour"},
             stops: [[0,16.5],[60,16.5],[66.66666666666666,148],[73.33333333333334,148],[80,16.5],[100,16.5]],
             gradient: "linear-gradient(in oklch to top, oklch(0.66 0.13 16.5) 0.0%, oklch(0.66 0.13 16.5) 60.0%, oklch(0.66 0.13 148) 66.7%, oklch(0.66 0.13 148) 73.3%, oklch(0.66 0.13 16.5) 80.0%, oklch(0.66 0.13 16.5) 100.0%)",
+            optimum: 2.1,
+            snapToMinThreshold: null,
         },
     },
 ];
 
-export const UV_OPTIMUM   = 6;
-export const UV_SIGMA_SQ  = 4;
+export const UV_SIGMA_SQ = 4;
