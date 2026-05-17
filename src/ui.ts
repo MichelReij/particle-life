@@ -1521,6 +1521,15 @@ function initializeEnvironmentalSliders(): void {
             applyHypothesis(newValue < WLP_DEPTH_THRESHOLD ? "wlp" : "htv");
         });
 
+        // Snap to 0m on release when depth < 50m (WLP threshold).
+        // Slider is inverted (top = 0m = sliderValue 1000), so snap means value → "1000".
+        presSlider.addEventListener("blur", () => {
+            if (pressure < WLP_DEPTH_THRESHOLD) {
+                presSlider.value = "1000";
+                presSlider.dispatchEvent(new Event("input"));
+            }
+        });
+
         // Stel initiële hypothese in (activeHypothesis op "htv" zodat switching altijd loopt)
         activeHypothesis = pressure < WLP_DEPTH_THRESHOLD ? "htv" : "wlp";
         applyHypothesis(pressure < WLP_DEPTH_THRESHOLD ? "wlp" : "htv");

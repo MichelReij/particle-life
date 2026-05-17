@@ -20,6 +20,7 @@ typedef enum { HYPO_HTV = 0, HYPO_WLP = 1 } hypothesis_t;
 
 typedef struct {
     float red_lo, green_lo, green_hi, red_hi;
+    float green2_lo, green2_hi; /* second green zone for U-shapes; both 0 when unused */
 } colour_zone_t;
 
 typedef struct {
@@ -36,25 +37,25 @@ static const slider_def_t SLIDER_DEFS_HTV[NUM_SLIDERS] = {
     { 0.0f, 1000.0f, 1.0f,
       "Diepte (druk)", "Depth (pressure)", "Profondeur (pression)",
       "m", "m", "m",
-      { 0.0f, 0.0f, 1000.0f, 450.0f },
+      { 150.0f, 0.0f, 20.0f, 300.0f, 450.0f, 1000.0f },
       0.0f, 50.0f },
     /* slider 1 */
     { 3.0f, 160.0f, 1.0f,
       "Temperatuur", "Temperature", "Température",
       "°C", "°C", "°C",
-      { 80.0f, 95.0f, 115.0f, 125.0f },
+      { 80.0f, 95.0f, 115.0f, 125.0f, 0.0f, 0.0f },
       105.0f, NAN },
     /* slider 2 */
     { 0.0f, 14.0f, 0.1f,
       "Zuurtegraad", "Acidity", "Acidité",
       "pH", "pH", "pH",
-      { 8.0f, 9.0f, 11.0f, 12.0f },
+      { 8.0f, 9.0f, 11.0f, 12.0f, 0.0f, 0.0f },
       10.0f, NAN },
     /* slider 3 */
     { 0.0f, 3.0f, 0.01f,
       "Elektrische activiteit", "Electrical activity", "Activité électrique",
       "kJ/m²/dag", "kJ/m²/day", "kJ/m²/jour",
-      { 0.7f, 0.9f, 1.4f, 1.6f },
+      { 0.7f, 0.9f, 1.4f, 1.6f, 0.0f, 0.0f },
       1.15f, NAN },
 };
 
@@ -63,25 +64,25 @@ static const slider_def_t SLIDER_DEFS_WLP[NUM_SLIDERS] = {
     { 0.0f, 1000.0f, 1.0f,
       "Diepte (druk)", "Depth (pressure)", "Profondeur (pression)",
       "m", "m", "m",
-      { 0.0f, 0.0f, 1000.0f, 450.0f },
+      { 150.0f, 0.0f, 20.0f, 300.0f, 450.0f, 1000.0f },
       0.0f, 50.0f },
     /* slider 1 */
     { 3.0f, 160.0f, 1.0f,
       "Temperatuur", "Temperature", "Température",
       "°C", "°C", "°C",
-      { 3.0f, 30.0f, 50.0f, 70.0f },
+      { 3.0f, 30.0f, 50.0f, 70.0f, 0.0f, 0.0f },
       40.0f, NAN },
     /* slider 2 */
     { 0.0f, 11.0f, 0.1f,
-      "UV", "UV", "UV",
+      "UV-straling", "UV radiation", "Rayonnement UV",
       "UV-index", "UV-index", "indice UV",
-      { 4.0f, 5.0f, 7.0f, 8.0f },
+      { 4.0f, 5.0f, 7.0f, 8.0f, 0.0f, 0.0f },
       6.0f, NAN },
     /* slider 3 */
     { 0.0f, 3.0f, 0.01f,
       "Elektrische activiteit", "Electrical activity", "Activité électrique",
       "kJ/m²/dag", "kJ/m²/day", "kJ/m²/jour",
-      { 1.8f, 2.0f, 2.2f, 2.4f },
+      { 1.8f, 2.0f, 2.2f, 2.4f, 0.0f, 0.0f },
       2.1f, NAN },
 };
 

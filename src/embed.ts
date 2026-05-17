@@ -650,7 +650,7 @@ class EmbedApp {
             "ol-pres",
         ) as HTMLInputElement | null;
         presSlider?.addEventListener("blur", () => {
-            if (presSlider && parseFloat(presSlider.value) < 50) {
+            if (presSlider && parseFloat(presSlider.value) < WLP_DEPTH_THRESHOLD) {
                 presSlider.value = "0";
                 presSlider.dispatchEvent(new Event("input"));
             }

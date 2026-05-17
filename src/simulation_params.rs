@@ -81,7 +81,7 @@ pub struct SimulationParams {
     pub base_friction: f32,
 
     // Active hypothesis: false = HTV (Hydrothermal Vents), true = WLP (Warm Little Ponds)
-    // Derived from pressure_level: WLP when pressure < 20m equivalent
+    // Derived from pressure_level: WLP when pressure < 50m
     pub is_wlp: bool,
 
     // UV level for WLP mode (replaces pH as the 3rd environmental slider)
@@ -456,7 +456,7 @@ impl SimulationParams {
         self.pressure_level = clamped_pressure;
 
         let was_wlp = self.is_wlp;
-        self.is_wlp = clamped_pressure < 20.0;
+        self.is_wlp = clamped_pressure < crate::life_params_gen::WLP_DEPTH_THRESHOLD;
 
         if self.is_wlp {
             self.apply_pressure_wlp(clamped_pressure);
