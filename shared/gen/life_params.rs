@@ -30,7 +30,7 @@ pub mod wlp {
     pub const SLIDER0_MIN: f32 = 0.0;
     pub const SLIDER0_MAX: f32 = 1000.0;
     pub const SLIDER1_MIN: f32 = 3.0;
-    pub const SLIDER1_MAX: f32 = 160.0;
+    pub const SLIDER1_MAX: f32 = 100.0;
     pub const SLIDER2_MIN: f32 = 0.0;
     pub const SLIDER2_MAX: f32 = 11.0;
     pub const SLIDER3_MIN: f32 = 0.0;

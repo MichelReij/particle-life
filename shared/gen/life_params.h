@@ -67,7 +67,7 @@ static const slider_def_t SLIDER_DEFS_WLP[NUM_SLIDERS] = {
       { 150.0f, 0.0f, 20.0f, 300.0f, 450.0f, 1000.0f },
       0.0f, 50.0f },
     /* slider 1 */
-    { 3.0f, 160.0f, 1.0f,
+    { 3.0f, 100.0f, 1.0f,
       "Temperatuur", "Temperature", "Température",
       "°C", "°C", "°C",
       { 3.0f, 30.0f, 50.0f, 70.0f, 0.0f, 0.0f },
@@ -126,7 +126,7 @@ static const float SLIDER_PHYS_MIN_WLP[NUM_SLIDERS] = {
     0.0f /* slider 0: pressure */, 3.0f /* slider 1: temperature */, 0.0f /* slider 2: uv */, 0.0f /* slider 3: electricity */
 };
 static const float SLIDER_PHYS_MAX_WLP[NUM_SLIDERS] = {
-    1000.0f /* slider 0: pressure */, 160.0f /* slider 1: temperature */, 11.0f /* slider 2: uv */, 3.0f /* slider 3: electricity */
+    1000.0f /* slider 0: pressure */, 100.0f /* slider 1: temperature */, 11.0f /* slider 2: uv */, 3.0f /* slider 3: electricity */
 };
 
 static const float SLIDER_OPTIMUM_HTV[NUM_SLIDERS] = {

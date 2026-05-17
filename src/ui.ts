@@ -1378,8 +1378,22 @@ function applyHypothesis(hypothesis: "htv" | "wlp"): void {
     const switching = hypothesis !== activeHypothesis;
     activeHypothesis = hypothesis;
 
-    // pH/UV label en range alleen wisselen bij een echte hypothese-switch.
+    // Slider ranges alleen wisselen bij een echte hypothese-switch.
     if (switching) {
+        // Temperatuur: max verschilt per hypothese (WLP: 100°C, HTV: 160°C)
+        const tempSlider = document.getElementById("tempSlider") as HTMLInputElement | null;
+        const tempVal    = document.getElementById("tempValue");
+        if (tempSlider) {
+            const newMax = hypothesis === "wlp"
+                ? SLIDERS[1].wlp.max
+                : SLIDERS[1].htv.max;
+            const clamped = Math.min(parseFloat(tempSlider.value), newMax);
+            tempSlider.max = newMax.toString();
+            tempSlider.value = clamped.toString();
+            if (tempVal) tempVal.textContent = clamped.toString();
+        }
+
+        // pH/UV: label en range wisselen
         const phSlider = document.getElementById("phSlider") as HTMLInputElement | null;
         const phLabel  = document.getElementById("phLabel")  as HTMLElement | null;
         const phVal    = document.getElementById("phValue");
@@ -1397,6 +1411,19 @@ function applyHypothesis(hypothesis: "htv" | "wlp"): void {
             const newMax = parseFloat(phSlider.max);
             phSlider.value = (normalized * newMax).toFixed(1);
             if (phVal) phVal.textContent = phSlider.value;
+        }
+
+        // Electricity: max per hypothese uit SLIDERS
+        const elecSlider = document.getElementById("elecSlider") as HTMLInputElement | null;
+        const elecVal    = document.getElementById("elecValue");
+        if (elecSlider) {
+            const newMax = hypothesis === "wlp"
+                ? SLIDERS[3].wlp.max
+                : SLIDERS[3].htv.max;
+            const clamped = Math.min(parseFloat(elecSlider.value), newMax);
+            elecSlider.max = newMax.toString();
+            elecSlider.value = clamped.toString();
+            if (elecVal) elecVal.textContent = clamped.toFixed(2);
         }
     }
 

@@ -75,20 +75,21 @@
       },
       "wlp": {
         "param": "temperature",
+        "max": 100,
         "optimum": 40,
         "labels": { "nl": "Temperatuur", "en": "Temperature", "fr": "Température" },
         "units":  { "nl": "°C", "en": "°C", "fr": "°C" },
         "meters": {
-          "scale_factor": 1.0, "scale_min": 0, "scale_max": 160,
+          "scale_factor": 1.0, "scale_min": 0, "scale_max": 100,
           "disp_factor": 1.0, "decimals": false, "disp_round": 0,
           "total_ticks": 21, "major_every": 5,
-          "tick_labels": ["0", "40", "80", "120", "160"]
+          "tick_labels": ["0", "25", "50", "75", "100"]
         },
         "ranges": [
           { "min":  3, "max":  30, "color": "blue" },
           { "min": 30, "max":  50, "color": "green" },
           { "min": 50, "max":  70, "color": "transition" },
-          { "min": 70, "max": 160, "color": "red" }
+          { "min": 70, "max": 100, "color": "red" }
         ]
       }
     },
