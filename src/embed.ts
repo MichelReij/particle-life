@@ -723,11 +723,18 @@ class EmbedApp {
             );
         }
 
-        // --- Temperatuur-gradient aanpassen aan optimum hypothese ---
+        // --- Temperatuur: max + gradient aanpassen aan hypothese ---
         const tempSlider = document.getElementById(
             "ol-temp",
         ) as HTMLInputElement | null;
         if (tempSlider) {
+            const newTempMax = hypothesis === "wlp"
+                ? SLIDERS[1].wlp.max
+                : SLIDERS[1].htv.max;
+            const clamped = Math.min(parseFloat(tempSlider.value), newTempMax);
+            tempSlider.max = newTempMax.toString();
+            tempSlider.value = clamped.toString();
+
             if (hypothesis === "wlp") {
                 tempSlider.style.background = SLIDERS[1].wlp.gradient;
             } else {
@@ -738,13 +745,15 @@ class EmbedApp {
                 hypothesis === "wlp" ? "ol-temp-wlp" : "ol-temp",
             );
             const tempVal = document.getElementById("ol-temp-val");
-            if (tempVal)
+            if (tempVal) {
+                tempVal.textContent = clamped.toString();
                 tempVal.style.color =
                     tempSlider.style.getPropertyValue("--thumb-color");
+            }
 
             // Achtergrondkleur direct bijwerken zonder te wachten op sliderbeweging
             if (this.engine && !this.engineBusy) {
-                this.engine.set_temperature(parseFloat(tempSlider.value));
+                this.engine.set_temperature(clamped);
             }
         }
     }
