@@ -34,6 +34,17 @@ let joystickForceX = 0.0;
 let joystickForceY = 0.0;
 let joystickInfluence = 200.0; // Maximum force influence from joystick
 
+// EMA-smoothed pan velocity (range -1..1, same as joystickForce*)
+let panVelocityX = 0.0;
+let panVelocityY = 0.0;
+// Time constant in seconds: larger = slower acceleration / deceleration
+const PAN_EMA_TAU = 0.4;
+
+// EMA-smoothed zoom (web UI slider only)
+let zoomTarget = 1.0;
+let zoomSmoothed = 1.0;
+const ZOOM_EMA_TAU = 0.25;
+
 // FPS calculation variables
 let frameCount = 0;
 let lastFPSTime = 0;
@@ -719,40 +730,56 @@ async function initJoyStick(currentZoomLevel: number) {
  * second at full deflection, so it feels the same depth regardless of zoom.
  */
 export function updateJoystickPan(deltaTime: number): void {
+    // Zoom EMA — runs every frame regardless of pan activity
+    const zoomAlpha = 1 - Math.exp(-deltaTime / ZOOM_EMA_TAU);
+    zoomSmoothed += zoomAlpha * (zoomTarget - zoomSmoothed);
+    if (Math.abs(zoomSmoothed - zoomTarget) > 0.001) {
+        constrainZoomCenter(zoomSmoothed);
+        if (parameterUpdateCallbacks.setZoom) {
+            parameterUpdateCallbacks.setZoom(zoomSmoothed, zoomCenterX, zoomCenterY);
+        } else {
+            parameterUpdateCallbacks.updateZoom(zoomSmoothed, zoomCenterX, zoomCenterY);
+        }
+        updateZoomCenterInfo(zoomSmoothed);
+    }
+
     const deadZone = 0.02;
-    if (
-        Math.abs(joystickForceX) < deadZone &&
-        Math.abs(joystickForceY) < deadZone
-    ) {
+    const alpha = 1 - Math.exp(-deltaTime / PAN_EMA_TAU);
+
+    const targetX = Math.abs(joystickForceX) < deadZone ? 0 : joystickForceX;
+    const targetY = Math.abs(joystickForceY) < deadZone ? 0 : joystickForceY;
+
+    panVelocityX += alpha * (targetX - panVelocityX);
+    panVelocityY += alpha * (targetY - panVelocityY);
+
+    const velDeadZone = 0.001;
+    if (Math.abs(panVelocityX) < velDeadZone && Math.abs(panVelocityY) < velDeadZone) {
+        panVelocityX = 0;
+        panVelocityY = 0;
         return;
     }
 
-    const zoomSlider = document.getElementById(
-        "zoomSlider",
-    ) as HTMLInputElement;
-    const zoom = zoomSlider ? parseFloat(zoomSlider.value) : 1.0;
-
-    // Viewport size in virtual-world units at current zoom
-    const viewportWidth = VIRTUAL_WORLD_WIDTH / zoom;
-    const viewportHeight = VIRTUAL_WORLD_HEIGHT / zoom;
+    // Viewport size in virtual-world units at current (smoothed) zoom
+    const viewportWidth = VIRTUAL_WORLD_WIDTH / zoomSmoothed;
+    const viewportHeight = VIRTUAL_WORLD_HEIGHT / zoomSmoothed;
 
     // 50 % of visible area per second at max deflection
     const speedFactor = 0.5;
 
-    zoomCenterX += joystickForceX * viewportWidth * speedFactor * deltaTime;
-    zoomCenterY += joystickForceY * viewportHeight * speedFactor * deltaTime;
+    zoomCenterX += panVelocityX * viewportWidth * speedFactor * deltaTime;
+    zoomCenterY += panVelocityY * viewportHeight * speedFactor * deltaTime;
 
-    const constrained = constrainZoomCenter(zoom);
+    const constrained = constrainZoomCenter(zoomSmoothed);
     zoomCenterX = constrained.x;
     zoomCenterY = constrained.y;
 
     if (parameterUpdateCallbacks.setZoom) {
-        parameterUpdateCallbacks.setZoom(zoom, zoomCenterX, zoomCenterY);
+        parameterUpdateCallbacks.setZoom(zoomSmoothed, zoomCenterX, zoomCenterY);
     } else {
-        parameterUpdateCallbacks.updateZoom(zoom, zoomCenterX, zoomCenterY);
+        parameterUpdateCallbacks.updateZoom(zoomSmoothed, zoomCenterX, zoomCenterY);
     }
 
-    updateZoomCenterInfo(zoom);
+    updateZoomCenterInfo(zoomSmoothed);
 }
 
 /**
@@ -1160,6 +1187,8 @@ function initializeZoomSlider(currentZoomLevel: number): void {
 
         zoomSlider.value = initialZoom.toString();
         zoomValueDisplay.textContent = initialZoom.toFixed(1); // Show 1 decimal
+        zoomTarget = initialZoom;
+        zoomSmoothed = initialZoom;
 
         // Immediately update the engine with the final zoom value to ensure consistency
         if (parameterUpdateCallbacks && parameterUpdateCallbacks.updateZoom) {
@@ -1182,35 +1211,8 @@ function initializeZoomSlider(currentZoomLevel: number): void {
                 (event.target as HTMLInputElement).value,
             );
             console.log(`🎚️ Zoom slider input event: ${newValue}`);
-            // Don't save to localStorage - always reset to minimum on reload
-
-            // Constrain zoom center based on new zoom level
-            constrainZoomCenter(newValue);
-
-            // Use comprehensive zoom method if available (Rust engine)
-            if (parameterUpdateCallbacks.setZoom) {
-                console.log(
-                    `🔍 Calling setZoom(${newValue}, ${zoomCenterX}, ${zoomCenterY})`,
-                );
-                parameterUpdateCallbacks.setZoom(
-                    newValue,
-                    zoomCenterX,
-                    zoomCenterY,
-                );
-            } else {
-                console.log(
-                    `🔍 Calling updateZoom fallback(${newValue}, ${zoomCenterX}, ${zoomCenterY})`,
-                );
-                // Fallback to updateZoom callback (TypeScript engine)
-                parameterUpdateCallbacks.updateZoom(
-                    newValue,
-                    zoomCenterX,
-                    zoomCenterY,
-                );
-            }
-
+            zoomTarget = newValue;
             updateZoomLabel(newValue);
-            updateZoomCenterInfo(newValue);
         });
 
         zoomSlider.addEventListener("change", (event) => {
@@ -1218,16 +1220,8 @@ function initializeZoomSlider(currentZoomLevel: number): void {
                 (event.target as HTMLInputElement).value,
             );
             console.log(`Zoom slider change event: ${newValue}`);
-            constrainZoomCenter(newValue);
-
-            if (parameterUpdateCallbacks.setZoom) {
-                parameterUpdateCallbacks.setZoom(newValue, zoomCenterX, zoomCenterY);
-            } else {
-                parameterUpdateCallbacks.updateZoom(newValue, zoomCenterX, zoomCenterY);
-            }
-
+            zoomTarget = newValue;
             updateZoomLabel(newValue);
-            updateZoomCenterInfo(newValue);
         });
     }
 }
