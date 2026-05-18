@@ -70,8 +70,8 @@ static const slider_def_t SLIDER_DEFS_WLP[NUM_SLIDERS] = {
     { 3.0f, 100.0f, 1.0f,
       "Temperatuur", "Temperature", "Température",
       "°C", "°C", "°C",
-      { 3.0f, 30.0f, 50.0f, 70.0f, 0.0f, 0.0f },
-      40.0f, NAN },
+      { 30.0f, 40.0f, 60.0f, 70.0f, 0.0f, 0.0f },
+      50.0f, NAN },
     /* slider 2 */
     { 0.0f, 11.0f, 0.1f,
       "UV-straling", "UV radiation", "Rayonnement UV",
@@ -82,7 +82,7 @@ static const slider_def_t SLIDER_DEFS_WLP[NUM_SLIDERS] = {
     { 0.0f, 3.0f, 0.01f,
       "Elektrische activiteit", "Electrical activity", "Activité électrique",
       "ΔkV", "ΔkV", "ΔkV",
-      { 1.8f, 2.0f, 2.2f, 2.4f, 0.0f, 0.0f },
+      { 1.5f, 1.8f, 2.4f, 2.7f, 0.0f, 0.0f },
       2.1f, NAN },
 };
 
@@ -137,7 +137,7 @@ static const float SLIDER_SNAP_THRESHOLD_HTV[NUM_SLIDERS] = {
 };
 
 static const float SLIDER_OPTIMUM_WLP[NUM_SLIDERS] = {
-    0.0f /* slider 0: pressure */, 40.0f /* slider 1: temperature */, 6.0f /* slider 2: uv */, 2.1f /* slider 3: electricity */
+    0.0f /* slider 0: pressure */, 50.0f /* slider 1: temperature */, 6.0f /* slider 2: uv */, 2.1f /* slider 3: electricity */
 };
 static const float SLIDER_SNAP_THRESHOLD_WLP[NUM_SLIDERS] = {
     50.0f /* slider 0: pressure */, NAN /* slider 1: temperature */, NAN /* slider 2: uv */, NAN /* slider 3: electricity */

@@ -90,6 +90,10 @@ pub struct SimulationParams {
 
     // Day/night cycle overlay alpha (0.0 = day, 0.5 = full night). WLP only.
     pub night_alpha: f32,
+
+    // Simulation time at the moment WLP became active — cycle starts from here so
+    // switching to WLP always begins with a full day.
+    pub wlp_start_time: f32,
 }
 
 impl SimulationParams {
@@ -161,6 +165,7 @@ impl SimulationParams {
             is_wlp: false,
             uv_level: 5.5,       // Mid UV-index as default
             night_alpha: 0.0,
+            wlp_start_time: 0.0,
             temperature_level: 20.0,
         }
     }
@@ -359,7 +364,7 @@ impl SimulationParams {
         const CYCLE: f32    = DAY + FADE_IN + NIGHT + FADE_OUT; // 80s
         const MAX_ALPHA: f32 = 0.8; // #000c
 
-        let t = self.time % CYCLE;
+        let t = (self.time - self.wlp_start_time) % CYCLE;
         self.night_alpha = if t < DAY {
             0.0
         } else if t < DAY + FADE_IN {
@@ -369,6 +374,10 @@ impl SimulationParams {
         } else {
             (1.0 - (t - DAY - FADE_IN - NIGHT) / FADE_OUT) * MAX_ALPHA
         };
+
+        // Night friction: above 75% of MAX_ALPHA, friction scales up to 2× (minder UV = meer rust).
+        let night_fraction = (self.night_alpha / MAX_ALPHA - 0.75).max(0.0) / 0.25;
+        self.friction = self.base_friction * (1.0 + night_fraction);
     }
 
     // These functions handle the complex mappings from user-friendly parameters
@@ -410,21 +419,19 @@ impl SimulationParams {
         self.background_color_b = b;
     }
 
-    // WLP: temp [10, 80°C], optimum ~50°C (warm tidal pools)
-    // Gekalibreerd op HTV-optimum (1000 bar / 110°C): bij 50°C produceert WLP
-    // dezelfde friction (0.058) en drift (−40.9 px/s) als HTV bij 110°C.
+    // WLP: temp [10, 80°C], optimum 50°C (warme getijdenpoelen)
+    // Gekalibreerd: bij 50°C → friction=0.058 (= HTV bij 1000 bar + 105°C).
     fn apply_temperature_wlp(&mut self, temp: f32) {
         let clamped_temp = temp.max(10.0).min(80.0);
 
-        // Drift: bij 50°C → -(40 * 71.6) / 70 ≈ -40.9 px/s (= HTV bij 110°C)
+        // Drift: bij 50°C → -(40 * 71.6) / 70 ≈ -40.9 px/s
         let drift = -((clamped_temp - 10.0) * 71.6) / 70.0;
         self.drift_x_per_second = drift;
 
-        // Friction: bij 50°C → 0.98 * exp(-8.66 * 0.326) ≈ 0.058 (= HTV bij 110°C + 1000 bar)
-        // Bij 10°C → ~0.98  |  50°C → ~0.058  |  80°C → ~0.003
-        let normalized_temp = (clamped_temp - 10.0) / 70.0;
-        let t = normalized_temp * normalized_temp;
-        let friction = 0.98 * (-8.66 * t).exp();
+        // Friction: lineair (geen kwadraat) zodat de curve vlakker is in de groene zone.
+        // Bij 10°C → ~0.98  |  40°C → ~0.118  |  50°C → ~0.058  |  60°C → ~0.029  |  80°C → ~0.007
+        let t = (clamped_temp - 10.0) / 70.0;
+        let friction = 0.98 * (-4.95 * t).exp();
         self.base_friction = friction;
         self.friction = friction; // WLP: geen drukmodifier
 
@@ -466,6 +473,10 @@ impl SimulationParams {
 
         // Bij hypothesewisseling achtergrondkleur direct aanpassen op basis van huidige temperatuur
         if self.is_wlp != was_wlp {
+            if self.is_wlp {
+                // Reset cycle so the user always gets a full day on switching to WLP
+                self.wlp_start_time = self.time;
+            }
             let temp = self.temperature_level;
             let (r, g, b) = if self.is_wlp {
                 Self::temperature_to_background_color_wlp(temp)
@@ -494,17 +505,17 @@ impl SimulationParams {
         self.recompute_cross_dependencies_htv();
     }
 
-    // WLP: pressure [0, 20 bar], optimum ~10 bar
-    // Gekalibreerd op HTV-optimum (1000 bar): bij 10 bar (normalized=0.5) produceert WLP
-    // dezelfde force_scale (500) en r_smooth (0.10) als HTV bij 1000 bar.
+    // WLP: pressure [0, WLP_DEPTH_THRESHOLD m), optimum = 0 (oppervlak)
+    // Bij pressure=0: force_scale=500, r_smooth=0.10 (= HTV bij 1000 bar, de levenszone).
+    // Dieper → degradeert; bij WLP_DEPTH_THRESHOLD overschakelen naar HTV-domein.
     fn apply_pressure_wlp(&mut self, clamped_pressure: f32) {
-        let normalized = clamped_pressure / 20.0;
+        let normalized = (clamped_pressure / crate::life_params_gen::WLP_DEPTH_THRESHOLD).min(1.0);
 
-        // force_scale: bij normalized=0.5 → 400 + 0.5*200 = 500 (= HTV bij 1000 bar)
-        self.force_scale = 400.0 + normalized * 200.0;
+        // force_scale: 500 aan het oppervlak → 100 bij drempeldiepte
+        self.force_scale = 500.0 - normalized * 400.0;
 
-        // r_smooth: bij normalized=0.5 → 20 * exp(-10.6 * 0.5) = 20 * exp(-5.3) ≈ 0.10 (= HTV bij 1000 bar)
-        self.r_smooth = 20.0 * (-10.6 * normalized).exp();
+        // r_smooth: 0.10 aan het oppervlak → exponentieel stijgend (spiegel van HTV)
+        self.r_smooth = 0.10 * (5.3 * normalized).exp();
 
         // Druk in WLP geeft geen frictiechaos — ondiepe poelen zijn stabiel
         self.friction = self.base_friction;
@@ -536,14 +547,16 @@ impl SimulationParams {
         self.recompute_cross_dependencies_htv();
     }
 
-    // WLP: kubische curve, originele normalisatie over 3.0 kJ (ongewijzigd).
+    // WLP: bell-curve gecentreerd op optimum 2.1 kJ → itas=0.458. Vlakkere af val aan beide kanten.
+    // itas = -1 + 1.458 × exp(-(elec−2.1)²/1.0)
+    // Bij 1.8: 0.333  |  2.1: 0.458  |  2.4: 0.333  |  3.0: −0.352
     fn apply_electrical_activity_wlp(&mut self, electrical_activity: f32) {
         let clamped = electrical_activity.max(0.0).min(3.0);
         self.electrical_activity_level = clamped;
 
         let norm = clamped / 3.0;
-        let cubic = norm * norm * norm;
-        self.inter_type_attraction_scale = -1.0 + cubic * 4.0;
+        let bell = (-(clamped - ELEC_OPTIMUM_WLP).powi(2) / 1.0).exp();
+        self.inter_type_attraction_scale = -1.0 + bell * 1.458;
         self.lightning_frequency = norm;
         self.lightning_intensity = 0.5 + norm * 1.5;
         self.lightning_duration = 0.3 + norm * 0.5;
@@ -575,22 +588,29 @@ impl SimulationParams {
         self.lenia_growth_sigma = 0.02 + combined_chaos * 0.14;
     }
 
-    // WLP cross-dependencies: UV vervangt pH als derde driver.
-    // Optimum UV: ~6 | Optimum electrical: ELEC_OPTIMUM_WLP (2.0)
-    // Symmetrisch met HTV: bij beide optima identieke secundaire parameterwaarden.
+    // WLP cross-dependencies: UV als derde driver (parallel aan pH in HTV).
+    // UV → inter_type_radius_scale, lenia_growth_mu, lenia_kernel_radius (zelfde relaties als pH).
+    // Electricity → itas (via cubic) + irs (penalty) + sigma (bell).
+    // Kalibratie: bij uv=6, elec=2.1 → irs=1.071, mu=0.050, kernel=100, sigma=0.160.
     fn recompute_cross_dependencies_wlp(&mut self) {
-        // UV quality: Gaussiaans gecentreerd op UV 6, σ²=4
+        // UV quality: Gaussiaans gecentreerd op UV=6, σ²=4 (uit life_params.json sigma_sq)
         let uv_quality = (-(self.uv_level - 6.0).powi(2) / 4.0).exp();
 
+        // Elec radius penalty: monotoon, geijkt op 0.664 zodat bij elec=2.1 → irs=1.071
+        // 2.0 × (1 − 0.664 × (2.1/3.0)) = 2.0 × 0.5352 = 1.070 ✓
         let elec_normalized = self.electrical_activity_level / 3.0;
-        let elec_radius_penalty = 1.0 - 0.65 * elec_normalized;
+        let elec_radius_penalty = 1.0 - 0.664 * elec_normalized;
         self.inter_type_radius_scale = (0.1 + uv_quality * 1.9) * elec_radius_penalty;
 
+        // UV → mu en kernel_radius (identiek aan pH-relaties in HTV)
         self.lenia_growth_mu = 0.05 + (1.0 - uv_quality) * 0.10;
         self.lenia_kernel_radius = 30.0 + uv_quality * 70.0;
 
-        let combined_chaos = (1.0 - uv_quality).max(elec_normalized * 0.5);
-        self.lenia_growth_sigma = 0.02 + combined_chaos * 0.14;
+        // Sigma: Gaussiaans op zowel UV als electricity, gecentreerd op hun optima.
+        // Bij uv=6 + elec=2.1: combined_quality=1.0 → sigma=0.160 (= HTV-levenszone) ✓
+        let elec_quality = (-(self.electrical_activity_level - ELEC_OPTIMUM_WLP).powi(2) / 0.36).exp();
+        let combined_quality = uv_quality * elec_quality;
+        self.lenia_growth_sigma = 0.02 + combined_quality * 0.14;
     }
 
     /// Converteert een lineaire sliderwaarde [ZOOM_MIN, ZOOM_MAX] naar een

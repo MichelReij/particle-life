@@ -216,6 +216,7 @@ let parameterUpdateCallbacks = {
     setTemperature: (temp: number) => {},
     setPressure: (pressure: number) => {},
     setPH: (ph: number) => {},
+    setUV: (uv: number) => {},
     setElectricalActivity: (electrical: number) => {},
     setZoom: (level: number, centerX?: number, centerY?: number) => {},
     setParticleOpacity: (opacity: number) => {},
@@ -240,6 +241,7 @@ export function setParameterUpdateCallbacks(callbacks: {
     setTemperature?: (temp: number) => void;
     setPressure?: (pressure: number) => void;
     setPH?: (ph: number) => void;
+    setUV?: (uv: number) => void;
     setElectricalActivity?: (electrical: number) => void;
     setZoom?: (level: number, centerX?: number, centerY?: number) => void;
     setParticleOpacity?: (opacity: number) => void;
@@ -266,6 +268,7 @@ export function setParameterUpdateCallbacks(callbacks: {
         setPressure:
             callbacks.setPressure || parameterUpdateCallbacks.setPressure,
         setPH: callbacks.setPH || parameterUpdateCallbacks.setPH,
+        setUV: callbacks.setUV || parameterUpdateCallbacks.setUV,
         setElectricalActivity:
             callbacks.setElectricalActivity ||
             parameterUpdateCallbacks.setElectricalActivity,
@@ -377,16 +380,17 @@ function updateParametersFromPressure(pressure: number): void {
 }
 
 function updateParametersFromPH(phValue: number): void {
-    // Use comprehensive pH method if available (Rust engine)
-    if (parameterUpdateCallbacks.setPH) {
-        parameterUpdateCallbacks.setPH(phValue);
-        // Synchronize all parameter displays to reflect changes
-        synchronizeAllParameterDisplays();
-        return;
+    if (activeHypothesis === "wlp") {
+        if (parameterUpdateCallbacks.setUV) {
+            parameterUpdateCallbacks.setUV(phValue);
+            synchronizeAllParameterDisplays();
+        }
+    } else {
+        if (parameterUpdateCallbacks.setPH) {
+            parameterUpdateCallbacks.setPH(phValue);
+            synchronizeAllParameterDisplays();
+        }
     }
-
-    // Fallback (TypeScript engine): pH effects handled by recompute_cross_dependencies in Rust
-    // No direct TypeScript mapping needed — all pH effects go through Rust
 }
 
 function updateParametersFromElectricalActivity(

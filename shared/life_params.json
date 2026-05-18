@@ -89,12 +89,22 @@
                     { "min": 95, "max": 115, "color": "green" },
                     { "min": 115, "max": 125, "color": "transition" },
                     { "min": 125, "max": 160, "color": "red" }
+                ],
+                "css_stops": [
+                    [3, "blue"],
+                    [80, "blue"],
+                    [87, "yellow"],
+                    [95, "green"],
+                    [115, "green"],
+                    [120, "yellow"],
+                    [125, "red"],
+                    [160, "red"]
                 ]
             },
             "wlp": {
                 "param": "temperature",
                 "max": 100,
-                "optimum": 40,
+                "optimum": 50,
                 "labels": {
                     "nl": "Temperatuur",
                     "en": "Temperature",
@@ -114,9 +124,20 @@
                 },
                 "ranges": [
                     { "min": 3, "max": 30, "color": "blue" },
-                    { "min": 30, "max": 50, "color": "green" },
-                    { "min": 50, "max": 70, "color": "transition" },
+                    { "min": 30, "max": 40, "color": "transition" },
+                    { "min": 40, "max": 60, "color": "green" },
+                    { "min": 60, "max": 70, "color": "transition" },
                     { "min": 70, "max": 100, "color": "red" }
+                ],
+                "css_stops": [
+                    [3, "blue"],
+                    [30, "blue"],
+                    [35, "yellow"],
+                    [40, "green"],
+                    [60, "green"],
+                    [65, "yellow"],
+                    [70, "red"],
+                    [100, "red"]
                 ]
             }
         },
@@ -151,6 +172,14 @@
                     { "min": 9.0, "max": 11.0, "color": "green" },
                     { "min": 11.0, "max": 12.0, "color": "transition" },
                     { "min": 12.0, "max": 14.0, "color": "red" }
+                ],
+                "css_stops": [
+                    [0, "red"],
+                    [8, "yellow"],
+                    [9, "green"],
+                    [11, "green"],
+                    [12, "yellow"],
+                    [14, "red"]
                 ]
             },
             "wlp": {
@@ -224,6 +253,14 @@
                     { "min": 0.9, "max": 1.4, "color": "green" },
                     { "min": 1.4, "max": 1.6, "color": "transition" },
                     { "min": 1.6, "max": 3.0, "color": "red" }
+                ],
+                "css_stops": [
+                    [0, "red"],
+                    [0.7, "yellow"],
+                    [0.9, "green"],
+                    [1.4, "green"],
+                    [1.6, "yellow"],
+                    [3.0, "red"]
                 ]
             },
             "wlp": {
@@ -250,11 +287,19 @@
                     "tick_labels": ["0", "0.5", "1", "1.5", "2", "2.5", "3"]
                 },
                 "ranges": [
-                    { "min": 0.0, "max": 1.8, "color": "red" },
-                    { "min": 1.8, "max": 2.0, "color": "transition" },
-                    { "min": 2.0, "max": 2.2, "color": "green" },
-                    { "min": 2.2, "max": 2.4, "color": "transition" },
-                    { "min": 2.4, "max": 3.0, "color": "red" }
+                    { "min": 0.0, "max": 1.5, "color": "red" },
+                    { "min": 1.5, "max": 1.8, "color": "transition" },
+                    { "min": 1.8, "max": 2.4, "color": "green" },
+                    { "min": 2.4, "max": 2.7, "color": "transition" },
+                    { "min": 2.7, "max": 3.0, "color": "red" }
+                ],
+                "css_stops": [
+                    [0, "red"],
+                    [1.5, "yellow"],
+                    [1.8, "green"],
+                    [2.4, "green"],
+                    [2.7, "yellow"],
+                    [3.0, "red"]
                 ]
             }
         }

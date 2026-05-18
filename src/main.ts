@@ -310,6 +310,11 @@ class App {
                     this.engine.set_ph(ph);
                 }
             },
+            setUV: (uv: number) => {
+                if (this.engine && !this.engineBusy) {
+                    this.engine.set_uv(uv);
+                }
+            },
             setElectricalActivity: (electrical: number) => {
                 if (this.engine && !this.engineBusy) {
                     this.engine.set_electrical_activity(electrical);

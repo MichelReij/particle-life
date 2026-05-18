@@ -227,10 +227,9 @@ fn should_process_spatial_interaction(p_idx: u32, q_idx: u32, p_cell: vec2<i32>,
 // Calculate edge damping factor for particles near world boundaries with anti-sticking
 fn calculate_edge_damping_factor(pos: vec2<f32>) -> f32 {
     // Reduced damping zone scaling for less aggressive edge effects
-    // At 1600 particles: base_zone = 40.0 (reduced from 80.0)
-    // At 6400 particles: base_zone = 120.0 (reduced from 240.0)
+    // At 6400 particles (default): base_zone = 40.0
     let base_damping_zone = 40.0;
-    let reference_particle_count = 1600.0;
+    let reference_particle_count = 6400.0;
     let particle_scale_factor = f32(sim_params.num_particles) / reference_particle_count;
     // Use linear scaling instead of square root for less aggressive high-density damping
     let density_scaling = particle_scale_factor;
@@ -300,7 +299,7 @@ fn calculate_anti_sticking_force(pos: vec2<f32>) -> vec2<f32> {
     let dist_bottom = world_height - pos.y;
 
     // Much smaller anti-sticking zone - only for severe edge cases
-    let particle_scale_factor = f32(sim_params.num_particles) / 1600.0;
+    let particle_scale_factor = f32(sim_params.num_particles) / 6400.0;
     let anti_stick_zone = 30.0 + 20.0 * sqrt(particle_scale_factor);
     // Much smaller zone
 
@@ -896,15 +895,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let is_near_y_edge = particle_p.pos.y < y_margin || particle_p.pos.y > (sim_params.virtual_world_height - y_margin);
 
         if (is_out_of_bounds || is_near_y_edge) {
-            // Randomized initial velocity per particle
-            let base_velocity_boost = 1.2 + (f32(sim_params.num_particles) / 1600.0) * 0.3;
-            // Base boost
-            let velocity_seed = hash(global_id.x * 41u + u32(sim_params.time * 1000.0) + particle_p.ptype * 43u);
-            let random_velocity_factor = random_float(velocity_seed);
-            // 0.0 to 1.0
-            let velocity_boost = base_velocity_boost * random_velocity_factor;
-            // Randomize between 0 and base_velocity_boost
-            particle_p.vel = vec2<f32>(sim_params.drift_x_per_second * velocity_boost, 0.0);
+            // Spawn with zero velocity — particles integrate naturally into the flow.
+            particle_p.vel = vec2<f32>(0.0, 0.0);
             if (is_near_y_edge) {
                 // Particles near Y edges get clustered Y positioning for more natural distribution
                 let y_seed = hash(global_id.x * 13u + u32(sim_params.time * 1000.0) + particle_p.ptype * 17u);
@@ -996,7 +988,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // Drifting left or no drift: respawn at right edge with bell Y to reduce edge clustering
                 particle_p.pos.x = sim_params.virtual_world_width;
                 let bell_seed = hash(global_id.x * 97u + u32(sim_params.time * 1000.0) + particle_p.ptype * 53u);
-                particle_p.pos.y = bell_random(bell_seed, 3u) * sim_params.virtual_world_height;
+                particle_p.pos.y = bell_random(bell_seed, 2u) * sim_params.virtual_world_height;
             }
 
         }
