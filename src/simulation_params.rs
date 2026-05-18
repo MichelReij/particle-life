@@ -769,9 +769,13 @@ impl SimulationParams {
         let pressure = sensor_data.to_pressure();
         self.apply_pressure(pressure);
 
-        // Apply pH
+        // Apply pH (HTV) or UV (WLP) — both come from the same slider
         let ph = sensor_data.to_ph();
-        self.apply_ph(ph);
+        if self.is_wlp {
+            self.apply_uv(ph);
+        } else {
+            self.apply_ph(ph);
+        }
 
         // Apply electrical activity
         let electrical = sensor_data.to_electrical_activity();

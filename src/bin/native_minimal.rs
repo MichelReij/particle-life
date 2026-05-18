@@ -61,6 +61,7 @@ struct MinimalNativeApp {
     lightning_communicated: bool,
     next_poll_time: std::time::Instant,
     last_night_alpha_sent: f32,
+    last_night_alpha_update: std::time::Instant,
 }
 
 impl Default for MinimalNativeApp {
@@ -111,6 +112,7 @@ impl Default for MinimalNativeApp {
             lightning_communicated: false,
             next_poll_time: std::time::Instant::now(),
             last_night_alpha_sent: -1.0,
+            last_night_alpha_update: std::time::Instant::now(),
         }
     }
 }
@@ -400,6 +402,10 @@ impl MinimalNativeApp {
     }
 
     fn communicate_night_alpha_to_esp32(&mut self) {
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_night_alpha_update).as_millis() < 100 { return; }
+        self.last_night_alpha_update = now;
+
         let alpha = self.simulation_params.night_alpha;
         if let Some(esp32) = &self.esp32_manager {
             esp32.update_night_alpha(alpha);
