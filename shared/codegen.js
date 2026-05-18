@@ -393,6 +393,24 @@ function genRust() {
             const i   = slider.index;
             lines.push(`    pub const SLIDER${i}_MIN: f32 = ${min}.0;`);
             lines.push(`    pub const SLIDER${i}_MAX: f32 = ${max}.0;`);
+
+            // Colour zone boundaries — parallel to C's colour_zone_t
+            if (v.ranges) {
+                const ranges = v.ranges;
+                const blues  = ranges.filter(r => r.color === "blue");
+                const greens = ranges.filter(r => r.color === "green");
+                const reds   = ranges.filter(r => r.color === "red");
+
+                if (blues.length)  lines.push(`    pub const SLIDER${i}_BLUE_END:    f32 = ${f32(blues[blues.length - 1].max)};`);
+                if (greens.length) lines.push(`    pub const SLIDER${i}_GREEN_START: f32 = ${f32(greens[0].min)};`);
+                if (greens.length) lines.push(`    pub const SLIDER${i}_GREEN_END:   f32 = ${f32(greens[greens.length - 1].max)};`);
+                if (reds.length)   lines.push(`    pub const SLIDER${i}_RED_START:   f32 = ${f32(reds[reds.length - 1].min)};`);
+                // Second green zone (U-shape, e.g. pressure)
+                if (greens.length >= 2) {
+                    lines.push(`    pub const SLIDER${i}_GREEN2_START: f32 = ${f32(greens[greens.length - 1].min)};`);
+                    lines.push(`    pub const SLIDER${i}_GREEN2_END:   f32 = ${f32(greens[greens.length - 1].max)};`);
+                }
+            }
         }
         lines.push(`}`);
         lines.push(``);

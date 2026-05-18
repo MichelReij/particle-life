@@ -824,23 +824,37 @@ impl ESP32SensorData {
 
     // Convert temperature (0-4096) to Celsius (3-160°C)
     pub fn to_temperature_celsius(&self) -> f32 {
-        3.0 + (self.temperature as f32 / 4096.0) * 157.0
+        use crate::life_params_gen::htv::{SLIDER1_MIN, SLIDER1_MAX};
+        SLIDER1_MIN + (self.temperature as f32 / 4096.0) * (SLIDER1_MAX - SLIDER1_MIN)
+    }
+
+    pub fn to_temperature_wlp(&self) -> f32 {
+        use crate::life_params_gen::wlp::{SLIDER1_MIN, SLIDER1_MAX};
+        SLIDER1_MIN + (self.temperature as f32 / 4096.0) * (SLIDER1_MAX - SLIDER1_MIN)
     }
 
     // Convert pressure (0-4096) to pressure units (0-1000 bar = ~0-10000m depth)
     pub fn to_pressure(&self) -> f32 {
-        (self.pressure as f32 / 4096.0) * 1000.0
+        use crate::life_params_gen::htv::{SLIDER0_MIN, SLIDER0_MAX};
+        SLIDER0_MIN + (self.pressure as f32 / 4096.0) * (SLIDER0_MAX - SLIDER0_MIN)
     }
 
     // Convert pH (0-4096) to pH units (0-14)
     // Optimal pH for life (hydrothermal vent theory) is ~10
     pub fn to_ph(&self) -> f32 {
-        (self.ph as f32 / 4096.0) * 14.0
+        use crate::life_params_gen::htv::{SLIDER2_MIN, SLIDER2_MAX};
+        SLIDER2_MIN + (self.ph as f32 / 4096.0) * (SLIDER2_MAX - SLIDER2_MIN)
+    }
+
+    pub fn to_uv(&self) -> f32 {
+        use crate::life_params_gen::wlp::{SLIDER2_MIN, SLIDER2_MAX};
+        SLIDER2_MIN + (self.ph as f32 / 4096.0) * (SLIDER2_MAX - SLIDER2_MIN)
     }
 
     // Convert electrical (0-4096) to electrical activity (0-3)
     pub fn to_electrical_activity(&self) -> f32 {
-        (self.electrical as f32 / 4096.0) * 3.0
+        use crate::life_params_gen::htv::{SLIDER3_MIN, SLIDER3_MAX};
+        SLIDER3_MIN + (self.electrical as f32 / 4096.0) * (SLIDER3_MAX - SLIDER3_MIN)
     }
 
     // Convert volume (0-4096) to audio volume percentage (0-100)

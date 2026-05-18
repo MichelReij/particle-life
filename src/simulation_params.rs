@@ -678,34 +678,36 @@ impl SimulationParams {
         crate::buffer_utils::oklch_to_srgb(BACKGROUND_L_WLP, BACKGROUND_C_WLP, hue)
     }
 
-    // HTV hue-interpolatie: blauw(3–80) → groen(95–115) → rood(125–160)
     fn temp_to_hue_htv(temp: f32, h_blue: f32, h_green: f32, h_red: f32) -> f32 {
-        let t = temp.clamp(3.0, 160.0);
-        if t <= 80.0 {
+        use crate::life_params_gen::htv::{SLIDER1_MAX, SLIDER1_BLUE_END, SLIDER1_GREEN_START, SLIDER1_GREEN_END, SLIDER1_RED_START};
+        let t = temp.clamp(3.0, SLIDER1_MAX);
+        if t <= SLIDER1_BLUE_END {
             h_blue
-        } else if t <= 95.0 {
-            let n = (t - 80.0) / (95.0 - 80.0);
+        } else if t <= SLIDER1_GREEN_START {
+            let n = (t - SLIDER1_BLUE_END) / (SLIDER1_GREEN_START - SLIDER1_BLUE_END);
             h_blue + n * (h_green - h_blue)
-        } else if t <= 115.0 {
+        } else if t <= SLIDER1_GREEN_END {
             h_green
-        } else if t <= 125.0 {
-            let n = (t - 115.0) / (125.0 - 115.0);
+        } else if t <= SLIDER1_RED_START {
+            let n = (t - SLIDER1_GREEN_END) / (SLIDER1_RED_START - SLIDER1_GREEN_END);
             h_green + n * (h_red - h_green)
         } else {
             h_red
         }
     }
 
-    // WLP hue-interpolatie: blauw(3–30) → groen(30–50) → rood(70–160)
     fn temp_to_hue_wlp(temp: f32, h_blue: f32, h_green: f32, h_red: f32) -> f32 {
-        let t = temp.clamp(3.0, 160.0);
-        if t <= 30.0 {
+        use crate::life_params_gen::wlp::{SLIDER1_MAX, SLIDER1_BLUE_END, SLIDER1_GREEN_START, SLIDER1_GREEN_END, SLIDER1_RED_START};
+        let t = temp.clamp(3.0, SLIDER1_MAX);
+        if t <= SLIDER1_BLUE_END {
             h_blue
-        } else if t <= 50.0 {
-            let n = (t - 30.0) / (50.0 - 30.0);
+        } else if t <= SLIDER1_GREEN_START {
+            let n = (t - SLIDER1_BLUE_END) / (SLIDER1_GREEN_START - SLIDER1_BLUE_END);
             h_blue + n * (h_green - h_blue)
-        } else if t <= 70.0 {
-            let n = (t - 50.0) / (70.0 - 50.0);
+        } else if t <= SLIDER1_GREEN_END {
+            h_green
+        } else if t <= SLIDER1_RED_START {
+            let n = (t - SLIDER1_GREEN_END) / (SLIDER1_RED_START - SLIDER1_GREEN_END);
             h_green + n * (h_red - h_green)
         } else {
             h_red
@@ -761,20 +763,23 @@ impl SimulationParams {
 
         self.apply_zoom(zoom_level, Some(new_center_x), Some(new_center_y));
 
-        // Apply temperature
-        let temperature = sensor_data.to_temperature_celsius();
-        self.apply_temperature(temperature);
-
-        // Apply pressure
+        // Apply pressure first so is_wlp is correct before temperature/pH routing
         let pressure = sensor_data.to_pressure();
         self.apply_pressure(pressure);
 
-        // Apply pH (HTV) or UV (WLP) — both come from the same slider
-        let ph = sensor_data.to_ph();
-        if self.is_wlp {
-            self.apply_uv(ph);
+        // Apply temperature — slider range differs per hypothesis (HTV: 3-160°C, WLP: 3-100°C)
+        let temperature = if self.is_wlp {
+            sensor_data.to_temperature_wlp()
         } else {
-            self.apply_ph(ph);
+            sensor_data.to_temperature_celsius()
+        };
+        self.apply_temperature(temperature);
+
+        // Apply pH (HTV) or UV (WLP) — same slider, different ranges
+        if self.is_wlp {
+            self.apply_uv(sensor_data.to_uv());
+        } else {
+            self.apply_ph(sensor_data.to_ph());
         }
 
         // Apply electrical activity

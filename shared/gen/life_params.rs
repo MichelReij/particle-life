@@ -18,22 +18,52 @@ pub const BACKGROUND_C_WLP: f32 = 0.04;
 pub mod htv {
     pub const SLIDER0_MIN: f32 = 0.0;
     pub const SLIDER0_MAX: f32 = 1000.0;
+    pub const SLIDER0_GREEN_START: f32 = 0.0;
+    pub const SLIDER0_GREEN_END:   f32 = 1000.0;
+    pub const SLIDER0_RED_START:   f32 = 150.0;
+    pub const SLIDER0_GREEN2_START: f32 = 450.0;
+    pub const SLIDER0_GREEN2_END:   f32 = 1000.0;
     pub const SLIDER1_MIN: f32 = 3.0;
     pub const SLIDER1_MAX: f32 = 160.0;
+    pub const SLIDER1_BLUE_END:    f32 = 80.0;
+    pub const SLIDER1_GREEN_START: f32 = 95.0;
+    pub const SLIDER1_GREEN_END:   f32 = 115.0;
+    pub const SLIDER1_RED_START:   f32 = 125.0;
     pub const SLIDER2_MIN: f32 = 0.0;
     pub const SLIDER2_MAX: f32 = 14.0;
+    pub const SLIDER2_GREEN_START: f32 = 9.0;
+    pub const SLIDER2_GREEN_END:   f32 = 11.0;
+    pub const SLIDER2_RED_START:   f32 = 12.0;
     pub const SLIDER3_MIN: f32 = 0.0;
     pub const SLIDER3_MAX: f32 = 3.0;
+    pub const SLIDER3_GREEN_START: f32 = 0.9;
+    pub const SLIDER3_GREEN_END:   f32 = 1.4;
+    pub const SLIDER3_RED_START:   f32 = 1.6;
 }
 
 pub mod wlp {
     pub const SLIDER0_MIN: f32 = 0.0;
     pub const SLIDER0_MAX: f32 = 1000.0;
+    pub const SLIDER0_GREEN_START: f32 = 0.0;
+    pub const SLIDER0_GREEN_END:   f32 = 1000.0;
+    pub const SLIDER0_RED_START:   f32 = 150.0;
+    pub const SLIDER0_GREEN2_START: f32 = 450.0;
+    pub const SLIDER0_GREEN2_END:   f32 = 1000.0;
     pub const SLIDER1_MIN: f32 = 3.0;
     pub const SLIDER1_MAX: f32 = 100.0;
+    pub const SLIDER1_BLUE_END:    f32 = 30.0;
+    pub const SLIDER1_GREEN_START: f32 = 40.0;
+    pub const SLIDER1_GREEN_END:   f32 = 60.0;
+    pub const SLIDER1_RED_START:   f32 = 70.0;
     pub const SLIDER2_MIN: f32 = 0.0;
     pub const SLIDER2_MAX: f32 = 11.0;
+    pub const SLIDER2_GREEN_START: f32 = 5.0;
+    pub const SLIDER2_GREEN_END:   f32 = 7.0;
+    pub const SLIDER2_RED_START:   f32 = 8.0;
     pub const SLIDER3_MIN: f32 = 0.0;
     pub const SLIDER3_MAX: f32 = 3.0;
+    pub const SLIDER3_GREEN_START: f32 = 1.8;
+    pub const SLIDER3_GREEN_END:   f32 = 2.4;
+    pub const SLIDER3_RED_START:   f32 = 2.7;
 }
 
