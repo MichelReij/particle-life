@@ -3,6 +3,31 @@
 ## Over Fullscreen Mode
 Op Linux wordt de particle-life applicatie automatisch in fullscreen mode geopend zonder titelbalk voor maximale immersie.
 
+## Auto-start na booten
+
+De applicatie start automatisch bij inloggen via een GNOME autostart entry:
+
+**Bestand:** `~/.config/autostart/particle-life.desktop`
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=Particle Life Auto-Start
+Exec=/home/michel/particle-life/quick-launch.sh
+X-GNOME-Autostart-enabled=true
+```
+
+Dit bestand staat in de gebruikersmap en blijft intact bij een Ubuntu-upgrade. Na een upgrade naar een nieuwe Ubuntu-versie hoeft hier niets aan aangepast te worden.
+
+Om de auto-start tijdelijk uit te schakelen:
+```bash
+# Uitschakelen
+mv ~/.config/autostart/particle-life.desktop ~/.config/autostart/particle-life.desktop.disabled
+
+# Weer inschakelen
+mv ~/.config/autostart/particle-life.desktop.disabled ~/.config/autostart/particle-life.desktop
+```
+
 ## Hoe de applicatie starten
 ```bash
 ./target/debug/native_minimal
