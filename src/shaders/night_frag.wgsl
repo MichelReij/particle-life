@@ -48,7 +48,7 @@ struct SimParams {
     viewport_height: f32,
     viewport_radius: f32,
     night_alpha: f32,
-    _viewport_padding2: f32,
+    wlp_start_time: f32,
     _viewport_padding3: f32,
 }
 
@@ -77,7 +77,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let core_width = 1.5;   // 1.5× canvas width
     let band_width = core_width + 2.0 * fuzz;
 
-    let t        = sim_params.time % (day + non_day);
+    let t        = (sim_params.time - sim_params.wlp_start_time) % (day + non_day);
     let t_non    = max(t - day, 0.0);
 
     // Start: tx_morn = 1+fuzz (morning edge just off-screen right, entire band off-screen)

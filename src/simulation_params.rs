@@ -339,7 +339,7 @@ impl SimulationParams {
         buffer.extend_from_slice(&self.viewport_radius.to_le_bytes()); // 44
 
         buffer.extend_from_slice(&self.night_alpha.to_le_bytes()); // 45 - night overlay alpha
-        buffer.extend_from_slice(&0.0f32.to_le_bytes()); // 46 - padding
+        buffer.extend_from_slice(&self.wlp_start_time.to_le_bytes()); // 46 - wlp_start_time (for night shader sync)
         buffer.extend_from_slice(&0.0f32.to_le_bytes()); // 47 - padding
 
         buffer
