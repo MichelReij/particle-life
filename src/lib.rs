@@ -593,7 +593,7 @@ impl ParticleLifeEngine {
                 let cy = particle.position[1] - view_top;
                 if cx < 0.0 || cx > canvas_width || cy < 0.0 || cy > canvas_height { continue; }
                 let hue = (particle.particle_type as f32 / self.simulation_params.num_types as f32) * 360.0;
-                context.set_fill_style_str(&format!("hsl({}, 70%, 60%)", hue));
+                context.set_fill_style_str(&format!("oklch(0.66 0.13 {})", hue));
                 context.begin_path();
                 context.arc(cx as f64, cy as f64, particle.size as f64, 0.0, 2.0 * std::f64::consts::PI)?;
                 context.fill();

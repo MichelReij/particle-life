@@ -650,7 +650,7 @@ class App {
                 const y = 400 + Math.sin(angle) * radius;
                 const hue = (frame + i * 20) % 360;
 
-                ctx.fillStyle = `hsl(${hue}, 60%, 50%)`;
+                ctx.fillStyle = `oklch(0.66 0.13 ${hue})`;
                 ctx.beginPath();
                 ctx.arc(x, y, 3, 0, 2 * Math.PI);
                 ctx.fill();

@@ -403,7 +403,7 @@ impl SimulationParams {
         // Apply pressure modifier so extreme depth also disrupts particle order
         self.friction = friction * self.pressure_friction_modifier_htv();
 
-        // 3. Update background color using HSL: temp [3, 160] → hue [200°, -10°]
+        // 3. Update background color using OkLCH: temp [3, 160] → hue [251° blauw → 24.0° rood]
         let (r, g, b) = Self::temperature_to_background_color(clamped_temp);
         self.background_color_r = r;
         self.background_color_g = g;

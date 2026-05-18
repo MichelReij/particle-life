@@ -145,18 +145,20 @@ function temperatureToFriction(temp: number): number {
     return 0.98 * Math.exp(-3.0 * normalizedTemp); // Exponential decay from 0.98 to 0.05
 }
 
-function hslToRgb(
-    h: number,
-    s: number,
-    l: number,
-): { r: number; g: number; b: number } {
-    // h: 0–360, s: 0–1, l: 0–1 → r/g/b: 0–1
-    const a = s * Math.min(l, 1 - l);
-    const f = (n: number) => {
-        const k = (n + h / 30) % 12;
-        return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-    };
-    return { r: f(0), g: f(8), b: f(4) };
+function oklchToRgb(L: number, C: number, H: number): { r: number; g: number; b: number } {
+    // OkLCH → OkLab → linear sRGB → gamma sRGB
+    const hRad = H * Math.PI / 180;
+    const a = C * Math.cos(hRad);
+    const b = C * Math.sin(hRad);
+    const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+    const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+    const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+    const lms_l = l_ ** 3, lms_m = m_ ** 3, lms_s = s_ ** 3;
+    const rLin =  4.0767416621 * lms_l - 3.3077115913 * lms_m + 0.2309699292 * lms_s;
+    const gLin = -1.2684380046 * lms_l + 2.6097574011 * lms_m - 0.3413193965 * lms_s;
+    const bLin = -0.0041960863 * lms_l - 0.7034186147 * lms_m + 1.7076147010 * lms_s;
+    const gamma = (v: number) => Math.max(0, Math.min(1, v <= 0.0031308 ? 12.92 * v : 1.055 * v ** (1 / 2.4) - 0.055));
+    return { r: gamma(rLin), g: gamma(gLin), b: gamma(bLin) };
 }
 
 function temperatureToBackgroundColor(temp: number): {
@@ -164,15 +166,11 @@ function temperatureToBackgroundColor(temp: number): {
     g: number;
     b: number;
 } {
-    // Hue: 220 (blauw) → 0 (rood)
-    // Bereikt max blauw al bij 80°C, max rood bij 140°C
-    // Saturation en lightness zijn constant
-    const S = 0.22;
-    const L = 0.66;
+    // OkLCH: blauw (251°) bij 80°C → rood (24.0°) bij 140°C
     const hueTempClamped = Math.max(80, Math.min(140, temp));
     const normalizedHue = (hueTempClamped - 80) / (140 - 80);
-    const hue = 220 + normalizedHue * (0 - 220); // 220 → 0
-    return hslToRgb(hue, S, L);
+    const hue = 251 + normalizedHue * (24.0 - 251); // 251° → 24.0°
+    return oklchToRgb(0.64, 0.13, hue);
 }
 
 // Pressure mapping functions - NOW ONLY CONTROLS rSmooth, forceScale, and particle count
@@ -305,7 +303,7 @@ function updateDriftAndFrictionFromTemperature(temp: number): void {
     // Update drift using callback
     parameterUpdateCallbacks.updateDriftAndBackground(newDrift);
 
-    // Update background color using HSL from Rust
+    // Update background color using OkLCH from Rust
     parameterUpdateCallbacks.updateBackgroundColorFromTemperature(temp);
 
     // Update friction parameter

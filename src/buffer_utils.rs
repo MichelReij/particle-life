@@ -43,27 +43,6 @@ pub fn pressure_to_particle_count(pressure: f32, min_particles: u32, max_particl
     ((target / 64.0).round() * 64.0) as u32
 }
 
-/// Standard HSL → linear RGB (no gamma).
-/// h: [0, 360],  s: [0, 100],  l: [0, 100]  →  (r, g, b): [0, 1]
-pub fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
-    // Normalise hue to [0, 360) — handles negative values and values > 360
-    let h = ((h % 360.0) + 360.0) % 360.0;
-    let s = s / 100.0;
-    let l = l / 100.0;
-    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
-    let h_prime = h / 60.0;
-    let x = c * (1.0 - ((h_prime % 2.0) - 1.0).abs());
-    let (r1, g1, b1) = match h_prime as u32 {
-        0 => (c, x, 0.0),
-        1 => (x, c, 0.0),
-        2 => (0.0, c, x),
-        3 => (0.0, x, c),
-        4 => (x, 0.0, c),
-        _ => (c, 0.0, x),
-    };
-    let m = l - c / 2.0;
-    (r1 + m, g1 + m, b1 + m)
-}
 
 /// OKLCH → sRGB (geclampt naar [0, 1]).
 /// l: [0, 1]  c: [0, ∞)  h_deg: [0, 360)  →  (r, g, b): [0, 1]
@@ -94,15 +73,12 @@ pub fn oklch_to_srgb(l: f32, c: f32, h_deg: f32) -> (f32, f32, f32) {
     (gamma(r_lin), gamma(g_lin), gamma(b_lin))
 }
 
-// Calculate background color based on drift speed
+// Calculate background color based on drift speed (OkLCH)
 pub fn calculate_background_color_from_drift(drift_x_per_second: f32) -> [f32; 3] {
     let normalized_abs_drift = (drift_x_per_second.abs() / 80.0).min(1.0);
 
-    // Hue transitions from blue (200°) at no drift to warm red-magenta (-10°/350°) at max drift
-    let hue = 200.0 - normalized_abs_drift * 210.0;
-    let saturation = 30.0;
-    let lightness = 66.0;
-
-    let (r, g, b) = hsl_to_rgb(hue, saturation, lightness);
+    // Hue transitions from blue (251°) at no drift to red (24.0°) at max drift
+    let hue = 251.0 + normalized_abs_drift * (24.0 - 251.0);
+    let (r, g, b) = oklch_to_srgb(0.64, 0.13, hue);
     [r, g, b]
 }

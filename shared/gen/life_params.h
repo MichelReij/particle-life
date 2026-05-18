@@ -7,12 +7,12 @@
 #include <math.h>
 
 /* OkLCH colour constants — single source of truth from life_params.json */
-#define OKLCH_L   0.66f
+#define OKLCH_L   0.64f
 #define OKLCH_C   0.13f
 #define H_BLUE    251.0f
 #define H_GREEN   148.0f
 #define H_YELLOW  72.5f
-#define H_RED     16.5f
+#define H_RED     24.0f
 
 #define NUM_SLIDERS 4
 

@@ -7,7 +7,7 @@ pub const WLP_DEPTH_THRESHOLD: f32 = 50.0;
 pub const H_BLUE:   f32 = 251.0;
 pub const H_GREEN:  f32 = 148.0;
 pub const H_YELLOW: f32 = 72.5;
-pub const H_RED:    f32 = 16.5;
+pub const H_RED:    f32 = 24.0;
 
 // OKLCH L/C voor simulatie-achtergrond (lichter en minder verzadigd dan slider-thumb)
 pub const BACKGROUND_L_HTV: f32 = 0.8;
