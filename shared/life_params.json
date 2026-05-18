@@ -125,7 +125,7 @@
         "optimum": 6.0,
         "sigma_sq": 4.0,
         "labels": { "nl": "UV-straling", "en": "UV radiation", "fr": "Rayonnement UV" },
-        "units":  { "nl": "UV-index", "en": "UV-index", "fr": "indice UV" },
+        "units":  { "nl": "UV", "en": "UV", "fr": "UV" },
         "meters": {
           "scale_factor": 10.0, "scale_min": 0, "scale_max": 110,
           "disp_factor": 1.0, "decimals": true, "disp_round": 0,
@@ -157,7 +157,7 @@
         "step": 0.01,
         "optimum": 1.15,
         "labels": { "nl": "Elektrische activiteit", "en": "Electrical activity", "fr": "Activité électrique" },
-        "units":  { "nl": "kJ/m²/dag", "en": "kJ/m²/day", "fr": "kJ/m²/jour" },
+        "units":  { "nl": "kJ", "en": "kJ", "fr": "kJ" },
         "meters": {
           "scale_factor": 10.0, "scale_min": 0, "scale_max": 30,
           "disp_factor": 1.0, "decimals": true, "disp_round": 0,
@@ -179,7 +179,7 @@
         "step": 0.01,
         "optimum": 2.1,
         "labels": { "nl": "Elektrische activiteit", "en": "Electrical activity", "fr": "Activité électrique" },
-        "units":  { "nl": "kJ/m²/dag", "en": "kJ/m²/day", "fr": "kJ/m²/jour" },
+        "units":  { "nl": "ΔkV", "en": "ΔkV", "fr": "ΔkV" },
         "meters": {
           "scale_factor": 10.0, "scale_min": 0, "scale_max": 30,
           "disp_factor": 1.0, "decimals": true, "disp_round": 0,

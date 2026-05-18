@@ -54,7 +54,7 @@ static const slider_def_t SLIDER_DEFS_HTV[NUM_SLIDERS] = {
     /* slider 3 */
     { 0.0f, 3.0f, 0.01f,
       "Elektrische activiteit", "Electrical activity", "Activité électrique",
-      "kJ/m²/dag", "kJ/m²/day", "kJ/m²/jour",
+      "kJ", "kJ", "kJ",
       { 0.7f, 0.9f, 1.4f, 1.6f, 0.0f, 0.0f },
       1.15f, NAN },
 };
@@ -75,13 +75,13 @@ static const slider_def_t SLIDER_DEFS_WLP[NUM_SLIDERS] = {
     /* slider 2 */
     { 0.0f, 11.0f, 0.1f,
       "UV-straling", "UV radiation", "Rayonnement UV",
-      "UV-index", "UV-index", "indice UV",
+      "UV", "UV", "UV",
       { 4.0f, 5.0f, 7.0f, 8.0f, 0.0f, 0.0f },
       6.0f, NAN },
     /* slider 3 */
     { 0.0f, 3.0f, 0.01f,
       "Elektrische activiteit", "Electrical activity", "Activité électrique",
-      "kJ/m²/dag", "kJ/m²/day", "kJ/m²/jour",
+      "ΔkV", "ΔkV", "ΔkV",
       { 1.8f, 2.0f, 2.2f, 2.4f, 0.0f, 0.0f },
       2.1f, NAN },
 };
