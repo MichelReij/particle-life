@@ -570,6 +570,16 @@ fn random_range(seed: u32, min_val: f32, max_val: f32) -> f32 {
     return min_val + random_float(seed) * (max_val - min_val);
 }
 
+// Bell-shaped random in [0, 1): average of `n` uniform samples → approximate normal centred at 0.5.
+// n=3 gives a good bell shape while keeping edge probability low.
+fn bell_random(seed: u32, n: u32) -> f32 {
+    var sum = 0.0;
+    for (var i = 0u; i < n; i++) {
+        sum += random_float(hash(seed + i * 7919u));
+    }
+    return sum / f32(n);
+}
+
 // === Super Lightning Interaction Rules Randomization ===
 
 // Check if super lightning is active and randomize interaction rules
@@ -982,15 +992,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 particle_p.pos.x = 0.0;
                 // Keep existing velocity (no forced velocity changes)
             }
-            else if (sim_params.drift_x_per_second < - EPSILON) {
-                // Drifting significantly left, respawn at right edge (x=1UV)
-                particle_p.pos.x = sim_params.virtual_world_width;
-                // Keep existing velocity (no forced velocity changes)
-            }
             else {
-                // No significant drift, respawn on the right edge
+                // Drifting left or no drift: respawn at right edge with bell Y to reduce edge clustering
                 particle_p.pos.x = sim_params.virtual_world_width;
-                // Keep existing velocity (no forced velocity changes)
+                let bell_seed = hash(global_id.x * 97u + u32(sim_params.time * 1000.0) + particle_p.ptype * 53u);
+                particle_p.pos.y = bell_random(bell_seed, 3u) * sim_params.virtual_world_height;
             }
 
         }
