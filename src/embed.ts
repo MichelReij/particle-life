@@ -723,6 +723,17 @@ class EmbedApp {
             );
         }
 
+        // --- Electricity: gradient aanpassen aan hypothese ---
+        const elecSlider = document.getElementById("ol-elec") as HTMLInputElement | null;
+        if (elecSlider) {
+            if (hypothesis === "wlp") {
+                elecSlider.style.background = SLIDERS[3].wlp.gradient;
+            } else {
+                elecSlider.style.background = "";
+            }
+            updateThumbColor(elecSlider, hypothesis === "wlp" ? "ol-elec-wlp" : "ol-elec");
+        }
+
         // --- Temperatuur: max + gradient aanpassen aan hypothese ---
         const tempSlider = document.getElementById(
             "ol-temp",
