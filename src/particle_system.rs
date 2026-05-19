@@ -189,9 +189,9 @@ impl ParticleSystem {
                 let is_active_u32 = if particle.is_active { 1u32 } else { 0u32 };
                 buffer.extend_from_slice(&is_active_u32.to_le_bytes());
 
-                // Padding (f32) - 8 bytes (for 16-byte alignment, total 48 bytes)
-                buffer.extend_from_slice(&0.0f32.to_le_bytes());
-                buffer.extend_from_slice(&0.0f32.to_le_bytes());
+                // spawn_time = -1.0 (sentinel: initial particle, exempt from spawn damping)
+                buffer.extend_from_slice(&(-1.0f32).to_le_bytes());
+                buffer.extend_from_slice(&0.0f32.to_le_bytes()); // _padding2
             } else {
                 // Fill with zeros for missing particles
                 buffer.extend_from_slice(&[0u8; 48]);

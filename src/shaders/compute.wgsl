@@ -12,7 +12,7 @@ struct Particle {
     // 0 = grow, 1 = shrink
     is_active: u32,
     // Whether this particle is active/visible (bool as u32)
-    _padding1: f32,
+    spawn_time: f32,   // sim_params.time at last respawn; -1.0 = initial particle (no damping)
     _padding2: f32,
     // Ensure 16-byte alignment (48 bytes total)
 }
@@ -823,6 +823,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Apply friction
     particle_p.vel = particle_p.vel * (1.0 - sim_params.friction);
 
+    // Spawn damping: freeze velocity for 2s after respawn so particles drift in at drift speed
+    // only, without force-based acceleration. spawn_time == -1.0 means initial particle (exempt).
+    if (particle_p.spawn_time >= 0.0 && (sim_params.time - particle_p.spawn_time) < 2.0) {
+        particle_p.vel = vec2<f32>(0.0, 0.0);
+    }
+
     // Update position
     particle_p.pos = particle_p.pos + particle_p.vel * sim_params.delta_time;
 
@@ -978,17 +984,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 particle_p.pos.y = clamp(particle_p.pos.y + y_offset_world, 0.0, sim_params.virtual_world_height);
             }
 
-            // Deterministic X respawn - particles spawn exactly at the appropriate edge
-            if (sim_params.drift_x_per_second > EPSILON) {
-                // Drifting significantly right, respawn at left edge (x=0)
-                particle_p.pos.x = 0.0;
-                // Keep existing velocity (no forced velocity changes)
-            }
-            else {
-                // Drifting left or no drift: respawn at right edge with bell Y to reduce edge clustering
-                particle_p.pos.x = sim_params.virtual_world_width;
-                let bell_seed = hash(global_id.x * 97u + u32(sim_params.time * 1000.0) + particle_p.ptype * 53u);
-                particle_p.pos.y = bell_random(bell_seed, 2u) * sim_params.virtual_world_height;
+            // X respawn only when X is actually out of bounds — not for Y-edge-only particles.
+            // Y-edge particles keep their X; otherwise they'd be teleported to the right edge
+            // and appear as fast leftward shots when attracted back toward the cluster.
+            let is_out_of_bounds_x = particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width;
+            if (is_out_of_bounds_x) {
+                particle_p.spawn_time = sim_params.time;
+                if (sim_params.drift_x_per_second > EPSILON) {
+                    particle_p.pos.x = 0.0;
+                }
+                else {
+                    particle_p.pos.x = sim_params.virtual_world_width - 1.0;
+                    let bell_seed = hash(global_id.x * 97u + u32(sim_params.time * 1000.0) + particle_p.ptype * 53u);
+                    particle_p.pos.y = bell_random(bell_seed, 2u) * sim_params.virtual_world_height;
+                }
             }
 
         }
