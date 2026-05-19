@@ -351,17 +351,17 @@ impl SimulationParams {
 
     // === CENTRAL CONVERSION FUNCTIONS ===
     // Day/night cycle for WLP. Call once per frame with current sim time.
-    // Cycle: 40s day → 5s fade-in → 10s night → 5s fade-out → repeat (60s total)
+    // Cycle: 80s day → 10s fade-in → 20s night → 10s fade-out → repeat (120s total)
     pub fn update_night_alpha(&mut self) {
         if !self.is_wlp {
             self.night_alpha = 0.0;
             return;
         }
-        const DAY: f32      = 40.0;
+        const DAY: f32      = 80.0;
         const FADE_IN: f32  = 10.0;  // 7 / 0.7
         const NIGHT: f32    = 20.0;  // 14 / 0.7
         const FADE_OUT: f32 = 10.0;  // 7 / 0.7
-        const CYCLE: f32    = DAY + FADE_IN + NIGHT + FADE_OUT; // 80s
+        const CYCLE: f32    = DAY + FADE_IN + NIGHT + FADE_OUT; // 120s
         const MAX_ALPHA: f32 = 0.8; // #000c
 
         let t = (self.time - self.wlp_start_time) % CYCLE;

@@ -309,8 +309,11 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
                     // Timeout is normal, just continue
                     thread::sleep(Duration::from_millis(50));
                 }
+                Err(ESP32Error::InvalidData) => {
+                    // Bad footer after resync scan — try again immediately, no reconnect.
+                }
                 Err(err) => {
-                    // Connection error - disconnect and retry
+                    // Real connection error — disconnect and retry.
                     println!("❌ ESP32 connection error: {:?}", err);
                     port = None;
                     if let Ok(mut state) = shared_state.lock() {
@@ -711,9 +714,35 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
     // [electrical_high] [electrical_low] [volume_high] [volume_low] [sleep_flags] [joy_click] [0x55]
 
     let mut buffer = [0u8; 20];
-    let mut bytes_read = 0;
 
-    // Try to read complete packet
+    // Scan for 0xAA start marker — resynchronises after any misalignment without reconnecting.
+    loop {
+        let mut header = [0u8; 1];
+        match port.read(&mut header) {
+            Ok(0) | Err(_) if {
+                let is_timeout = matches!(
+                    port.read(&mut header),
+                    Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut
+                );
+                is_timeout
+            } => return Err(ESP32Error::ReadTimeout),
+            Ok(0) => return Err(ESP32Error::ReadTimeout),
+            Ok(_) => {
+                if header[0] == 0xAA {
+                    buffer[0] = 0xAA;
+                    break;
+                }
+                // Not the start marker — discard and keep scanning.
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                return Err(ESP32Error::ReadTimeout);
+            }
+            Err(_) => return Err(ESP32Error::ConnectionLost),
+        }
+    }
+
+    // Read the remaining 19 bytes of the packet.
+    let mut bytes_read = 1;
     while bytes_read < 20 {
         match port.read(&mut buffer[bytes_read..]) {
             Ok(n) => {
@@ -731,15 +760,9 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
         }
     }
 
-    // Validate packet format
-    if buffer[0] != 0xAA || buffer[19] != 0x55 {
-        println!("❌ ESP32 InvalidData - Bad packet format:");
-        println!("   Expected: [0xAA, ..., 0x55] (20 bytes)");
-        println!("   Received: {:02X?}", buffer);
-        println!(
-            "   Header: 0x{:02X} (expected 0xAA), Footer: 0x{:02X} (expected 0x55)",
-            buffer[0], buffer[19]
-        );
+    // Validate footer only (header is guaranteed 0xAA by the scan above).
+    if buffer[19] != 0x55 {
+        println!("⚠️  ESP32: bad footer 0x{:02X} (expected 0x55) — resyncing", buffer[19]);
         return Err(ESP32Error::InvalidData);
     }
 
