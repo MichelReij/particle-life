@@ -878,27 +878,13 @@ impl WebGpuRenderer {
         { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Zoom"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
           p.set_pipeline(&self.zoom_render_pipeline); p.set_bind_group(0, &self.zoom_render_bind_group, &[]); p.draw(0..6, 0..1); }
 
-        // Corner copyright overlays (PNG textures, hidden by circular viewport but present in raw canvas)
+        // Fullscreen mask overlay (circle mask PNG, covers corners)
         if let Some(pipeline) = &self.corner_overlay_pipeline {
             let canvas = simulation_params.canvas_render_width;
-            let scale  = canvas / 1080.0;
 
-            let n = self.corner_overlays.len();
-            let positions: Vec<(f32, f32)> = (0..n).map(|i| {
-                let (_, img_w, img_h, _) = &self.corner_overlays[i];
-                match i {
-                    0 => (0.0, 0.0),                                                                    // topleft
-                    1 => (canvas - *img_w as f32 * scale, 0.0),                                         // topright
-                    2 => (0.0, canvas - *img_h as f32 * scale),                                         // bottomleft
-                    3 => (canvas - *img_w as f32 * scale, canvas - *img_h as f32 * scale),              // bottomright
-                    _ => (0.0, 0.0),
-                }
-            }).collect();
-
-            // Write positions to each overlay's own uniform buffer before encoding
-            for (i, (_, img_w, img_h, ubuf)) in self.corner_overlays.iter().enumerate() {
-                let (ox, oy) = positions[i];
-                let uniforms: [f32; 4] = [ox, oy, *img_w as f32 * scale, *img_h as f32 * scale];
+            // Single fullscreen overlay: always positioned at (0,0) scaled to canvas size
+            for (_, _, _, ubuf) in self.corner_overlays.iter() {
+                let uniforms: [f32; 4] = [0.0, 0.0, canvas, canvas];
                 self.queue.write_buffer(ubuf, 0, bytemuck::cast_slice(&uniforms));
             }
 
@@ -1043,8 +1029,7 @@ impl WebGpuRenderer {
     #[cfg(target_arch = "wasm32")]
     pub fn update_fps_data(&mut self, _fps: f32, _frame_count: u32, _particle_count: u32, _time: f32) {}
 
-    /// Upload 3 PNG corner overlays (topleft, bottomleft, bottomright) as GPU textures.
-    /// images: [(bitmap, width, height); 3] — sized for a 1080×1080 canvas, scaled at render time.
+    /// Upload fullscreen mask overlay as GPU texture (1080×1080 PNG, scaled to canvas at render time).
     #[cfg(target_arch = "wasm32")]
     pub fn set_overlay_images(&mut self, images: Vec<(web_sys::ImageBitmap, u32, u32)>) {
         let surface_format = self.surface_format;
@@ -1120,7 +1105,7 @@ impl WebGpuRenderer {
                     size: wgpu::Extent3d { width: *img_w, height: *img_h, depth_or_array_layers: 1 },
                     mip_level_count: 1, sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    format: wgpu::TextureFormat::Rgba8Unorm,
                     usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::RENDER_ATTACHMENT,
                     view_formats: &[],
                 });

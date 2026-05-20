@@ -119,21 +119,14 @@ class App {
                 this.updateStatus("WebGPU failed, using CPU fallback");
             }
 
-            // Load copyright overlay PNGs and upload as GPU textures
+            // Load circle mask overlay PNG and upload as GPU texture
             try {
-                const loadBitmap = async (name: string): Promise<[ImageBitmap, number, number]> => {
-                    const resp = await fetch(`assets/images/${name}`);
-                    const blob = await resp.blob();
-                    const bm   = await createImageBitmap(blob);
-                    return [bm, bm.width, bm.height];
-                };
-                const [tlBm, tlW, tlH] = await loadBitmap("copyright-michelreij.png");
-                const [trBm, trW, trH] = await loadBitmap("2025-2026.png");
-                const [blBm, blW, blH] = await loadBitmap("michelreij.png");
-                const [brBm, brW, brH] = await loadBitmap("cc-by-nc-4.png");
-                this.engine.set_overlay_images(tlBm, trBm, blBm, brBm, tlW, tlH, trW, trH, blW, blH, brW, brH);
+                const resp = await fetch("assets/images/copyright_mask_1080.png");
+                const blob = await resp.blob();
+                const bm   = await createImageBitmap(blob);
+                this.engine.set_overlay_images(bm, bm.width, bm.height);
             } catch (e) {
-                console.warn("Origin of Life: overlay images failed to load:", e);
+                console.warn("Origin of Life: overlay image failed to load:", e);
             }
 
             // Wire up UI controls

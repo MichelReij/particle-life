@@ -653,22 +653,12 @@ impl ParticleLifeEngine {
     #[wasm_bindgen]
     pub fn set_overlay_images(
         &mut self,
-        topleft:      web_sys::ImageBitmap,
-        topright:     web_sys::ImageBitmap,
-        bottomleft:   web_sys::ImageBitmap,
-        bottomright:  web_sys::ImageBitmap,
-        tl_w: u32, tl_h: u32,
-        tr_w: u32, tr_h: u32,
-        bl_w: u32, bl_h: u32,
-        br_w: u32, br_h: u32,
+        mask: web_sys::ImageBitmap,
+        mask_w: u32,
+        mask_h: u32,
     ) {
         if let Some(ref mut r) = self.renderer {
-            r.set_overlay_images(vec![
-                (topleft,     tl_w, tl_h),
-                (topright,    tr_w, tr_h),
-                (bottomleft,  bl_w, bl_h),
-                (bottomright, br_w, br_h),
-            ]);
+            r.set_overlay_images(vec![(mask, mask_w, mask_h)]);
         }
     }
 
