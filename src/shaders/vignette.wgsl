@@ -9,7 +9,7 @@
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let dims = vec2<f32>(textureDimensions(blur_h_tex));
     let uv   = frag_coord.xy / dims;
-    let step = vec2<f32>(0.0, 1.5 / dims.y); // 3px step, vertical only
+    let step = vec2<f32>(0.0, 1.3 / dims.y); // 3px step, vertical only
 
     // V-blur: same 9-tap Gaussian as blur_h.wgsl
     var blurred = textureSample(blur_h_tex, s, uv)              * 0.2742;
@@ -29,5 +29,5 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let dark_t   = smoothstep(0.05, 0.5, dist); // wider transition for darkening
     let blur_t   = t * 0.6; // cap blur blend at 60% so corners stay readable
 
-    return vec4<f32>(mix(sharp, blurred, blur_t).rgb * mix(1.0, 0.80, dark_t), 1.0);
+    return vec4<f32>(mix(sharp, blurred, blur_t).rgb * mix(1.0, 0.95, dark_t), 1.0);
 }

@@ -412,9 +412,10 @@ class App {
 
         // Keyboard shortcuts: S = screenshot, V = toggle video recording, A = audio toggle
         document.addEventListener("keydown", (e: KeyboardEvent) => {
+            const el = document.activeElement;
             if (
-                document.activeElement instanceof HTMLInputElement ||
-                document.activeElement instanceof HTMLTextAreaElement
+                el instanceof HTMLTextAreaElement ||
+                (el instanceof HTMLInputElement && el.type !== "range")
             )
                 return;
             if (e.key === "a" || e.key === "A") this.toggleAudio();

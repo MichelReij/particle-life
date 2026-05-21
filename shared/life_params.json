@@ -8,9 +8,9 @@
         "h_green": 148.0,
         "h_yellow": 72.5,
         "h_red": 24.0,
-        "background_l_htv": 0.8,
+        "background_l_htv": 0.92,
         "background_c_htv": 0.04,
-        "background_l_wlp": 0.86,
+        "background_l_wlp": 0.92,
         "background_c_wlp": 0.04
     },
     "sliders": [

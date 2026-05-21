@@ -7,7 +7,7 @@
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let dims = vec2<f32>(textureDimensions(tex));
     let uv   = frag_coord.xy / dims;
-    let step = vec2<f32>(1.5 / dims.x, 0.0); // 3px step, horizontal only
+    let step = vec2<f32>(1.3 / dims.x, 0.0); // 3px step, horizontal only
 
     // 9-tap Gaussian, sigma ≈ 4px (weights: 1, 0.6065, 0.1353 at 0, 1, 2 steps)
     var c = textureSample(tex, s, uv)                      * 0.2742;

@@ -10,9 +10,9 @@ pub const H_YELLOW: f32 = 72.5;
 pub const H_RED:    f32 = 24.0;
 
 // OKLCH L/C voor simulatie-achtergrond (lichter en minder verzadigd dan slider-thumb)
-pub const BACKGROUND_L_HTV: f32 = 0.8;
+pub const BACKGROUND_L_HTV: f32 = 0.92;
 pub const BACKGROUND_C_HTV: f32 = 0.04;
-pub const BACKGROUND_L_WLP: f32 = 0.86;
+pub const BACKGROUND_L_WLP: f32 = 0.92;
 pub const BACKGROUND_C_WLP: f32 = 0.04;
 
 pub mod htv {

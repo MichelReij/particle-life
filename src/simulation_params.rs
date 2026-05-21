@@ -532,14 +532,14 @@ impl SimulationParams {
         }
     }
 
-    // HTV: kubische curve, verschoven zodat ELEC_GREEN_MAX_HTV (1.4 kJ) het maximum bereikt.
+    // HTV: bell-curve gecentreerd op ELEC_OPTIMUM_HTV (1.15 kJ), σ²=0.5.
+    // itas = -1 + 4 × exp(-(elec−1.15)²/0.5) — vlakkere falloff dan de vroegere kubische curve.
     fn apply_electrical_activity_htv(&mut self, electrical_activity: f32) {
         let clamped = electrical_activity.max(0.0).min(3.0);
         self.electrical_activity_level = clamped;
 
-        let norm = (clamped / ELEC_GREEN_MAX_HTV).min(1.0);
-        let cubic = norm * norm * norm;
-        self.inter_type_attraction_scale = -1.0 + cubic * 4.0;
+        let bell = (-(clamped - ELEC_OPTIMUM_HTV).powi(2) / 0.5).exp();
+        self.inter_type_attraction_scale = -1.0 + bell * 1.5; // itas ≈ 0.5 at optimum (1.15 kJ)
         self.lightning_frequency = 0.0;
         self.lightning_intensity = 0.0;
         self.lightning_duration = 0.0;
