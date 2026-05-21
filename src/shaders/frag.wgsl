@@ -1,11 +1,9 @@
 struct VertexOutput {
     @location(0) particle_color: vec4<f32>,
     @location(1) quad_uv: vec2<f32>,
-    // UV coordinates for the quad
     @location(2) particle_id: f32,
-    // Particle index for unique base shape
     @location(3) velocity_angle: f32,
-    // Direction of movement, drives organic shape orientation
+    @location(4) particle_canvas_uv: vec2<f32>,
 }
 
 ;

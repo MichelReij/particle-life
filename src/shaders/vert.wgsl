@@ -128,11 +128,9 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) particle_color: vec4<f32>,
     @location(1) quad_uv: vec2<f32>,
-    // UV coordinates for circular particle rendering
     @location(2) particle_id: f32,
-    // Particle index for unique base shape
     @location(3) velocity_angle: f32,
-    // Direction of movement (atan2), drives organic shape rotation
+    @location(4) particle_canvas_uv: vec2<f32>, // particle center in 0-1 canvas space (for vignette)
 }
 
 // Get color for particle type from precomputed custom colors buffer
@@ -215,8 +213,12 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
     // UV: scale by wobble_margin so frag uv_centered covers ±(wobble_margin*0.5) — enough room for max wobble
     out.quad_uv = vec2<f32>(vertex_attrs.quad_pos.x * 0.5 * wobble_margin + 0.5, vertex_attrs.quad_pos.y * 0.5 * wobble_margin + 0.5);
     out.particle_id = f32(vertex_attrs.instance_idx);
-    // Shape orientation follows velocity direction (like an amoeba facing its direction of travel)
     out.velocity_angle = atan2(particle_attrs.particle_vel.y, particle_attrs.particle_vel.x);
+    // Particle center in 0-1 canvas UV space (clip space → UV: (x+1)/2, (1-y)/2)
+    out.particle_canvas_uv = vec2<f32>(
+        (normalized_particle_pos.x + 1.0) * 0.5,
+        (1.0 - normalized_particle_pos.y) * 0.5,
+    );
 
     return out;
 }

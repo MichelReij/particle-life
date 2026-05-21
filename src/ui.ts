@@ -7,6 +7,13 @@
 import { SimulationParams, BoundaryMode } from "./particle-life-types";
 import { updateThumbColor, applySliderGradient, syncValueColor } from "./color-utils";
 import { WLP_DEPTH_THRESHOLD, SLIDERS } from "./gen/life_params";
+import {
+    type Hypothesis,
+    type HypothesisKeys,
+    type SliderIds,
+    type SliderValues,
+    saveSlider, loadSlider, loadInitialHypothesis, sliderKey, applyHypothesisToSliders,
+} from "./hypothesis-sliders";
 // import { Joy } from "./lib/joy";
 declare var Joy: any; // Temporary fix for Joy library
 import {
@@ -52,9 +59,6 @@ let fpsDisplayElement: HTMLElement | null;
 
 // localStorage functionality for persistent settings
 const STORAGE_KEYS = {
-    temperature: "particleLife_temperature",
-    electricalActivity: "particleLife_electricalActivity",
-    ph: "particleLife_ph",
     pressure: "particleLife_pressure",
     zoom: "particleLife_zoom",
     drift: "particleLife_drift",
@@ -68,44 +72,33 @@ const STORAGE_KEYS = {
     opacity: "particleLife_opacity",
 };
 
+// Hypothesis-specific storage keys (shared with embed.ts via hypothesis-sliders.ts)
+const HYPOTHESIS_KEYS: HypothesisKeys = {
+    temp: { htv: "particleLife_temperature",      wlp: "particleLife_temperature_wlp" },
+    ph:   { htv: "particleLife_ph",               wlp: "particleLife_ph_wlp" },
+    elec: { htv: "particleLife_electricalActivity", wlp: "particleLife_electricalActivity_wlp" },
+    pres: "particleLife_pressure",
+};
+
+const SLIDER_IDS: SliderIds = {
+    temp: { slider: "tempSlider", value: "tempValue", thumbStop: { htv: "tempSlider",  wlp: "ol-temp-wlp" } },
+    ph:   { slider: "phSlider",   value: "phValue",   label: "phLabel", thumbStop: { htv: "phSlider",    wlp: "ol-ph-wlp"   } },
+    elec: { slider: "elecSlider", value: "elecValue", thumbStop: { htv: "elecSlider",  wlp: "ol-elec-wlp" } },
+};
+
 // === Storage Functions ===
 export function saveToLocalStorage(key: string, value: number): void {
-    try {
-        localStorage.setItem(key, value.toString());
-        if (key === STORAGE_KEYS.zoom) {
-            console.log(`💾 Saving zoom to localStorage: ${value}`);
-        }
-    } catch (e) {
-        console.warn("Failed to save to localStorage:", e);
-    }
+    if (key === STORAGE_KEYS.zoom) console.log(`💾 Saving zoom to localStorage: ${value}`);
+    saveSlider(key, value);
 }
 
-export function loadFromLocalStorage(
-    key: string,
-    defaultValue: number,
-): number {
-    try {
-        const stored = localStorage.getItem(key);
-        if (stored !== null) {
-            const parsed = parseFloat(stored);
-            if (!isNaN(parsed)) {
-                if (key === STORAGE_KEYS.zoom) {
-                    console.log(
-                        `📖 Loading zoom from localStorage: ${parsed} (default: ${defaultValue})`,
-                    );
-                }
-                return parsed;
-            }
-        }
-    } catch (e) {
-        console.warn("Failed to load from localStorage:", e);
-    }
-    if (key === STORAGE_KEYS.zoom) {
-        console.log(
-            `📖 No zoom in localStorage, using default: ${defaultValue}`,
-        );
-    }
-    return defaultValue;
+export function loadFromLocalStorage(key: string, defaultValue: number): number {
+    const value = loadSlider(key, defaultValue);
+    if (key === STORAGE_KEYS.zoom)
+        console.log(value !== defaultValue
+            ? `📖 Loading zoom from localStorage: ${value} (default: ${defaultValue})`
+            : `📖 No zoom in localStorage, using default: ${defaultValue}`);
+    return value;
 }
 
 // === Parameter Mapping Functions ===
@@ -1348,26 +1341,22 @@ function initializeLeniaControls(simParams: SimulationParams): void {
     }
 }
 
-let activeHypothesis: "htv" | "wlp" = "htv";
+let activeHypothesis: Hypothesis = "htv";
 
-// Werkt gradients en thumb-kleuren altijd bij op basis van actieve hypothese.
 function refreshHypothesisColors(): void {
     const isWlp = activeHypothesis === "wlp";
-
     const tempSlider = document.getElementById("tempSlider") as HTMLInputElement | null;
     if (tempSlider) {
         tempSlider.style.background = isWlp ? SLIDERS[1].wlp.gradient : SLIDERS[1].htv.gradient;
         updateThumbColor(tempSlider, isWlp ? "ol-temp-wlp" : "tempSlider");
         syncValueColor(tempSlider, "tempValue");
     }
-
     const phSlider = document.getElementById("phSlider") as HTMLInputElement | null;
     if (phSlider) {
         phSlider.style.background = isWlp ? SLIDERS[2].wlp.gradient : SLIDERS[2].htv.gradient;
         updateThumbColor(phSlider, isWlp ? "ol-ph-wlp" : "phSlider");
         syncValueColor(phSlider, "phValue");
     }
-
     const elecSlider = document.getElementById("elecSlider") as HTMLInputElement | null;
     if (elecSlider) {
         elecSlider.style.background = isWlp ? SLIDERS[3].wlp.gradient : SLIDERS[3].htv.gradient;
@@ -1376,62 +1365,24 @@ function refreshHypothesisColors(): void {
     }
 }
 
-function applyHypothesis(hypothesis: "htv" | "wlp"): void {
+function applyHypothesis(hypothesis: Hypothesis): void {
     const switching = hypothesis !== activeHypothesis;
     activeHypothesis = hypothesis;
 
-    // Slider ranges alleen wisselen bij een echte hypothese-switch.
     if (switching) {
-        // Temperatuur: max verschilt per hypothese (WLP: 100°C, HTV: 160°C)
-        const tempSlider = document.getElementById("tempSlider") as HTMLInputElement | null;
-        const tempVal    = document.getElementById("tempValue");
-        if (tempSlider) {
-            const newMax = hypothesis === "wlp"
-                ? SLIDERS[1].wlp.max
-                : SLIDERS[1].htv.max;
-            const clamped = Math.min(parseFloat(tempSlider.value), newMax);
-            tempSlider.max = newMax.toString();
-            tempSlider.value = clamped.toString();
-            if (tempVal) tempVal.textContent = clamped.toString();
-        }
-
-        // pH/UV: label en range wisselen
-        const phSlider = document.getElementById("phSlider") as HTMLInputElement | null;
-        const phLabel  = document.getElementById("phLabel")  as HTMLElement | null;
-        const phVal    = document.getElementById("phValue");
-        if (phSlider) {
-            const oldMin = parseFloat(phSlider.min);
-            const oldMax = parseFloat(phSlider.max);
-            const normalized = (parseFloat(phSlider.value) - oldMin) / (oldMax - oldMin);
-            if (hypothesis === "wlp") {
-                phSlider.min = "0"; phSlider.max = "11"; phSlider.step = "0.1";
-                if (phLabel) phLabel.textContent = "UV";
-            } else {
-                phSlider.min = "0"; phSlider.max = "14"; phSlider.step = "0.1";
-                if (phLabel) phLabel.textContent = "pH";
-            }
-            const newMax = parseFloat(phSlider.max);
-            phSlider.value = (normalized * newMax).toFixed(1);
-            if (phVal) phVal.textContent = phSlider.value;
-        }
-
-        // Electricity: max per hypothese uit SLIDERS
-        const elecSlider = document.getElementById("elecSlider") as HTMLInputElement | null;
-        const elecVal    = document.getElementById("elecValue");
-        if (elecSlider) {
-            const newMax = hypothesis === "wlp"
-                ? SLIDERS[3].wlp.max
-                : SLIDERS[3].htv.max;
-            const clamped = Math.min(parseFloat(elecSlider.value), newMax);
-            elecSlider.max = newMax.toString();
-            elecSlider.value = clamped.toString();
-            if (elecVal) elecVal.textContent = clamped.toFixed(2);
-        }
+        const vals = applyHypothesisToSliders(
+            hypothesis, SLIDER_IDS, HYPOTHESIS_KEYS, "pH", "UV",
+            { temperature, ph, electricalActivity },
+        );
+        temperature         = vals.temperature;
+        ph                  = vals.ph;
+        electricalActivity  = vals.electricalActivity;
+        updateDriftAndFrictionFromTemperature(temperature);
+        updateParametersFromPH(ph);
+        updateParametersFromElectricalActivity(electricalActivity);
     }
 
     refreshHypothesisColors();
-
-    // Achtergrondkleur direct bijwerken, net als in embed na hypothesis-switch.
     updateDriftAndFrictionFromTemperature(temperature);
 }
 
@@ -1442,8 +1393,11 @@ function initializeEnvironmentalSliders(): void {
     ) as HTMLInputElement;
     const tempValueDisplay = document.getElementById("tempValue");
 
+    // Bepaal hypothese vroeg zodat pH/elec/temp de juiste storage-key laden
+    activeHypothesis = loadInitialHypothesis(HYPOTHESIS_KEYS);
+
     if (tempSlider && tempValueDisplay) {
-        temperature = loadFromLocalStorage(STORAGE_KEYS.temperature, temperature);
+        temperature = loadSlider(sliderKey(HYPOTHESIS_KEYS, "temp", activeHypothesis), temperature);
         tempSlider.value = temperature.toString();
         tempValueDisplay.textContent = temperature.toString();
         applySliderGradient(tempSlider, "tempSlider");
@@ -1458,19 +1412,17 @@ function initializeEnvironmentalSliders(): void {
             tempValueDisplay.textContent = newValue.toString();
             updateThumbColor(tempSlider, activeHypothesis === "wlp" ? "ol-temp-wlp" : "tempSlider");
             syncValueColor(tempSlider, "tempValue");
-            saveToLocalStorage(STORAGE_KEYS.temperature, newValue);
+            saveSlider(sliderKey(HYPOTHESIS_KEYS, "temp", activeHypothesis), newValue);
             updateDriftAndFrictionFromTemperature(newValue);
         });
     }
 
     // Electrical Activity Slider
-    const elecSlider = document.getElementById(
-        "elecSlider",
-    ) as HTMLInputElement;
+    const elecSlider = document.getElementById("elecSlider") as HTMLInputElement;
     const elecValueDisplay = document.getElementById("elecValue");
 
     if (elecSlider && elecValueDisplay) {
-        electricalActivity = loadFromLocalStorage(STORAGE_KEYS.electricalActivity, electricalActivity);
+        electricalActivity = loadSlider(sliderKey(HYPOTHESIS_KEYS, "elec", activeHypothesis), electricalActivity);
         elecSlider.value = electricalActivity.toString();
         elecValueDisplay.textContent = electricalActivity.toFixed(2);
         applySliderGradient(elecSlider, "elecSlider");
@@ -1485,7 +1437,7 @@ function initializeEnvironmentalSliders(): void {
             elecValueDisplay.textContent = newValue.toFixed(2);
             updateThumbColor(elecSlider, activeHypothesis === "wlp" ? "ol-elec-wlp" : "elecSlider");
             syncValueColor(elecSlider, "elecValue");
-            saveToLocalStorage(STORAGE_KEYS.electricalActivity, newValue);
+            saveSlider(sliderKey(HYPOTHESIS_KEYS, "elec", activeHypothesis), newValue);
             updateParametersFromElectricalActivity(newValue);
         });
     }
@@ -1495,7 +1447,7 @@ function initializeEnvironmentalSliders(): void {
     const phValueDisplay = document.getElementById("phValue");
 
     if (phSlider && phValueDisplay) {
-        ph = loadFromLocalStorage(STORAGE_KEYS.ph, ph);
+        ph = loadSlider(sliderKey(HYPOTHESIS_KEYS, "ph", activeHypothesis), ph);
         phSlider.value = ph.toString();
         phValueDisplay.textContent = ph.toFixed(1);
         applySliderGradient(phSlider, "phSlider");
@@ -1510,7 +1462,7 @@ function initializeEnvironmentalSliders(): void {
             phValueDisplay.textContent = newValue.toFixed(1);
             updateThumbColor(phSlider, activeHypothesis === "wlp" ? "ol-ph-wlp" : "phSlider");
             syncValueColor(phSlider, "phValue");
-            saveToLocalStorage(STORAGE_KEYS.ph, newValue);
+            saveSlider(sliderKey(HYPOTHESIS_KEYS, "ph", activeHypothesis), newValue);
             updateParametersFromPH(newValue);
         });
     }

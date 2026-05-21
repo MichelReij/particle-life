@@ -45,26 +45,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     // Sample from the central region of the fisheye buffer
     let scene_color = textureSample(scene_texture, scene_sampler, fisheye_uv);
 
-    // Add vignette effect
-    // canvas_uv is already calculated above for direct sampling
-
-    // Center the UV coordinates around (0, 0) for vignette calculation
-    let centered_uv = canvas_uv - 0.5;
-    let dist_from_center = length(centered_uv);
-
-    // Vignette parameters (based on canvas size)
-    let vignette_radius = 0.7;
-    // Relative to canvas size
-    let vignette_softness = 0.4;
-    // Softness of the vignette transition (increased for gentler fade)
-    let max_vignette_alpha = 0.33;
-    // Maximum vignette opacity
-
-    // Calculate vignette alpha using smoothstep for smooth transition
-    let vignette_alpha = smoothstep(vignette_radius - vignette_softness, vignette_radius, dist_from_center) * max_vignette_alpha;
-
-    // Apply vignette (darken towards edges)
-    let final_rgb = scene_color.rgb * (1.0 - vignette_alpha);
+    let final_rgb = scene_color.rgb;
 
     // Platform-specific gamma correction for color matching
     // Native gets extra gamma correction to match browser appearance

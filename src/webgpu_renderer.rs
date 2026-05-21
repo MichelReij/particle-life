@@ -219,6 +219,16 @@ pub struct WebGpuRenderer {
     text_overlay_bind_group: Option<wgpu::BindGroup>,
     fps_data_buffer: Option<wgpu::Buffer>,
 
+    // Vignette post-process pass (separable blur + darken toward corners)
+    post_texture: wgpu::Texture,
+    post_texture_view: wgpu::TextureView,
+    blur_temp_texture: wgpu::Texture,
+    blur_temp_texture_view: wgpu::TextureView,
+    blur_h_pipeline: wgpu::RenderPipeline,
+    blur_h_bind_group: wgpu::BindGroup,
+    vignette_pipeline: wgpu::RenderPipeline,
+    vignette_bind_group: wgpu::BindGroup,
+
     // Corner copyright overlay (PNG textures uploaded from JS)
     corner_overlay_pipeline: Option<wgpu::RenderPipeline>,
     // [topleft, bottomleft, bottomright]: (bind_group, img_w, img_h, uniform_buffer)
@@ -425,6 +435,26 @@ impl WebGpuRenderer {
             view_formats: &[],
         });
         let intermediate_texture_view = intermediate_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let post_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Post Texture"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: surface_format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let post_texture_view = post_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let blur_temp_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Blur Temp Texture"),
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+            format: surface_format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let blur_temp_texture_view = blur_temp_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let scene_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Scene Sampler"),
@@ -638,6 +668,8 @@ impl WebGpuRenderer {
         let night_frag      = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Night"),    source: wgpu::ShaderSource::Wgsl(include_str!("shaders/night_frag.wgsl").into()) });
         let fisheye_frag    = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Fisheye"),  source: wgpu::ShaderSource::Wgsl(include_str!("shaders/fisheye_frag.wgsl").into()) });
         let zoom_frag       = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Zoom"),     source: wgpu::ShaderSource::Wgsl(include_str!("shaders/zoom_frag.wgsl").into()) });
+        let blur_h_frag     = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("BlurH"),   source: wgpu::ShaderSource::Wgsl(include_str!("shaders/blur_h.wgsl").into()) });
+        let vignette_frag   = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Vignette"), source: wgpu::ShaderSource::Wgsl(include_str!("shaders/vignette.wgsl").into()) });
         let lc_shader       = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("LC"),       source: wgpu::ShaderSource::Wgsl(include_str!("shaders/lightning_compute.wgsl").into()) });
         let lv_shader       = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("LV"),       source: wgpu::ShaderSource::Wgsl(include_str!("shaders/lightning_vert.wgsl").into()) });
         let lf_shader       = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("LF"),       source: wgpu::ShaderSource::Wgsl(include_str!("shaders/lightning_frag_buffer.wgsl").into()) });
@@ -738,7 +770,51 @@ impl WebGpuRenderer {
         let text_overlay_pipeline: Option<wgpu::RenderPipeline> = None;
         let text_overlay_bind_group: Option<wgpu::BindGroup> = None;
 
+        // ── Blur H + Vignette pipelines ──────────────────────────────────────────
+        let pp1_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("PP1 BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+            ],
+        });
+        let pp2_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("PP2 BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+            ],
+        });
+        let pp1_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("PP1 PL"), bind_group_layouts: &[&pp1_bgl], push_constant_ranges: &[] });
+        let pp2_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("PP2 PL"), bind_group_layouts: &[&pp2_bgl], push_constant_ranges: &[] });
+        let blur_h_pipeline   = make_fullscreen_pipeline("BlurH",   &pp1_pl, &blur_h_frag,   None);
+        let vignette_pipeline = make_fullscreen_pipeline("Vignette", &pp2_pl, &vignette_frag, None);
+        let blur_h_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("BlurH BG"), layout: &pp1_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Sampler(&scene_sampler) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&post_texture_view) },
+            ],
+        });
+        let vignette_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Vignette BG"), layout: &pp2_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Sampler(&scene_sampler) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&blur_temp_texture_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&post_texture_view) },
+            ],
+        });
+
         Ok(WebGpuRenderer {
+            post_texture,
+            post_texture_view,
+            blur_temp_texture,
+            blur_temp_texture_view,
+            blur_h_pipeline,
+            blur_h_bind_group,
+            vignette_pipeline,
+            vignette_bind_group,
             corner_overlay_pipeline: None,
             corner_overlays: Vec::new(),
             surface_format,
@@ -874,9 +950,17 @@ impl WebGpuRenderer {
             );
         }
 
-        // Zoom
-        { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Zoom"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
+        // Zoom → post_texture (input for vignette pass)
+        { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Zoom"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.post_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
           p.set_pipeline(&self.zoom_render_pipeline); p.set_bind_group(0, &self.zoom_render_bind_group, &[]); p.draw(0..6, 0..1); }
+
+        // H-blur: post_texture → blur_temp_texture
+        { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("BlurH"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.blur_temp_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
+          p.set_pipeline(&self.blur_h_pipeline); p.set_bind_group(0, &self.blur_h_bind_group, &[]); p.draw(0..6, 0..1); }
+
+        // Vignette: V-blur(blur_temp) + mix sharp(post) + darken → surface
+        { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Vignette"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
+          p.set_pipeline(&self.vignette_pipeline); p.set_bind_group(0, &self.vignette_bind_group, &[]); p.draw(0..6, 0..1); }
 
         // Fullscreen mask overlay (circle mask PNG, covers corners)
         if let Some(pipeline) = &self.corner_overlay_pipeline {
