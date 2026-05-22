@@ -537,7 +537,7 @@ class EmbedApp {
         // Load circle mask overlay PNG and upload as GPU texture
         try {
             const base = getScriptBase();
-            const resp = await fetch(`${base}assets/images/copyright_mask_1080.png`);
+            const resp = await fetch(`${base}assets/images/copyright_mask_wasm_1080.png`);
             const blob = await resp.blob();
             const bm   = await createImageBitmap(blob);
             this.engine.set_overlay_images(bm, bm.width, bm.height);

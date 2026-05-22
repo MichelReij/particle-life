@@ -121,7 +121,7 @@ class App {
 
             // Load circle mask overlay PNG and upload as GPU texture
             try {
-                const resp = await fetch("assets/images/copyright_mask_1080.png");
+                const resp = await fetch("assets/images/copyright_mask_wasm_1080.png");
                 const blob = await resp.blob();
                 const bm   = await createImageBitmap(blob);
                 this.engine.set_overlay_images(bm, bm.width, bm.height);

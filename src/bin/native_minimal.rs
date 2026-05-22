@@ -148,8 +148,20 @@ impl ApplicationHandler for MinimalNativeApp {
 
         pollster::block_on(async {
             match WebGpuRenderer::new(window.clone()).await {
-                Ok(renderer) => {
+                Ok(mut renderer) => {
                     console_log!("✅ WebGPU renderer geïnitialiseerd");
+
+                    // Load copyright/dropshadow overlay (baked into binary at compile time)
+                    let png_bytes = include_bytes!("../../assets/images/copyright_mask_native_1080.png");
+                    match image::load_from_memory(png_bytes) {
+                        Ok(img) => {
+                            let rgba = img.to_rgba8();
+                            renderer.set_overlay_from_rgba(rgba.as_raw(), rgba.width(), rgba.height());
+                            console_log!("✅ Copyright overlay geladen ({}×{})", rgba.width(), rgba.height());
+                        }
+                        Err(e) => console_log!("⚠ Overlay laden mislukt: {:?}", e),
+                    }
+
                     self.renderer = Some(renderer);
                 }
                 Err(e) => console_log!("❌ Renderer fout: {:?}", e),
