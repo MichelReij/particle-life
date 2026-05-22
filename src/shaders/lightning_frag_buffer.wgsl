@@ -214,7 +214,7 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
         // Simple white lightning - much cheaper than conditional color logic
         let segmentColor = vec3<f32>(1.0, 1.0, 1.0);
-        let segmentResult = drawSegment(virtual_uv, segment.start_pos, segment.end_pos, segment.alpha, segment.thickness, segmentColor);
+        let segmentResult = drawSegment(uv, segment.start_pos, segment.end_pos, segment.alpha, segment.thickness, segmentColor);
 
         // Accumulate lightning contributions
         finalColor += segmentResult.rgb;
