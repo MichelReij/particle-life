@@ -80,7 +80,7 @@ export function applyHypothesisToSliders(
             newMax,
         );
         tempSlider.value = result.temperature.toString();
-        if (tempVal) tempVal.textContent = result.temperature.toString();
+        if (tempVal) tempVal.textContent = `${result.temperature}°C`;
         tempSlider.style.background = hypothesis === "wlp" ? SLIDERS[1].wlp.gradient : "";
         updateThumbColor(tempSlider, ids.temp.thumbStop[hypothesis]);
     }

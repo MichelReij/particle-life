@@ -14,7 +14,7 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     // uv_centered covers ±1.5 and the particle body ends at dist≈0.5.
     // Falloff coefficient 1.2 keeps glow clearly visible well outside the particle body.
     // Peak alpha 0.45 ensures the halo is visible against dark backgrounds.
-    let glow_alpha = exp(- dist * dist * 3.5) * 0.6 * in.particle_color.a;
+    let glow_alpha = exp(- dist * dist * 3.5) * 0.5 * in.particle_color.a;
 
     if (glow_alpha < 0.002) {
         discard;

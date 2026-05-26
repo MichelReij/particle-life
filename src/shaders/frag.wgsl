@@ -54,7 +54,7 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     let center_glow = (1.0 - normalized_dist) * 0.18;
 
     // Soft organic edge: full opacity in core, gentle fade in outer 20%
-    let alpha_factor = smoothstep(1.0, 0.8, normalized_dist);
+    let alpha_factor = smoothstep(1.0, 0.9, normalized_dist);
 
     var rgb = in.particle_color.rgb;
     rgb = rgb * diffuse;

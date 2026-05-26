@@ -145,13 +145,11 @@ override wobble_margin: f32 = 1.1;
 fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
-    // Cull inactive particles using the is_active flag
-    if (particle_attrs.is_active == 0u) {
-        // Position far outside clip space and make completely transparent
+    // Cull inactive particles and particles shrinking below visibility threshold
+    // (prevents ghost glow during shrink transition when size approaches 0.1)
+    if (particle_attrs.is_active == 0u || particle_attrs.particle_size < 1.0) {
         out.position = vec4<f32>(- 10.0, - 10.0, - 10.0, 1.0);
-        // Make completely transparent
         out.particle_color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-        // Set UV coordinates
         out.quad_uv = vec2<f32>(0.0, 0.0);
         return out;
     }
@@ -163,9 +161,11 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
     let viewport_top = sim_params.viewport_center_y - sim_params.viewport_height * 0.5;
     let viewport_bottom = sim_params.viewport_center_y + sim_params.viewport_height * 0.5;
 
-    // Add particle radius as margin to ensure particles partially in view are rendered
+    // Add particle radius as margin to ensure particles partially in view are rendered.
+    // Multiply by wobble_margin so glow pass (wobble_margin=3.0) doesn't cull particles
+    // whose glow is still visible — preventing halos without a particle (ghosts).
     let particle_radius = particle_attrs.particle_size;
-    let margin = particle_radius * 2.0;
+    let margin = particle_radius * wobble_margin * 2.0;
 
     // Check if particle is outside viewport bounds (with margin)
     if (particle_attrs.particle_pos.x < viewport_left - margin || particle_attrs.particle_pos.x > viewport_right + margin || particle_attrs.particle_pos.y < viewport_top - margin || particle_attrs.particle_pos.y > viewport_bottom + margin) {

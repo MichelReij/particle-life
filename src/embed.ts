@@ -17,7 +17,11 @@ import {
     type HypothesisKeys,
     type SliderIds,
     type SliderValues,
-    saveSlider, loadSlider, loadInitialHypothesis, sliderKey, applyHypothesisToSliders,
+    saveSlider,
+    loadSlider,
+    loadInitialHypothesis,
+    sliderKey,
+    applyHypothesisToSliders,
 } from "./hypothesis-sliders";
 
 const WORLD_CENTER_X = VIRTUAL_WORLD_WIDTH / 2;
@@ -44,8 +48,8 @@ const I18N: Record<
 > = {
     nl: {
         loading: "Simulatie laden…",
-        hintZoom: "scroll / knijp om te zoomen",
-        hintPan: "sleep om te bewegen",
+        hintZoom: "Scroll / knijp om te zoomen",
+        hintPan: "Sleep om te bewegen",
         titleScreenshot: "Screenshot",
         titleRecord: "Video opnemen",
         startText:
@@ -59,8 +63,8 @@ const I18N: Record<
     },
     en: {
         loading: "Loading simulation…",
-        hintZoom: "scroll / pinch to zoom",
-        hintPan: "drag to pan",
+        hintZoom: "Scroll / pinch to zoom",
+        hintPan: "Drag to pan",
         titleScreenshot: "Screenshot",
         titleRecord: "Record video",
         startText:
@@ -74,8 +78,8 @@ const I18N: Record<
     },
     fr: {
         loading: "Chargement de la simulation…",
-        hintZoom: "molette / pincer pour zoomer",
-        hintPan: "glisser pour déplacer",
+        hintZoom: "Molette / pincer pour zoomer",
+        hintPan: "Glisser pour déplacer",
         titleScreenshot: "Capture d'écran",
         titleRecord: "Enregistrer la vidéo",
         startText:
@@ -140,7 +144,7 @@ const EMBED_CSS = `
     overflow: hidden;
     font-family: system-ui, sans-serif;
     font-size: 13px;
-    color: #ccc;
+    color: #8f7e48;
     box-sizing: border-box;
 }
 #ol-wrap *, #ol-wrap *::before, #ol-wrap *::after {
@@ -172,17 +176,16 @@ const EMBED_CSS = `
     align-items: center;
     justify-content: center;
     background: transparent;
-    color: #7aaff0;
+    color: #8f7e48;
     font-size: 14px;
     pointer-events: none;
-    text-shadow: 0 1px 4px rgba(0,0,0,0.8);
 }
 #ol-hint-zoom {
     position: absolute;
     top: 6px;
     left: 8px;
     font-size: 10px;
-    color: #ccc;
+    color: #8f7e48;
     pointer-events: none;
     user-select: none;
 }
@@ -191,7 +194,7 @@ const EMBED_CSS = `
     top: 6px;
     right: 8px;
     font-size: 10px;
-    color: #ccc;
+    color: #8f7e48;
     pointer-events: none;
     user-select: none;
 }
@@ -200,7 +203,7 @@ const EMBED_CSS = `
     bottom: 10px;
     background: none;
     border: none;
-    color: #E3C463;
+    color: #8f7e48;
     font-size: 0;
     width: 40px;
     height: 40px;
@@ -233,7 +236,7 @@ canvas#ol-canvas {
 #ol-hint-zoom,
 #ol-hint-pan {
     font-size: var(--wp--preset--font-size--small);
-    color: var(--wp--preset--color--accent-1, #e3c463);
+    color: var(--wp--preset--color--contrast, #8f7e48);
 }
 #ol-screenshot-flash {
     position: absolute;
@@ -255,13 +258,13 @@ canvas#ol-canvas {
     border-radius: 50%;
     padding: 12%;
     text-align: center;
+    background: #000C url('${getScriptBase()}assets/images/not_started_yet_1080.png') center/cover no-repeat;
 }
 #ol-start-overlay p {
-    color: #ccc;
+    color: #8f7e48;
     font-size: 12px;
     line-height: 1.6;
     margin: 0 0 16px;
-    text-shadow: 0 1px 6px rgba(0,0,0,0.9);
 }
 #ol-start-overlay button {
     background: rgba(40,140,60,0.9);
@@ -294,12 +297,11 @@ canvas#ol-canvas {
     flex: 1 1 0;
 }
 .ol-slider-group label {
-    color: #999;
+    color: #8f7e48;
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     white-space: nowrap;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.9);
     order: 3;
 }
 .ol-slider-group .ol-val {
@@ -307,7 +309,6 @@ canvas#ol-canvas {
     font-variant-numeric: tabular-nums;
     min-width: 3.5em;
     text-align: center;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.9);
     order: 2;
 }
 /* Vertical slider via writing-mode — native vertical, height = track length */
@@ -327,29 +328,29 @@ canvas#ol-canvas {
     width: 12px;
     height: 240px;
     border-radius: 6px;
-    border: 4px solid #000C;
+    border: 3px solid #FFF;
     outline: none;
     cursor: pointer;
     margin: 0;
 }
 .ol-slider-group input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 16px;
-    height: 16px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
     background: var(--thumb-color, #4aaff0);
-    border: 4px solid #000C;
+    border: 3px solid #FFF;
     cursor: pointer;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    box-shadow: 0 1px 3px rgba(255,255,255,0.5);
 }
 .ol-slider-group input[type="range"]::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
     background: var(--thumb-color, #4aaff0);
-    border: 4px solid #000C;
+    border: 3px solid #FFF;
     cursor: pointer;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+    box-shadow: 0 1px 3px rgba(255,255,255,0.5);
 }
 @media (pointer: coarse) {
     .ol-slider-group .ol-slider-wrap {
@@ -437,7 +438,7 @@ function buildDOM() {
                 <div class="ol-slider-wrap"><input type="range" id="ol-temp" min="3" max="160" value="20" step="1" /></div>
             </div>
             <div class="ol-slider-group">
-                <label>${t.ph}</label>
+                <label id="ol-ph-label">${t.ph}</label>
                 <span class="ol-val" id="ol-ph-val">7.0</span>
                 <div class="ol-slider-wrap"><input type="range" id="ol-ph" min="0" max="14" value="7" step="0.1" /></div>
             </div>
@@ -459,19 +460,36 @@ class EmbedApp {
     private activeHypothesis: Hypothesis = "htv";
 
     private readonly hypothesisKeys: HypothesisKeys = {
-        temp: { htv: "ol-slider-ol-temp",      wlp: "ol-slider-ol-temp-wlp" },
-        ph:   { htv: "ol-slider-ol-ph",         wlp: "ol-slider-ol-ph-wlp" },
-        elec: { htv: "ol-slider-ol-elec",       wlp: "ol-slider-ol-elec-wlp" },
+        temp: { htv: "ol-slider-ol-temp", wlp: "ol-slider-ol-temp-wlp" },
+        ph: { htv: "ol-slider-ol-ph", wlp: "ol-slider-ol-ph-wlp" },
+        elec: { htv: "ol-slider-ol-elec", wlp: "ol-slider-ol-elec-wlp" },
         pres: "ol-slider-ol-pres",
     };
 
     private readonly sliderIds: SliderIds = {
-        temp: { slider: "ol-temp", value: "ol-temp-val", thumbStop: { htv: "ol-temp",    wlp: "ol-temp-wlp" } },
-        ph:   { slider: "ol-ph",   value: "ol-ph-val",   label: "ol-ph-label", thumbStop: { htv: "ol-ph",      wlp: "ol-ph-wlp"   } },
-        elec: { slider: "ol-elec", value: "ol-elec-val", thumbStop: { htv: "ol-elec",    wlp: "ol-elec-wlp" } },
+        temp: {
+            slider: "ol-temp",
+            value: "ol-temp-val",
+            thumbStop: { htv: "ol-temp", wlp: "ol-temp-wlp" },
+        },
+        ph: {
+            slider: "ol-ph",
+            value: "ol-ph-val",
+            label: "ol-ph-label",
+            thumbStop: { htv: "ol-ph", wlp: "ol-ph-wlp" },
+        },
+        elec: {
+            slider: "ol-elec",
+            value: "ol-elec-val",
+            thumbStop: { htv: "ol-elec", wlp: "ol-elec-wlp" },
+        },
     };
 
-    private sliderDefaults: SliderValues = { temperature: 15, ph: 7.0, electricalActivity: 0.1 };
+    private sliderDefaults: SliderValues = {
+        temperature: 15,
+        ph: 7.0,
+        electricalActivity: 0.1,
+    };
 
     private zoom = 1.0;
     private panX = WORLD_CENTER_X;
@@ -537,9 +555,11 @@ class EmbedApp {
         // Load circle mask overlay PNG and upload as GPU texture
         try {
             const base = getScriptBase();
-            const resp = await fetch(`${base}assets/images/copyright_mask_wasm_1080.png`);
+            const resp = await fetch(
+                `${base}assets/images/copyright_mask_wasm_1080.png`,
+            );
             const blob = await resp.blob();
-            const bm   = await createImageBitmap(blob);
+            const bm = await createImageBitmap(blob);
             this.engine.set_overlay_images(bm, bm.width, bm.height);
         } catch (e) {
             console.warn("Origin of Life: overlay image failed to load:", e);
@@ -575,6 +595,20 @@ class EmbedApp {
         // Bepaal hypothese vroeg zodat temp/ph/elec de juiste storage-key laden
         this.activeHypothesis = loadInitialHypothesis(this.hypothesisKeys);
 
+        // Gradients direct toepassen als we in wlp starten — anders blijven ze op htv
+        if (this.activeHypothesis === "wlp") {
+            const t = I18N[getLang()];
+            const vals = applyHypothesisToSliders(
+                "wlp",
+                this.sliderIds,
+                this.hypothesisKeys,
+                t.ph,
+                t.uv,
+                this.sliderDefaults,
+            );
+            this.sliderDefaults = vals;
+        }
+
         // Generic wire for sliders without hypothesis-specific storage
         const wire = (
             id: string,
@@ -583,7 +617,9 @@ class EmbedApp {
             apply: (v: number) => void,
             stopsKey?: () => string,
         ) => {
-            const slider = document.getElementById(id) as HTMLInputElement | null;
+            const slider = document.getElementById(
+                id,
+            ) as HTMLInputElement | null;
             const display = document.getElementById(valId);
             if (!slider) return;
             const saved = loadSlider("ol-slider-" + id, NaN);
@@ -592,7 +628,9 @@ class EmbedApp {
                 const v = parseFloat(slider.value);
                 if (display) display.textContent = format(v);
                 updateThumbColor(slider, stopsKey ? stopsKey() : undefined);
-                if (display) display.style.color = slider.style.getPropertyValue("--thumb-color");
+                if (display)
+                    display.style.color =
+                        slider.style.getPropertyValue("--thumb-color");
                 saveSlider("ol-slider-" + id, v);
                 apply(v);
             };
@@ -601,18 +639,35 @@ class EmbedApp {
         };
 
         // Temperature — hypothesis-aware
-        const tempSlider = document.getElementById("ol-temp") as HTMLInputElement | null;
-        const tempVal    = document.getElementById("ol-temp-val");
+        const tempSlider = document.getElementById(
+            "ol-temp",
+        ) as HTMLInputElement | null;
+        const tempVal = document.getElementById("ol-temp-val");
         if (tempSlider) {
-            const saved = loadSlider(sliderKey(this.hypothesisKeys, "temp", this.activeHypothesis), this.sliderDefaults.temperature);
+            const saved = loadSlider(
+                sliderKey(this.hypothesisKeys, "temp", this.activeHypothesis),
+                this.sliderDefaults.temperature,
+            );
             tempSlider.value = saved.toString();
             this.sliderDefaults.temperature = saved;
             const update = () => {
                 const v = parseFloat(tempSlider.value);
                 if (tempVal) tempVal.textContent = `${v}°C`;
-                updateThumbColor(tempSlider, this.activeHypothesis === "wlp" ? "ol-temp-wlp" : "ol-temp");
-                if (tempVal) tempVal.style.color = tempSlider.style.getPropertyValue("--thumb-color");
-                saveSlider(sliderKey(this.hypothesisKeys, "temp", this.activeHypothesis), v);
+                updateThumbColor(
+                    tempSlider,
+                    this.activeHypothesis === "wlp" ? "ol-temp-wlp" : "ol-temp",
+                );
+                if (tempVal)
+                    tempVal.style.color =
+                        tempSlider.style.getPropertyValue("--thumb-color");
+                saveSlider(
+                    sliderKey(
+                        this.hypothesisKeys,
+                        "temp",
+                        this.activeHypothesis,
+                    ),
+                    v,
+                );
                 this.sliderDefaults.temperature = v;
                 if (this.engine && !this.engineBusy) {
                     this.engine.set_temperature(v);
@@ -625,18 +680,35 @@ class EmbedApp {
         }
 
         // pH / UV — hypothesis-aware
-        const phSlider = document.getElementById("ol-ph") as HTMLInputElement | null;
-        const phVal    = document.getElementById("ol-ph-val");
+        const phSlider = document.getElementById(
+            "ol-ph",
+        ) as HTMLInputElement | null;
+        const phVal = document.getElementById("ol-ph-val");
         if (phSlider) {
-            const saved = loadSlider(sliderKey(this.hypothesisKeys, "ph", this.activeHypothesis), this.sliderDefaults.ph);
+            const saved = loadSlider(
+                sliderKey(this.hypothesisKeys, "ph", this.activeHypothesis),
+                this.sliderDefaults.ph,
+            );
             phSlider.value = saved.toString();
             this.sliderDefaults.ph = saved;
             const update = () => {
                 const v = parseFloat(phSlider.value);
-                if (phVal) phVal.textContent = this.activeHypothesis === "wlp" ? v.toFixed(1) + " UV" : v.toFixed(1);
-                updateThumbColor(phSlider, this.activeHypothesis === "wlp" ? "ol-ph-wlp" : "ol-ph");
-                if (phVal) phVal.style.color = phSlider.style.getPropertyValue("--thumb-color");
-                saveSlider(sliderKey(this.hypothesisKeys, "ph", this.activeHypothesis), v);
+                if (phVal)
+                    phVal.textContent =
+                        this.activeHypothesis === "wlp"
+                            ? v.toFixed(1) + " UV"
+                            : v.toFixed(1);
+                updateThumbColor(
+                    phSlider,
+                    this.activeHypothesis === "wlp" ? "ol-ph-wlp" : "ol-ph",
+                );
+                if (phVal)
+                    phVal.style.color =
+                        phSlider.style.getPropertyValue("--thumb-color");
+                saveSlider(
+                    sliderKey(this.hypothesisKeys, "ph", this.activeHypothesis),
+                    v,
+                );
                 this.sliderDefaults.ph = v;
                 if (!this.engine || this.engineBusy) return;
                 if (this.activeHypothesis === "wlp") this.engine.set_uv(v);
@@ -647,20 +719,38 @@ class EmbedApp {
         }
 
         // Electrical activity — hypothesis-aware
-        const elecSlider = document.getElementById("ol-elec") as HTMLInputElement | null;
-        const elecVal    = document.getElementById("ol-elec-val");
+        const elecSlider = document.getElementById(
+            "ol-elec",
+        ) as HTMLInputElement | null;
+        const elecVal = document.getElementById("ol-elec-val");
         if (elecSlider) {
-            const saved = loadSlider(sliderKey(this.hypothesisKeys, "elec", this.activeHypothesis), this.sliderDefaults.electricalActivity);
+            const saved = loadSlider(
+                sliderKey(this.hypothesisKeys, "elec", this.activeHypothesis),
+                this.sliderDefaults.electricalActivity,
+            );
             elecSlider.value = saved.toString();
             this.sliderDefaults.electricalActivity = saved;
             const update = () => {
                 const v = parseFloat(elecSlider.value);
                 if (elecVal) elecVal.textContent = v.toFixed(2);
-                updateThumbColor(elecSlider, this.activeHypothesis === "wlp" ? "ol-elec-wlp" : "ol-elec");
-                if (elecVal) elecVal.style.color = elecSlider.style.getPropertyValue("--thumb-color");
-                saveSlider(sliderKey(this.hypothesisKeys, "elec", this.activeHypothesis), v);
+                updateThumbColor(
+                    elecSlider,
+                    this.activeHypothesis === "wlp" ? "ol-elec-wlp" : "ol-elec",
+                );
+                if (elecVal)
+                    elecVal.style.color =
+                        elecSlider.style.getPropertyValue("--thumb-color");
+                saveSlider(
+                    sliderKey(
+                        this.hypothesisKeys,
+                        "elec",
+                        this.activeHypothesis,
+                    ),
+                    v,
+                );
                 this.sliderDefaults.electricalActivity = v;
-                if (this.engine && !this.engineBusy) this.engine.set_electrical_activity(v);
+                if (this.engine && !this.engineBusy)
+                    this.engine.set_electrical_activity(v);
             };
             elecSlider.addEventListener("input", update);
             update();
@@ -675,15 +765,22 @@ class EmbedApp {
                 if (this.engine && !this.engineBusy) {
                     this.engine.set_pressure(v);
                     this.engine.set_particle_count_from_pressure(v);
-                    this.applyHypothesis(v < WLP_DEPTH_THRESHOLD ? "wlp" : "htv");
+                    this.applyHypothesis(
+                        v < WLP_DEPTH_THRESHOLD ? "wlp" : "htv",
+                    );
                 }
             },
         );
 
         // Clamp depth slider: snap to 0 on blur when value < 50m
-        const presSlider = document.getElementById("ol-pres") as HTMLInputElement | null;
+        const presSlider = document.getElementById(
+            "ol-pres",
+        ) as HTMLInputElement | null;
         presSlider?.addEventListener("blur", () => {
-            if (presSlider && parseFloat(presSlider.value) < WLP_DEPTH_THRESHOLD) {
+            if (
+                presSlider &&
+                parseFloat(presSlider.value) < WLP_DEPTH_THRESHOLD
+            ) {
                 presSlider.value = "0";
                 presSlider.dispatchEvent(new Event("input"));
             }
@@ -696,8 +793,12 @@ class EmbedApp {
 
         const t = I18N[getLang()];
         const vals = applyHypothesisToSliders(
-            hypothesis, this.sliderIds, this.hypothesisKeys,
-            t.ph, t.uv, this.sliderDefaults,
+            hypothesis,
+            this.sliderIds,
+            this.hypothesisKeys,
+            t.ph,
+            t.uv,
+            this.sliderDefaults,
         );
         this.sliderDefaults = vals;
 
