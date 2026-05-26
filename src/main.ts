@@ -10,6 +10,7 @@ import {
     initializeUI,
     initColorPanel,
     updateJoystickPan,
+    setRecordingMode,
 } from "./ui";
 import { SimulationParams } from "./particle-life-types";
 import {
@@ -567,6 +568,7 @@ class App {
 
         this.mediaRecorder.start(100); // collect data every 100ms
         this.isRecording = true;
+        setRecordingMode(true);
 
         document.getElementById("record-btn")?.classList.add("recording");
         document.getElementById("rec-indicator")?.classList.add("visible");
@@ -577,6 +579,7 @@ class App {
         if (!this.mediaRecorder || !this.isRecording) return;
         this.mediaRecorder.stop();
         this.isRecording = false;
+        setRecordingMode(false);
 
         document.getElementById("record-btn")?.classList.remove("recording");
         document.getElementById("rec-indicator")?.classList.remove("visible");

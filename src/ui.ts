@@ -45,12 +45,20 @@ let joystickInfluence = 200.0; // Maximum force influence from joystick
 let panVelocityX = 0.0;
 let panVelocityY = 0.0;
 // Time constant in seconds: larger = slower acceleration / deceleration
-const PAN_EMA_TAU = 0.4;
+let PAN_EMA_TAU = 0.4;
 
 // EMA-smoothed zoom (web UI slider only)
 let zoomTarget = 1.0;
 let zoomSmoothed = 1.0;
-const ZOOM_EMA_TAU = 0.25;
+let ZOOM_EMA_TAU = 0.25;
+
+let PAN_SPEED_FACTOR = 0.5;
+
+export function setRecordingMode(active: boolean): void {
+    PAN_EMA_TAU      = active ? 2.0   : 0.4;
+    ZOOM_EMA_TAU     = active ? 1.5   : 0.25;
+    PAN_SPEED_FACTOR = active ? 0.125 : 0.5;
+}
 
 // FPS calculation variables
 let frameCount = 0;
@@ -759,7 +767,7 @@ export function updateJoystickPan(deltaTime: number): void {
     const viewportHeight = VIRTUAL_WORLD_HEIGHT / zoomSmoothed;
 
     // 50 % of visible area per second at max deflection
-    const speedFactor = 0.5;
+    const speedFactor = PAN_SPEED_FACTOR;
 
     zoomCenterX += panVelocityX * viewportWidth * speedFactor * deltaTime;
     zoomCenterY += panVelocityY * viewportHeight * speedFactor * deltaTime;
