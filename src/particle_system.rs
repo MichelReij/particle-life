@@ -20,25 +20,41 @@ pub struct Particle {
 
 // Size ranges for each particle type (multipliers of base size)
 // We'll use the middle value of each range with ±20% randomization
-const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; 7] = [
-    1.4, // Type 0: Blue   - medium-large
-    2.2, // Type 1: Yellow - large, dominant
-    0.4, // Type 2: Red    - small, agile
-    0.7, // Type 3: Purple - smaller, compact
-    1.0, // Type 4: Green  - medium, balanced
-    1.8, // Type 5: Olive  - medium-large
-    0.6, // Type 6: Orange - small-medium
+const NUM_TYPES: usize = 8;
+
+// Probability weight per particle type (must sum to 1.0)
+const PARTICLE_TYPE_WEIGHTS: [f32; NUM_TYPES] = [
+    0.22, // Type 0: Blue
+    0.15, // Type 1: Yellow
+    0.11, // Type 2: Red
+    0.08, // Type 3: Purple
+    0.18, // Type 4: Green
+    0.08, // Type 5: Olive
+    0.15, // Type 6: Blue-gray
+    0.10, // Type 7: Blue-green
 ];
 
-// Default color palette (sRGB 0-1), OKLCH-adjusted
-const DEFAULT_COLORS: [[f32; 3]; 7] = [
-    [0.4805, 0.6942, 0.6433], // #7bb1a4 - Blue
-    [0.9923, 0.8874, 0.6210], // #fde29e - Yellow
-    [0.8428, 0.4442, 0.4913], // #d7717d - Red
-    [0.6689, 0.4828, 0.6993], // #ab7bb2 - Purple
-    [0.3898, 0.6981, 0.4909], // #63b27d - Green
-    [0.7546, 0.7263, 0.4904], // #c0b97d - Olive green
-    [0.4688, 0.5970, 0.7357], // #7898bc - Orange
+const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; NUM_TYPES] = [
+    1.4, // Type 0: Blue
+    2.2, // Type 1: Yellow
+    0.4, // Type 2: Red
+    0.7, // Type 3: Purple
+    1.0, // Type 4: Green
+    1.8, // Type 5: Olive
+    0.6, // Type 6: Cyan
+    1.2, // Type 7: Blue-green
+];
+
+// Default color palette (sRGB 0-1), evenly spaced in OkLCH hue
+const DEFAULT_COLORS: [[f32; 3]; 8] = [
+    [0.4596, 0.6745, 0.5871], // #75ac96 - Blue
+    [0.9352, 0.8674, 0.6573], // #eedda8 - Yellow
+    [0.8126, 0.4163, 0.5183], // #cf6a84 - Red
+    [0.6718, 0.4511, 0.6439], // #ab73a4 - Purple
+    [0.3582, 0.6903, 0.4753], // #5bb079 - Green
+    [0.5833, 0.6397, 0.4227], // #95a36c - Olive green
+    [0.4863, 0.5691, 0.6656], // #7c91aa - Blue-gray (Cyan)
+    [0.5253, 0.7727, 0.7534], // #86c5c0 - Blue-green
 ];
 
 #[derive(Debug)]
@@ -50,7 +66,7 @@ pub struct ParticleSystem {
     num_types: u32,
     base_particle_size: f32,
     pub particle_opacity: f32,
-    pub type_colors: [[f32; 3]; 7],
+    pub type_colors: [[f32; 3]; NUM_TYPES],
     spatial_grid: SpatialGrid,
 }
 
@@ -58,13 +74,24 @@ impl ParticleSystem {
     pub fn new(params: &SimulationParams, _rules: &InteractionRules, rng: &mut SmallRng) -> Self {
         let max_particles = MAX_PARTICLES;
         let min_particles = MIN_PARTICLES;
-        let num_types = 7;
+        let num_types = NUM_TYPES as u32;
 
         let mut particles = Vec::with_capacity(max_particles as usize);
 
         // Initialize all particles (even inactive ones)
         for i in 0..max_particles {
-            let particle_type = (i % num_types) as u32;
+            let weight_sum: f32 = PARTICLE_TYPE_WEIGHTS.iter().sum();
+            let r = rng.gen::<f32>() * weight_sum;
+            let mut cumulative = 0.0f32;
+            let particle_type = PARTICLE_TYPE_WEIGHTS
+                .iter()
+                .enumerate()
+                .find(|(_, &w)| {
+                    cumulative += w;
+                    r < cumulative
+                })
+                .map(|(i, _)| i as u32)
+                .unwrap_or(num_types - 1);
             let base_multiplier = PARTICLE_TYPE_SIZE_MULTIPLIERS[particle_type as usize];
 
             // Add ±40% randomization to the base multiplier
@@ -207,7 +234,7 @@ impl ParticleSystem {
         let mut buffer = Vec::with_capacity(self.num_types as usize * 16); // 4 floats per type
 
         for i in 0..self.num_types as usize {
-            let color = self.type_colors[i % 7];
+            let color = self.type_colors[i % NUM_TYPES];
 
             // Store RGBA values as little-endian f32
             buffer.extend_from_slice(&color[0].to_le_bytes()); // Red

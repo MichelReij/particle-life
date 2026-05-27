@@ -149,9 +149,6 @@ input[type="button"] {
     #Elec {
         grid-area: elec;
 
-        #elecValue::after {
-            content: " kJ/m²/day";
-        }
     }
 
     #Pres {

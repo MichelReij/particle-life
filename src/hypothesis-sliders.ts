@@ -81,7 +81,7 @@ export function applyHypothesisToSliders(
         );
         tempSlider.value = result.temperature.toString();
         if (tempVal) tempVal.textContent = `${result.temperature}°C`;
-        tempSlider.style.background = hypothesis === "wlp" ? SLIDERS[1].wlp.gradient : "";
+        tempSlider.style.background = hypothesis === "wlp" ? SLIDERS[1].wlp.gradient.replace("to top", "to right") : "";
         updateThumbColor(tempSlider, ids.temp.thumbStop[hypothesis]);
     }
 
@@ -106,7 +106,7 @@ export function applyHypothesisToSliders(
             phValEl.textContent = hypothesis === "wlp"
                 ? result.ph.toFixed(1) + " UV"
                 : result.ph.toFixed(1);
-        phSlider.style.background = hypothesis === "wlp" ? SLIDERS[2].wlp.gradient : "";
+        phSlider.style.background = hypothesis === "wlp" ? SLIDERS[2].wlp.gradient.replace("to top", "to right") : "";
         updateThumbColor(phSlider, ids.ph.thumbStop[hypothesis]);
     }
 
@@ -121,8 +121,9 @@ export function applyHypothesisToSliders(
             newMax,
         );
         elecSlider.value = result.electricalActivity.toString();
-        if (elecVal) elecVal.textContent = result.electricalActivity.toFixed(2);
-        elecSlider.style.background = hypothesis === "wlp" ? SLIDERS[3].wlp.gradient : "";
+        const elecUnit = hypothesis === "wlp" ? SLIDERS[3].wlp.unit["en"] : SLIDERS[3].htv.unit["en"];
+        if (elecVal) elecVal.textContent = `${result.electricalActivity.toFixed(2)} ${elecUnit}`;
+        elecSlider.style.background = hypothesis === "wlp" ? SLIDERS[3].wlp.gradient.replace("to top", "to right") : "";
         updateThumbColor(elecSlider, ids.elec.thumbStop[hypothesis]);
     }
 

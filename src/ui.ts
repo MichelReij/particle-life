@@ -1407,7 +1407,7 @@ function initializeEnvironmentalSliders(): void {
     if (tempSlider && tempValueDisplay) {
         temperature = loadSlider(sliderKey(HYPOTHESIS_KEYS, "temp", activeHypothesis), temperature);
         tempSlider.value = temperature.toString();
-        tempValueDisplay.textContent = temperature.toString();
+        tempValueDisplay.textContent = `${temperature}°C`;
         applySliderGradient(tempSlider, "tempSlider");
         updateThumbColor(tempSlider);
         syncValueColor(tempSlider, "tempValue");
@@ -1417,7 +1417,7 @@ function initializeEnvironmentalSliders(): void {
         tempSlider.addEventListener("input", (event) => {
             const newValue = parseFloat((event.target as HTMLInputElement).value);
             temperature = newValue;
-            tempValueDisplay.textContent = newValue.toString();
+            tempValueDisplay.textContent = `${newValue}°C`;
             updateThumbColor(tempSlider, activeHypothesis === "wlp" ? "ol-temp-wlp" : "tempSlider");
             syncValueColor(tempSlider, "tempValue");
             saveSlider(sliderKey(HYPOTHESIS_KEYS, "temp", activeHypothesis), newValue);
@@ -1432,7 +1432,8 @@ function initializeEnvironmentalSliders(): void {
     if (elecSlider && elecValueDisplay) {
         electricalActivity = loadSlider(sliderKey(HYPOTHESIS_KEYS, "elec", activeHypothesis), electricalActivity);
         elecSlider.value = electricalActivity.toString();
-        elecValueDisplay.textContent = electricalActivity.toFixed(2);
+        const elecUnit = () => activeHypothesis === "wlp" ? SLIDERS[3].wlp.unit["en"] : SLIDERS[3].htv.unit["en"];
+        elecValueDisplay.textContent = `${electricalActivity.toFixed(2)} ${elecUnit()}`;
         applySliderGradient(elecSlider, "elecSlider");
         updateThumbColor(elecSlider);
         syncValueColor(elecSlider, "elecValue");
@@ -1442,7 +1443,7 @@ function initializeEnvironmentalSliders(): void {
         elecSlider.addEventListener("input", (event) => {
             const newValue = parseFloat((event.target as HTMLInputElement).value);
             electricalActivity = newValue;
-            elecValueDisplay.textContent = newValue.toFixed(2);
+            elecValueDisplay.textContent = `${newValue.toFixed(2)} ${elecUnit()}`;
             updateThumbColor(elecSlider, activeHypothesis === "wlp" ? "ol-elec-wlp" : "elecSlider");
             syncValueColor(elecSlider, "elecValue");
             saveSlider(sliderKey(HYPOTHESIS_KEYS, "elec", activeHypothesis), newValue);
@@ -1951,7 +1952,7 @@ export function initColorPanel(): void {
 
         const rows = document.querySelectorAll<HTMLElement>(".color-type-row");
         palette.colors.forEach((hex, i) => {
-            if (i >= 7) return;
+            if (i >= 8) return;
             const [r, g2, b] = hexToSrgb(hex);
             const [l, c, h] = srgbToOklch(r, g2, b);
             typeOklch[i] = [l, c, h];
@@ -2039,7 +2040,7 @@ export function initColorPanel(): void {
                 const fmt = (x: number) => x.toFixed(4);
                 return `    [${fmt(r)}, ${fmt(g)}, ${fmt(b)}], // ${hex} - ${typeNames[i]}`;
             });
-            const text = `const DEFAULT_COLORS: [[f32; 3]; 7] = [\n${lines.join("\n")}\n];`;
+            const text = `const DEFAULT_COLORS: [[f32; 3]; 8] = [\n${lines.join("\n")}\n];`;
             navigator.clipboard.writeText(text).then(() => {
                 const btn = document.getElementById("copy-palette-btn");
                 if (btn) {

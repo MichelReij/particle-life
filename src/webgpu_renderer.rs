@@ -335,7 +335,7 @@ impl WebGpuRenderer {
 
         let max_particles = MAX_PARTICLES as usize;
         let active_particles = MAX_PARTICLES as usize;
-        let num_types = 7usize;
+        let num_types = 8usize;
         let mut initial_particle_data = Vec::with_capacity(max_particles * 48);
         let mut rng = rand::thread_rng();
 

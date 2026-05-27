@@ -40,7 +40,7 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     let view_dir = vec3<f32>(0.0, 0.0, 1.0);
 
     // Deeper diffuse shadow for volume (0.5 min = real shadow on back side)
-    let diffuse = mix(0.5, 1.0, max(0.0, dot(normal, light_dir)));
+    let diffuse = mix(0.625, 1.0, max(0.0, dot(normal, light_dir)));
 
     // Faint specular - organic matter isn't shiny
     let reflect_dir = reflect(- light_dir, normal);
@@ -48,7 +48,7 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Dark cell-wall rim: membrane effect - darkens edge like a real cell
     let rim = 1.0 - max(0.0, dot(normal, view_dir));
-    let cell_wall = pow(rim, 2.5) * 0.55;
+    let cell_wall = pow(rim, 2.5) * 0.41;
 
     // Internal translucency glow: center is slightly brighter/warmer (cheap SSS)
     let center_glow = (1.0 - normalized_dist) * 0.18;

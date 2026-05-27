@@ -259,7 +259,7 @@ canvas#ol-canvas {
     border-radius: 50%;
     padding: 12%;
     text-align: center;
-    background: #000C url('${getScriptBase()}assets/images/not_started_yet_1080.png') center/cover no-repeat;
+    background: #FFFC url('${getScriptBase()}assets/images/not_started_yet_1080.png') center/cover no-repeat;
 }
 #ol-start-overlay p {
     color: #8f7e48;
@@ -280,22 +280,18 @@ canvas#ol-canvas {
 #ol-start-overlay button:hover {
     background: rgba(40,140,60,1);
 }
+/* Grid: label | slider | value — één rij per slider, netjes uitgelijnd */
 #ol-controls {
-    display: flex;
-    flex-direction: row;
-    gap: 0;
-    padding: 10px 14px;
+    display: grid;
+    grid-template-columns: max-content 1fr max-content;
+    column-gap: 10px;
+    row-gap: 10px;
+    padding: 12px 14px;
     background: transparent;
-    border-top: none;
-    align-items: flex-end;
-    justify-content: space-evenly;
+    align-items: center;
 }
 .ol-slider-group {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-    flex: 1 1 0;
+    display: contents;
 }
 .ol-slider-group label {
     color: #8f7e48;
@@ -303,31 +299,28 @@ canvas#ol-canvas {
     text-transform: uppercase;
     letter-spacing: 0.06em;
     white-space: nowrap;
-    order: 3;
+    grid-column: 1;
+}
+.ol-slider-group .ol-slider-wrap {
+    display: flex;
+    align-items: center;
+    grid-column: 2;
+    min-width: 0;
 }
 .ol-slider-group .ol-val {
     font-size: 12px;
     font-variant-numeric: tabular-nums;
-    min-width: 3.5em;
-    text-align: center;
-    order: 2;
-}
-/* Vertical slider via writing-mode — native vertical, height = track length */
-.ol-slider-group .ol-slider-wrap {
-    order: 1;
-    width: 34px;
-    height: 240px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    white-space: nowrap;
+    text-align: right;
+    grid-column: 3;
 }
 .ol-slider-group input[type="range"] {
     -webkit-appearance: none;
     appearance: none;
-    writing-mode: vertical-lr;
-    direction: rtl;
-    width: 12px;
-    height: 240px;
+    writing-mode: horizontal-tb;
+    direction: ltr;
+    width: 100%;
+    height: 12px;
     border-radius: 6px;
     border: 3px solid #FFF;
     outline: none;
@@ -354,42 +347,38 @@ canvas#ol-canvas {
     box-shadow: 0 1px 3px rgba(255,255,255,0.5);
 }
 @media (pointer: coarse) {
-    .ol-slider-group .ol-slider-wrap {
-        width: 36px;
-    }
     .ol-slider-group input[type="range"] {
-        width: 10px;
-        border-radius: 5px;
+        height: 10px;
     }
     .ol-slider-group input[type="range"]::-webkit-slider-thumb {
-        width: 26px;
-        height: 26px;
+        width: 28px;
+        height: 28px;
     }
     .ol-slider-group input[type="range"]::-moz-range-thumb {
-        width: 26px;
-        height: 26px;
+        width: 28px;
+        height: 28px;
     }
 }
 
 /* Temp HTV */
-#ol-temp { background: ${SLIDERS[1].htv.gradient}; }
+#ol-temp { background: ${SLIDERS[1].htv.gradient.replace("to top", "to right")}; }
 #ol-temp::-webkit-slider-runnable-track { background: transparent; }
 #ol-temp::-moz-range-track { background: transparent; }
 
-/* Diepte — direction:ltr omdat de slider omgekeerd is (0 bovenaan) */
-#ol-pres { direction: ltr; background: ${SLIDERS[0].htv.gradient.replace("to top", "to bottom")}; }
+/* Diepte */
+#ol-pres { background: ${SLIDERS[0].htv.gradient.replace("to top", "to right")}; }
 #ol-pres::-webkit-slider-runnable-track { background: transparent; }
 #ol-pres::-moz-range-track { background: transparent; }
 
 /* pH HTV */
-#ol-ph { background: ${SLIDERS[2].htv.gradient}; }
+#ol-ph { background: ${SLIDERS[2].htv.gradient.replace("to top", "to right")}; }
 /* UV WLP */
-#ol-ph.wlp { background: ${SLIDERS[2].wlp.gradient}; }
+#ol-ph.wlp { background: ${SLIDERS[2].wlp.gradient.replace("to top", "to right")}; }
 #ol-ph::-webkit-slider-runnable-track { background: transparent; }
 #ol-ph::-moz-range-track { background: transparent; }
 
 /* Elec */
-#ol-elec { background: ${SLIDERS[3].htv.gradient}; }
+#ol-elec { background: ${SLIDERS[3].htv.gradient.replace("to top", "to right")}; }
 #ol-elec::-webkit-slider-runnable-track { background: transparent; }
 #ol-elec::-moz-range-track { background: transparent; }
 `;
@@ -431,23 +420,23 @@ function buildDOM() {
         <div id="ol-controls">
             <div class="ol-slider-group">
                 <label>${t.depth}</label>
-                <span class="ol-val" id="ol-pres-val">1m</span>
                 <div class="ol-slider-wrap"><input type="range" id="ol-pres" min="0" max="1000" value="1" step="1" /></div>
+                <span class="ol-val" id="ol-pres-val">1m</span>
             </div>
             <div class="ol-slider-group">
                 <label>${t.temp}</label>
-                <span class="ol-val" id="ol-temp-val">20°C</span>
                 <div class="ol-slider-wrap"><input type="range" id="ol-temp" min="3" max="160" value="20" step="1" /></div>
+                <span class="ol-val" id="ol-temp-val">20°C</span>
             </div>
             <div class="ol-slider-group">
                 <label id="ol-ph-label">${t.ph}</label>
-                <span class="ol-val" id="ol-ph-val">7.0</span>
                 <div class="ol-slider-wrap"><input type="range" id="ol-ph" min="0" max="14" value="7" step="0.1" /></div>
+                <span class="ol-val" id="ol-ph-val">7.0</span>
             </div>
             <div class="ol-slider-group">
                 <label>${t.electricity}</label>
-                <span class="ol-val" id="ol-elec-val">1.02</span>
                 <div class="ol-slider-wrap"><input type="range" id="ol-elec" min="0" max="3" value="1.02" step="0.01" /></div>
+                <span class="ol-val" id="ol-elec-val">1.02</span>
             </div>
         </div>
     `;
@@ -764,7 +753,8 @@ class EmbedApp {
             this.sliderDefaults.electricalActivity = saved;
             const update = () => {
                 const v = parseFloat(elecSlider.value);
-                if (elecVal) elecVal.textContent = v.toFixed(2);
+                const elecUnit = this.activeHypothesis === "wlp" ? SLIDERS[3].wlp.unit["en"] : SLIDERS[3].htv.unit["en"];
+                if (elecVal) elecVal.textContent = `${v.toFixed(2)} ${elecUnit}`;
                 updateThumbColor(
                     elecSlider,
                     this.activeHypothesis === "wlp" ? "ol-elec-wlp" : "ol-elec",
