@@ -35,6 +35,7 @@ class App {
     private recordedChunks: Blob[] = [];
     private isRecording = false;
     private isAudioOn = false;
+    private isPaused = false;
     // Guard against wasm-bindgen re-entrancy: async check_super_lightning holds a
     // &mut self borrow for the GPU readback; all other &mut self calls must be
     // deferred until it completes.
@@ -411,7 +412,12 @@ class App {
             .getElementById("circle-btn")
             ?.addEventListener("click", () => this.toggleCircleCanvas());
 
-        // Keyboard shortcuts: S = screenshot, V = toggle video recording, A = audio toggle
+        // Pause button
+        document
+            .getElementById("pause-btn")
+            ?.addEventListener("click", () => this.togglePause());
+
+        // Keyboard shortcuts: P = pause, S = screenshot, V = video, A = audio
         document.addEventListener("keydown", (e: KeyboardEvent) => {
             const el = document.activeElement;
             if (
@@ -419,6 +425,7 @@ class App {
                 (el instanceof HTMLInputElement && el.type !== "range")
             )
                 return;
+            if (e.key === "p" || e.key === "P") this.togglePause();
             if (e.key === "a" || e.key === "A") this.toggleAudio();
             if (e.key === "s" || e.key === "S") this.triggerScreenshot();
             if (e.key === "v" || e.key === "V") this.toggleRecording();
@@ -462,7 +469,7 @@ class App {
                 this.checkLightningStatus();
             }
 
-            if (this.engine && !this.engineBusy) {
+            if (!this.isPaused && this.engine && !this.engineBusy) {
                 try {
                     // Apply relative joystick panning before the simulation step
                     updateJoystickPan(deltaTime);
@@ -502,6 +509,12 @@ class App {
         if (canvas) canvas.style.borderRadius = this.isCircleCanvas ? "50%" : "0";
         const icon = document.getElementById("circle-btn")?.querySelector(".material-symbols-outlined");
         if (icon) icon.textContent = this.isCircleCanvas ? "check_circle" : "cancel";
+    }
+
+    private togglePause() {
+        this.isPaused = !this.isPaused;
+        const icon = document.getElementById("pause-btn")?.querySelector(".material-symbols-outlined");
+        if (icon) icon.textContent = this.isPaused ? "play_arrow" : "pause";
     }
 
     private toggleAudio() {

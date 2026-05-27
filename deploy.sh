@@ -65,6 +65,20 @@ mirror -R --delete --verbose --parallel=4 \
     $FTP_PATH/pkg
 LFTP
 
+# Sync newer source assets to public/ before uploading
+echo "Checking assets/images/ for updates ..."
+SRC_ASSETS="$SCRIPT_DIR/assets/images"
+DST_ASSETS="$PUBLIC_DIR/assets/images"
+mkdir -p "$DST_ASSETS"
+for src_file in "$SRC_ASSETS"/*.png "$SRC_ASSETS"/*.jpg "$SRC_ASSETS"/*.gif "$SRC_ASSETS"/*.webp; do
+    [[ -f "$src_file" ]] || continue
+    dst_file="$DST_ASSETS/$(basename "$src_file")"
+    if [[ ! -f "$dst_file" ]] || [[ "$src_file" -nt "$dst_file" ]]; then
+        echo "  Copying $(basename "$src_file") -> public/assets/images/"
+        cp "$src_file" "$dst_file"
+    fi
+done
+
 # Mirror assets/images/ (copyright overlay PNGs)
 echo "Syncing assets/images/ ..."
 lftp -u "$FTP_USER","$FTP_PASS" "ftp://$FTP_HOST" <<LFTP

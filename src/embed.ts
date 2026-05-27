@@ -198,7 +198,7 @@ const EMBED_CSS = `
     pointer-events: none;
     user-select: none;
 }
-#ol-screenshot-btn, #ol-record-btn {
+#ol-screenshot-btn, #ol-record-btn, #ol-pause-btn {
     position: absolute;
     bottom: 10px;
     background: none;
@@ -218,16 +218,17 @@ const EMBED_CSS = `
 }
 #ol-screenshot-btn { right: 10px; }
 #ol-record-btn     { right: 58px; }
-#ol-screenshot-btn .ol-material-icon, #ol-record-btn .ol-material-icon {
+#ol-pause-btn      { left: 10px; }
+#ol-screenshot-btn .ol-material-icon, #ol-record-btn .ol-material-icon, #ol-pause-btn .ol-material-icon {
     font-size: 32px;
     line-height: 1;
 }
-#ol-screenshot-btn:hover, #ol-record-btn:hover { opacity: 1; }
-#ol-screenshot-btn:active, #ol-record-btn:active { transform: scale(0.88); }
+#ol-screenshot-btn:hover, #ol-record-btn:hover, #ol-pause-btn:hover { opacity: 1; }
+#ol-screenshot-btn:active, #ol-record-btn:active, #ol-pause-btn:active { transform: scale(0.88); }
 #ol-record-btn.recording { color: #ff5555; opacity: 1; }
-#ol-screenshot-btn:focus, #ol-record-btn:focus { outline: none; }
+#ol-screenshot-btn:focus, #ol-record-btn:focus, #ol-pause-btn:focus { outline: none; }
 @media (max-width: 480px) {
-    #ol-hint-zoom, #ol-hint-pan, #ol-screenshot-btn, #ol-record-btn { display: none; }
+    #ol-hint-zoom, #ol-hint-pan, #ol-screenshot-btn, #ol-record-btn, #ol-pause-btn { display: none; }
 }
 canvas#ol-canvas {
     background-color: #0004;
@@ -418,6 +419,7 @@ function buildDOM() {
             <div id="ol-status">${t.loading}</div>
             <div id="ol-hint-zoom">${t.hintZoom}</div>
             <div id="ol-hint-pan">${t.hintPan}</div>
+            <button id="ol-pause-btn" title="Pause / Play (P)"><span class="ol-material-icon">pause</span></button>
             <button id="ol-screenshot-btn" title="${t.titleScreenshot}"><span class="ol-material-icon">photo_camera</span></button>
             <button id="ol-record-btn" title="${t.titleRecord}"><span class="ol-material-icon">videocam</span></button>
             <div id="ol-screenshot-flash"></div>
@@ -456,6 +458,7 @@ class EmbedApp {
     private canvas: HTMLCanvasElement | null = null;
     private animationId: number | null = null;
     private engineBusy = false;
+    private isPaused = false;
     private lastTime = 0;
     private activeHypothesis: Hypothesis = "htv";
 
@@ -534,6 +537,24 @@ class EmbedApp {
         this.panX = this.virtualWorldWidth / 2;
         this.panY = this.virtualWorldHeight / 2;
 
+        // Feature detection: skip loading WASM if browser lacks WebAssembly or WebGPU
+        if (typeof WebAssembly === "undefined") {
+            console.warn("Origin of Life: WebAssembly not supported.");
+            this.setStatus("Your browser does not support WebAssembly.");
+            return;
+        }
+        if (!navigator.gpu) {
+            console.warn("Origin of Life: WebGPU not supported.");
+            this.setStatus("Your browser does not support WebGPU.");
+            return;
+        }
+        const gpuAdapter = await navigator.gpu.requestAdapter();
+        if (!gpuAdapter) {
+            console.warn("Origin of Life: No WebGPU adapter available.");
+            this.setStatus("No compatible GPU found for WebGPU.");
+            return;
+        }
+
         const wasmUrl = `${getScriptBase()}pkg/particle_life_wasm_bg.wasm?v=${Date.now()}`;
 
         try {
@@ -594,6 +615,17 @@ class EmbedApp {
     private wireSliders() {
         // Bepaal hypothese vroeg zodat temp/ph/elec de juiste storage-key laden
         this.activeHypothesis = loadInitialHypothesis(this.hypothesisKeys);
+
+        // Stuur pressure als eerste naar de engine zodat is_wlp correct staat
+        // vóór temp/ph/elec worden berekend — anders gebruikt apply_temperature de verkeerde hypothese
+        if (this.engine) {
+            const presSliderInit = document.getElementById("ol-pres") as HTMLInputElement | null;
+            if (presSliderInit) {
+                const pv = parseFloat(presSliderInit.value);
+                this.engine.set_pressure(pv);
+                this.engine.set_particle_count_from_pressure(pv);
+            }
+        }
 
         // Gradients direct toepassen als we in wlp starten — anders blijven ze op htv
         if (this.activeHypothesis === "wlp") {
@@ -1007,13 +1039,31 @@ class EmbedApp {
         );
     }
 
+    private togglePause() {
+        this.isPaused = !this.isPaused;
+        const btn = document.getElementById("ol-pause-btn");
+        if (btn) btn.innerHTML = `<span class="ol-material-icon">${this.isPaused ? "play_arrow" : "pause"}</span>`;
+    }
+
     private wireCapture() {
+        document
+            .getElementById("ol-pause-btn")
+            ?.addEventListener("click", () => this.togglePause());
         document
             .getElementById("ol-screenshot-btn")
             ?.addEventListener("click", () => this.captureScreenshot());
         document
             .getElementById("ol-record-btn")
             ?.addEventListener("click", () => this.toggleRecording());
+
+        document.addEventListener("keydown", (e: KeyboardEvent) => {
+            const el = document.activeElement;
+            if (el instanceof HTMLTextAreaElement ||
+                (el instanceof HTMLInputElement && el.type !== "range")) return;
+            if (e.key === "p" || e.key === "P") this.togglePause();
+            if (e.key === "s" || e.key === "S") this.captureScreenshot();
+            if (e.key === "v" || e.key === "V") this.toggleRecording();
+        });
     }
 
     private captureScreenshot() {
@@ -1077,7 +1127,7 @@ class EmbedApp {
             const dt = Math.min((now - this.lastTime) / 1000, 0.05);
             this.lastTime = now;
 
-            if (this.engine && !this.engineBusy) {
+            if (!this.isPaused && this.engine && !this.engineBusy) {
                 try {
                     this.engine.update_frame(dt);
                     this.engine.render();
