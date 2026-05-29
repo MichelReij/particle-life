@@ -37,8 +37,10 @@ const I18N: Record<
         hintPan: string;
         titleScreenshot: string;
         titleRecord: string;
-        startText: string;
-        playAnyway: string;
+        noWebAssembly: string;
+        noWebGPU: string;
+        noGPUAdapter: string;
+        loadFailed: string;
         temp: string;
         ph: string;
         uv: string;
@@ -52,9 +54,10 @@ const I18N: Record<
         hintPan: "Sleep om te bewegen",
         titleScreenshot: "Screenshot",
         titleRecord: "Video opnemen",
-        startText:
-            "Deze simulatie gebruikt je grafische processor intensief en werkt mogelijk niet goed op oudere apparaten. Ook verbruikt het veel energie, waardoor de batterij van je telefoon of laptop snel leegloopt.",
-        playAnyway: "Starten",
+        noWebAssembly: "Je browser ondersteunt WebAssembly niet.",
+        noWebGPU: "Je browser ondersteunt WebGPU niet.",
+        noGPUAdapter: "Geen compatibele GPU gevonden voor WebGPU.",
+        loadFailed: "Laden van de simulatie mislukt.",
         temp: "Temperatuur",
         ph: "pH",
         uv: "UV",
@@ -67,9 +70,10 @@ const I18N: Record<
         hintPan: "Drag to pan",
         titleScreenshot: "Screenshot",
         titleRecord: "Record video",
-        startText:
-            "This simulation uses your graphics processor intensively and may not run well on older devices. It also consumes a lot of energy, which will drain the battery of your phone or laptop quickly.",
-        playAnyway: "Play anyway",
+        noWebAssembly: "Your browser does not support WebAssembly.",
+        noWebGPU: "Your browser does not support WebGPU.",
+        noGPUAdapter: "No compatible GPU found for WebGPU.",
+        loadFailed: "Failed to load simulation.",
         temp: "Temperature",
         ph: "pH",
         uv: "UV",
@@ -82,9 +86,10 @@ const I18N: Record<
         hintPan: "Glisser pour déplacer",
         titleScreenshot: "Capture d'écran",
         titleRecord: "Enregistrer la vidéo",
-        startText:
-            "Cette simulation sollicite intensément votre processeur graphique et peut ne pas fonctionner correctement sur les appareils plus anciens. Elle consomme également beaucoup d'énergie, ce qui déchargera rapidement la batterie de votre téléphone ou ordinateur portable.",
-        playAnyway: "Démarrer quand même",
+        noWebAssembly: "Votre navigateur ne prend pas en charge WebAssembly.",
+        noWebGPU: "Votre navigateur ne prend pas en charge WebGPU.",
+        noGPUAdapter: "Aucun GPU compatible trouvé pour WebGPU.",
+        loadFailed: "Échec du chargement de la simulation.",
         temp: "Température",
         ph: "pH",
         uv: "UV",
@@ -412,10 +417,7 @@ function buildDOM() {
             <button id="ol-screenshot-btn" title="${t.titleScreenshot}"><span class="ol-material-icon">photo_camera</span></button>
             <button id="ol-record-btn" title="${t.titleRecord}"><span class="ol-material-icon">videocam</span></button>
             <div id="ol-screenshot-flash"></div>
-            <div id="ol-start-overlay">
-                <p>${t.startText}</p>
-                <button id="ol-play-anyway">${t.playAnyway}</button>
-            </div>
+            <div id="ol-start-overlay"></div>
         </div>
         <div id="ol-controls">
             <div class="ol-slider-group">
@@ -503,6 +505,7 @@ class EmbedApp {
     private recordedChunks: Blob[] = [];
 
     async init() {
+        const t = I18N[getLang()];
         injectStyles();
         buildDOM();
 
@@ -529,18 +532,18 @@ class EmbedApp {
         // Feature detection: skip loading WASM if browser lacks WebAssembly or WebGPU
         if (typeof WebAssembly === "undefined") {
             console.warn("Origin of Life: WebAssembly not supported.");
-            this.setStatus("Your browser does not support WebAssembly.");
+            this.showError(t.noWebAssembly);
             return;
         }
         if (!navigator.gpu) {
             console.warn("Origin of Life: WebGPU not supported.");
-            this.setStatus("Your browser does not support WebGPU.");
+            this.showError(t.noWebGPU);
             return;
         }
         const gpuAdapter = await navigator.gpu.requestAdapter();
         if (!gpuAdapter) {
             console.warn("Origin of Life: No WebGPU adapter available.");
-            this.setStatus("No compatible GPU found for WebGPU.");
+            this.showError(t.noGPUAdapter);
             return;
         }
 
@@ -550,7 +553,7 @@ class EmbedApp {
             await init({ module_or_path: wasmUrl });
         } catch (e) {
             console.error("Origin of Life: WASM init failed:", e);
-            this.setStatus("Failed to load simulation.");
+            this.showError(t.loadFailed);
             return;
         }
 
@@ -584,21 +587,19 @@ class EmbedApp {
         if (status) status.style.display = "none";
     }
 
-    private setStatus(msg: string) {
+    private showError(msg: string) {
+        const overlay = document.getElementById("ol-start-overlay");
+        if (overlay) overlay.style.display = "none";
         const el = document.getElementById("ol-status");
         if (el) el.textContent = msg;
     }
 
     private wireStartOverlay() {
         const overlay = document.getElementById("ol-start-overlay");
-        const btn = document.getElementById("ol-play-anyway");
-        if (!overlay || !btn) return;
-
-        btn.addEventListener("click", () => {
-            overlay.style.display = "none";
-            this.lastTime = performance.now();
-            this.startLoop();
-        });
+        if (!overlay) return;
+        overlay.style.display = "none";
+        this.lastTime = performance.now();
+        this.startLoop();
     }
 
     private wireSliders() {
