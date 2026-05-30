@@ -9,7 +9,7 @@
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let dims = vec2<f32>(textureDimensions(blur_h_tex));
     let uv   = frag_coord.xy / dims;
-    let step = vec2<f32>(0.0, 1.3 / dims.y); // 3px step, vertical only
+    let step = vec2<f32>(0.0, 1.3 / 1080.0); // fixed fraction calibrated on 1080px canvas
 
     // V-blur: same 9-tap Gaussian as blur_h.wgsl
     var blurred = textureSample(blur_h_tex, s, uv)              * 0.2742;

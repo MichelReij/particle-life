@@ -276,6 +276,7 @@ canvas#ol-canvas {
     display: contents;
 }
 .ol-slider-group label {
+font-size: 0.8rem;
     white-space: nowrap;
     grid-column: 1;
 }
@@ -286,6 +287,7 @@ canvas#ol-canvas {
     min-width: 0;
 }
 .ol-slider-group .ol-val {
+    font-size: 0.8rem;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     text-align: right;
