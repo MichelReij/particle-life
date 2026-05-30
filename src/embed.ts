@@ -147,9 +147,6 @@ const EMBED_CSS = `
     background: transparent;
     border-radius: 6px;
     overflow: hidden;
-    font-family: system-ui, sans-serif;
-    font-size: 13px;
-    color: #8f7e48;
     box-sizing: border-box;
 }
 #ol-wrap *, #ol-wrap *::before, #ol-wrap *::after {
@@ -181,16 +178,14 @@ const EMBED_CSS = `
     align-items: center;
     justify-content: center;
     background: transparent;
-    color: #8f7e48;
-    font-size: 14px;
     pointer-events: none;
 }
 #ol-hint-zoom {
     position: absolute;
     top: 6px;
     left: 8px;
-    font-size: 10px;
-    color: #8f7e48;
+    font-size: 12px;
+    color: var(--wp--preset--color--contrast);
     pointer-events: none;
     user-select: none;
 }
@@ -198,8 +193,8 @@ const EMBED_CSS = `
     position: absolute;
     top: 6px;
     right: 8px;
-    font-size: 10px;
-    color: #8f7e48;
+    font-size: 12px;
+    color: var(--wp--preset--color--contrast);
     pointer-events: none;
     user-select: none;
 }
@@ -208,7 +203,7 @@ const EMBED_CSS = `
     bottom: 10px;
     background: none;
     border: none;
-    color: #8f7e48;
+    color: var(--wp--preset--color--contrast);
     font-size: 0;
     width: 40px;
     height: 40px;
@@ -230,7 +225,7 @@ const EMBED_CSS = `
 }
 #ol-screenshot-btn:hover, #ol-record-btn:hover, #ol-pause-btn:hover { opacity: 1; }
 #ol-screenshot-btn:active, #ol-record-btn:active, #ol-pause-btn:active { transform: scale(0.88); }
-#ol-record-btn.recording { color: #ff5555; opacity: 1; }
+#ol-record-btn.recording { color: var(--wp--preset--color--accent-3); opacity: 1; }
 #ol-screenshot-btn:focus, #ol-record-btn:focus, #ol-pause-btn:focus { outline: none; }
 @media (max-width: 480px) {
     #ol-hint-zoom, #ol-hint-pan, #ol-screenshot-btn, #ol-record-btn, #ol-pause-btn { display: none; }
@@ -242,7 +237,7 @@ canvas#ol-canvas {
 #ol-hint-zoom,
 #ol-hint-pan {
     font-size: var(--wp--preset--font-size--small);
-    color: var(--wp--preset--color--contrast, #8f7e48);
+    color: var(--wp--preset--color--contrast);
 }
 #ol-screenshot-flash {
     position: absolute;
@@ -266,25 +261,7 @@ canvas#ol-canvas {
     text-align: center;
     background: #FFFC url('${getScriptBase()}assets/images/not_started_yet_1080.png') center/cover no-repeat;
 }
-#ol-start-overlay p {
-    color: #8f7e48;
-    font-size: 12px;
-    line-height: 1.6;
-    margin: 0 0 16px;
-}
-#ol-start-overlay button {
-    background: rgba(40,140,60,0.9);
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    padding: 8px 22px;
-    font-size: 13px;
-    cursor: pointer;
-    transition: background 0.15s;
-}
-#ol-start-overlay button:hover {
-    background: rgba(40,140,60,1);
-}
+
 /* Grid: label | slider | value — één rij per slider, netjes uitgelijnd */
 #ol-controls {
     display: grid;
@@ -299,10 +276,6 @@ canvas#ol-canvas {
     display: contents;
 }
 .ol-slider-group label {
-    color: #8f7e48;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     white-space: nowrap;
     grid-column: 1;
 }
@@ -313,7 +286,6 @@ canvas#ol-canvas {
     min-width: 0;
 }
 .ol-slider-group .ol-val {
-    font-size: 12px;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     text-align: right;
@@ -609,7 +581,9 @@ class EmbedApp {
         // Stuur pressure als eerste naar de engine zodat is_wlp correct staat
         // vóór temp/ph/elec worden berekend — anders gebruikt apply_temperature de verkeerde hypothese
         if (this.engine) {
-            const presSliderInit = document.getElementById("ol-pres") as HTMLInputElement | null;
+            const presSliderInit = document.getElementById(
+                "ol-pres",
+            ) as HTMLInputElement | null;
             if (presSliderInit) {
                 const pv = parseFloat(presSliderInit.value);
                 this.engine.set_pressure(pv);
@@ -754,8 +728,12 @@ class EmbedApp {
             this.sliderDefaults.electricalActivity = saved;
             const update = () => {
                 const v = parseFloat(elecSlider.value);
-                const elecUnit = this.activeHypothesis === "wlp" ? SLIDERS[3].wlp.unit["en"] : SLIDERS[3].htv.unit["en"];
-                if (elecVal) elecVal.textContent = `${v.toFixed(2)} ${elecUnit}`;
+                const elecUnit =
+                    this.activeHypothesis === "wlp"
+                        ? SLIDERS[3].wlp.unit["en"]
+                        : SLIDERS[3].htv.unit["en"];
+                if (elecVal)
+                    elecVal.textContent = `${v.toFixed(2)} ${elecUnit}`;
                 updateThumbColor(
                     elecSlider,
                     this.activeHypothesis === "wlp" ? "ol-elec-wlp" : "ol-elec",
@@ -1033,7 +1011,8 @@ class EmbedApp {
     private togglePause() {
         this.isPaused = !this.isPaused;
         const btn = document.getElementById("ol-pause-btn");
-        if (btn) btn.innerHTML = `<span class="ol-material-icon">${this.isPaused ? "play_arrow" : "pause"}</span>`;
+        if (btn)
+            btn.innerHTML = `<span class="ol-material-icon">${this.isPaused ? "play_arrow" : "pause"}</span>`;
     }
 
     private wireCapture() {
@@ -1049,8 +1028,11 @@ class EmbedApp {
 
         document.addEventListener("keydown", (e: KeyboardEvent) => {
             const el = document.activeElement;
-            if (el instanceof HTMLTextAreaElement ||
-                (el instanceof HTMLInputElement && el.type !== "range")) return;
+            if (
+                el instanceof HTMLTextAreaElement ||
+                (el instanceof HTMLInputElement && el.type !== "range")
+            )
+                return;
             if (e.key === "p" || e.key === "P") this.togglePause();
             if (e.key === "s" || e.key === "S") this.captureScreenshot();
             if (e.key === "v" || e.key === "V") this.toggleRecording();
