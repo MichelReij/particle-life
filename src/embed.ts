@@ -200,7 +200,7 @@ const EMBED_CSS = `
 }
 #ol-screenshot-btn, #ol-record-btn, #ol-pause-btn {
     position: absolute;
-    bottom: 10px;
+    bottom: 6px;
     background: none;
     border: none;
     color: var(--wp--preset--color--contrast);
@@ -216,9 +216,9 @@ const EMBED_CSS = `
     opacity: 0.85;
     padding: 0;
 }
-#ol-screenshot-btn { right: 10px; }
-#ol-record-btn     { right: 58px; }
-#ol-pause-btn      { left: 10px; }
+#ol-screenshot-btn { right: 6px; }
+#ol-record-btn     { right: 54px; }
+#ol-pause-btn      { left: 6px; }
 #ol-screenshot-btn .ol-material-icon, #ol-record-btn .ol-material-icon, #ol-pause-btn .ol-material-icon {
     font-size: 32px;
     line-height: 1;
@@ -265,18 +265,19 @@ canvas#ol-canvas {
 /* Grid: label | slider | value — één rij per slider, netjes uitgelijnd */
 #ol-controls {
     display: grid;
-    grid-template-columns: max-content 1fr max-content;
+    grid-template-columns: max-content 1fr 3rem;
     column-gap: 10px;
     row-gap: 10px;
-    padding: 12px 14px;
+    padding: 12px 4px;
     background: transparent;
     align-items: center;
+    margin-top: 48px;
 }
 .ol-slider-group {
     display: contents;
 }
 .ol-slider-group label {
-font-size: 0.8rem;
+    font-size: 1rem;
     white-space: nowrap;
     grid-column: 1;
 }
@@ -287,7 +288,7 @@ font-size: 0.8rem;
     min-width: 0;
 }
 .ol-slider-group .ol-val {
-    font-size: 0.8rem;
+    font-size: 1rem;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     text-align: right;
