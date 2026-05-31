@@ -265,13 +265,13 @@ canvas#ol-canvas {
 /* Grid: label | slider | value — één rij per slider, netjes uitgelijnd */
 #ol-controls {
     display: grid;
-    grid-template-columns: max-content 1fr 3rem;
+    grid-template-columns: max-content 1fr 4rem;
     column-gap: 10px;
     row-gap: 10px;
     padding: 12px 4px;
     background: transparent;
     align-items: center;
-    margin-top: 48px;
+    margin-top: clamp(32px, 5vw, 64px);
 }
 .ol-slider-group {
     display: contents;
