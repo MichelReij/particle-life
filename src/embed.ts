@@ -425,6 +425,8 @@ class EmbedApp {
     private animationId: number | null = null;
     private engineBusy = false;
     private isPaused = false;
+    private autopaused = false;
+    private intersectionObserver: IntersectionObserver | null = null;
     private lastTime = 0;
     private activeHypothesis: Hypothesis = "htv";
 
@@ -1099,11 +1101,33 @@ class EmbedApp {
     private startLoop() {
         this.lastTime = performance.now();
 
+        let windowHidden = false;
+        let tabHidden = false;
+        let scrolledOut = false;
+
+        const updateAutopause = () => {
+            this.autopaused = tabHidden || windowHidden || scrolledOut;
+        };
+
+        const onVisibility = () => { tabHidden = document.hidden; updateAutopause(); };
+        const onBlur  = () => { windowHidden = true;  updateAutopause(); };
+        const onFocus = () => { windowHidden = false; updateAutopause(); };
+
+        document.addEventListener("visibilitychange", onVisibility);
+        window.addEventListener("blur",  onBlur);
+        window.addEventListener("focus", onFocus);
+
+        this.intersectionObserver = new IntersectionObserver(
+            ([entry]) => { scrolledOut = !entry.isIntersecting; updateAutopause(); },
+            { threshold: 0 }
+        );
+        if (this.canvas) this.intersectionObserver.observe(this.canvas);
+
         const animate = (now: number) => {
             const dt = Math.min((now - this.lastTime) / 1000, 0.05);
             this.lastTime = now;
 
-            if (!this.isPaused && this.engine && !this.engineBusy) {
+            if (!this.isPaused && !this.autopaused && this.engine && !this.engineBusy) {
                 try {
                     this.engine.update_frame(dt);
                     this.engine.render();
@@ -1120,6 +1144,7 @@ class EmbedApp {
 
     destroy() {
         if (this.animationId) cancelAnimationFrame(this.animationId);
+        this.intersectionObserver?.disconnect();
         if (this.engine) {
             this.engine.free();
             this.engine = null;
