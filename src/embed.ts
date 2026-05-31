@@ -457,9 +457,9 @@ class EmbedApp {
     };
 
     private sliderDefaults: SliderValues = {
-        temperature: 15,
+        temperature: 20,
         ph: 7.0,
-        electricalActivity: 0.1,
+        electricalActivity: 0.0,
     };
 
     private zoom = 1.0;
@@ -584,31 +584,27 @@ class EmbedApp {
         this.activeHypothesis = loadInitialHypothesis(this.hypothesisKeys);
 
         // Stuur pressure als eerste naar de engine zodat is_wlp correct staat
-        // vóór temp/ph/elec worden berekend — anders gebruikt apply_temperature de verkeerde hypothese
+        // vóór temp/ph/elec worden berekend. Lees uit localStorage (zelfde bron als
+        // loadInitialHypothesis) zodat HTML slider-default nooit de hypothese bepaalt.
+        const savedPressure = loadSlider(this.hypothesisKeys.pres, this.activeHypothesis === "wlp" ? 0 : 350);
         if (this.engine) {
-            const presSliderInit = document.getElementById(
-                "ol-pres",
-            ) as HTMLInputElement | null;
-            if (presSliderInit) {
-                const pv = parseFloat(presSliderInit.value);
-                this.engine.set_pressure(pv);
-                this.engine.set_particle_count_from_pressure(pv);
-            }
+            const presSliderInit = document.getElementById("ol-pres") as HTMLInputElement | null;
+            if (presSliderInit) presSliderInit.value = savedPressure.toString();
+            this.engine.set_pressure(savedPressure);
+            this.engine.set_particle_count_from_pressure(savedPressure);
         }
 
-        // Gradients direct toepassen als we in wlp starten — anders blijven ze op htv
-        if (this.activeHypothesis === "wlp") {
-            const t = I18N[getLang()];
-            const vals = applyHypothesisToSliders(
-                "wlp",
-                this.sliderIds,
-                this.hypothesisKeys,
-                t.ph,
-                t.uv,
-                this.sliderDefaults,
-            );
-            this.sliderDefaults = vals;
-        }
+        // Laad hypothese-specifieke slider-waarden en pas UI aan
+        const t = I18N[getLang()];
+        const vals = applyHypothesisToSliders(
+            this.activeHypothesis,
+            this.sliderIds,
+            this.hypothesisKeys,
+            t.ph,
+            t.uv,
+            this.sliderDefaults,
+        );
+        this.sliderDefaults = vals;
 
         // Generic wire for sliders without hypothesis-specific storage
         const wire = (
