@@ -8,13 +8,16 @@
 // Gebruik:
 //   1. StatsReader::new(device, sim_params_buffer)
 //   2. stats_reader.make_bind_group(device, output_particle_buffer, sim_params_buffer)
-//   3. In render loop: stats_reader.maybe_dispatch(&mut encoder, &bind_group, particle_count)
-//   4. Na submit: if dispatched { pollster::block_on(stats_reader.read_stats(device)) }
+//   3. In render loop: if stats_reader.maybe_dispatch(&mut encoder, &bind_group, count) { submit; start_readback() }
+//   4. Elke frame: if let Some(stats) = stats_reader.poll_result() { sla op }
 
 use crate::sonification::{GpuGlobalStats, GpuTypeStats};
+use std::sync::{Arc, Mutex};
 
 /// 8 vec4 (7 per-type + 1 globaal) × 16 bytes = 128 bytes
 const STATS_BUFFER_SIZE: u64 = 8 * 4 * 4;
+
+type StatsResult = ([GpuTypeStats; 7], GpuGlobalStats);
 
 pub struct StatsReader {
     pub pipeline:          wgpu::ComputePipeline,
@@ -23,7 +26,10 @@ pub struct StatsReader {
     pub staging_buffer:    wgpu::Buffer,
     frame_counter:         u32,
     pub poll_interval:     u32,  // elke N frames dispatchen (standaard 6 ≈ 10 Hz)
-    pub last_stats:        Option<([GpuTypeStats; 7], GpuGlobalStats)>,
+    pub last_stats:        Option<StatsResult>,
+    /// Gezet door start_readback(), gewist door poll_result() zodra data uitgelezen.
+    readback_ready:        Arc<Mutex<bool>>,
+    readback_pending:      bool,
 }
 
 impl StatsReader {
@@ -117,6 +123,8 @@ impl StatsReader {
             frame_counter: 0,
             poll_interval: 6,
             last_stats: None,
+            readback_ready: Arc::new(Mutex::new(false)),
+            readback_pending: false,
         }
     }
 
@@ -174,26 +182,35 @@ impl StatsReader {
         true
     }
 
-    /// Lees de stats terug van GPU naar CPU.
-    /// Moet worden aangeroepen ná het submit van de encoder die maybe_dispatch true teruggaf.
-    /// Blokkeert tot de GPU klaar is (gebruik pollster::block_on of in een aparte thread).
-    pub async fn read_stats(
-        &self,
-        device: &wgpu::Device,
-    ) -> Result<([GpuTypeStats; 7], GpuGlobalStats), Box<dyn std::error::Error + Send + Sync>> {
-        let slice = self.staging_buffer.slice(..);
+    /// Start een niet-blokkerende GPU-readback. Aanroepen ná submit van de encoder
+    /// die maybe_dispatch true teruggaf. Resultaat ophalen via poll_result().
+    pub fn start_readback(&mut self) {
+        // Reset vlag voor deze readback-cyclus
+        if let Ok(mut ready) = self.readback_ready.lock() {
+            *ready = false;
+        }
+        let flag = Arc::clone(&self.readback_ready);
+        self.staging_buffer.slice(..).map_async(wgpu::MapMode::Read, move |result| {
+            if result.is_ok() {
+                if let Ok(mut ready) = flag.lock() {
+                    *ready = true;
+                }
+            }
+        });
+        self.readback_pending = true;
+    }
 
-        let (tx, rx) = futures::channel::oneshot::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { let _ = tx.send(r); });
+    /// Controleer of een lopende readback klaar is. Geeft Some(stats) terug als ja,
+    /// leest de buffer uit, en wist de pending-staat. Elke frame aanroepen.
+    pub fn poll_result(&mut self) -> Option<StatsResult> {
+        if !self.readback_pending { return None; }
 
-        device.poll(wgpu::MaintainBase::Wait)
-            .map_err(|e| format!("Device poll: {:?}", e))?;
+        let is_ready = self.readback_ready.lock().ok().map(|g| *g).unwrap_or(false);
+        if !is_ready { return None; }
 
-        rx.await
-            .map_err(|_| "Channel gesloten".to_string())?
-            .map_err(|e| format!("Buffer map: {:?}", e))?;
+        self.readback_pending = false;
 
-        let raw    = slice.get_mapped_range();
+        let raw    = self.staging_buffer.slice(..).get_mapped_range();
         let floats: &[f32] = bytemuck::cast_slice(&raw[..]);
 
         let mut per_type = [GpuTypeStats::default(); 7];
@@ -203,12 +220,11 @@ impl StatsReader {
                 floats[b..b+4].try_into().unwrap()
             );
         }
-        let g = &floats[28..32];
-        let global = GpuGlobalStats::from_floats(g.try_into().unwrap());
+        let global = GpuGlobalStats::from_floats(floats[28..32].try_into().unwrap());
 
         drop(raw);
         self.staging_buffer.unmap();
 
-        Ok((per_type, global))
+        Some((per_type, global))
     }
 }

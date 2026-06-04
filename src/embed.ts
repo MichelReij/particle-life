@@ -37,10 +37,7 @@ const I18N: Record<
         hintPan: string;
         titleScreenshot: string;
         titleRecord: string;
-        noWebAssembly: string;
-        noWebGPU: string;
-        noGPUAdapter: string;
-        loadFailed: string;
+        unsupported: string;
         temp: string;
         ph: string;
         uv: string;
@@ -54,10 +51,8 @@ const I18N: Record<
         hintPan: "Sleep om te bewegen",
         titleScreenshot: "Screenshot",
         titleRecord: "Video opnemen",
-        noWebAssembly: "Je browser ondersteunt WebAssembly niet.",
-        noWebGPU: "Je browser ondersteunt WebGPU niet.",
-        noGPUAdapter: "Geen compatibele GPU gevonden voor WebGPU.",
-        loadFailed: "Laden van de simulatie mislukt.",
+        unsupported:
+            "Deze simulatie vraagt veel rekenkracht. Waarschijnlijk is dit apparaat al wat ouder en heeft het niet de laatste nieuwe technologie om de simulatie soepel te laten draaien. De video hierboven geeft ook een goede indruk.",
         temp: "Temperatuur",
         ph: "pH",
         uv: "UV",
@@ -70,10 +65,8 @@ const I18N: Record<
         hintPan: "Drag to pan",
         titleScreenshot: "Screenshot",
         titleRecord: "Record video",
-        noWebAssembly: "Your browser does not support WebAssembly.",
-        noWebGPU: "Your browser does not support WebGPU.",
-        noGPUAdapter: "No compatible GPU found for WebGPU.",
-        loadFailed: "Failed to load simulation.",
+        unsupported:
+            "This simulation requires a lot of computing power. Possibly your device is a bit older and may not have the latest technology to run the simulation smoothly. The video above should give you a good impression.",
         temp: "Temperature",
         ph: "pH",
         uv: "UV",
@@ -86,10 +79,8 @@ const I18N: Record<
         hintPan: "Glisser pour déplacer",
         titleScreenshot: "Capture d'écran",
         titleRecord: "Enregistrer la vidéo",
-        noWebAssembly: "Votre navigateur ne prend pas en charge WebAssembly.",
-        noWebGPU: "Votre navigateur ne prend pas en charge WebGPU.",
-        noGPUAdapter: "Aucun GPU compatible trouvé pour WebGPU.",
-        loadFailed: "Échec du chargement de la simulation.",
+        unsupported:
+            "Cette simulation demande beaucoup de puissance de calcul. Votre appareil est peut-être un peu ancien et ne dispose pas des dernières technologies pour faire tourner la simulation de manière fluide. La vidéo ci-dessus devrait vous donner une bonne impression.",
         temp: "Température",
         ph: "pH",
         uv: "UV",
@@ -175,10 +166,14 @@ const EMBED_CSS = `
     position: absolute;
     inset: 0;
     display: flex;
+    padding: clamp(4rem, 8vw, 6rem);
     align-items: center;
     justify-content: center;
-    background: transparent;
+    line-height: 1.4;
+    background: #fff;
     pointer-events: none;
+    box-shadow: inset 1px 1px 11px #000c;
+  border-radius: 50%;
 }
 #ol-hint-zoom {
     position: absolute;
@@ -509,18 +504,18 @@ class EmbedApp {
         // Feature detection: skip loading WASM if browser lacks WebAssembly or WebGPU
         if (typeof WebAssembly === "undefined") {
             console.warn("Origin of Life: WebAssembly not supported.");
-            this.showError(t.noWebAssembly);
+            this.showError(t.unsupported);
             return;
         }
         if (!navigator.gpu) {
             console.warn("Origin of Life: WebGPU not supported.");
-            this.showError(t.noWebGPU);
+            this.showError(t.unsupported);
             return;
         }
         const gpuAdapter = await navigator.gpu.requestAdapter();
         if (!gpuAdapter) {
             console.warn("Origin of Life: No WebGPU adapter available.");
-            this.showError(t.noGPUAdapter);
+            this.showError(t.unsupported);
             return;
         }
 
@@ -530,7 +525,7 @@ class EmbedApp {
             await init({ module_or_path: wasmUrl });
         } catch (e) {
             console.error("Origin of Life: WASM init failed:", e);
-            this.showError(t.loadFailed);
+            this.showError(t.unsupported);
             return;
         }
 
@@ -586,9 +581,14 @@ class EmbedApp {
         // Stuur pressure als eerste naar de engine zodat is_wlp correct staat
         // vóór temp/ph/elec worden berekend. Lees uit localStorage (zelfde bron als
         // loadInitialHypothesis) zodat HTML slider-default nooit de hypothese bepaalt.
-        const savedPressure = loadSlider(this.hypothesisKeys.pres, this.activeHypothesis === "wlp" ? 0 : 350);
+        const savedPressure = loadSlider(
+            this.hypothesisKeys.pres,
+            this.activeHypothesis === "wlp" ? 0 : 350,
+        );
         if (this.engine) {
-            const presSliderInit = document.getElementById("ol-pres") as HTMLInputElement | null;
+            const presSliderInit = document.getElementById(
+                "ol-pres",
+            ) as HTMLInputElement | null;
             if (presSliderInit) presSliderInit.value = savedPressure.toString();
             this.engine.set_pressure(savedPressure);
             this.engine.set_particle_count_from_pressure(savedPressure);
@@ -1105,17 +1105,29 @@ class EmbedApp {
             this.autopaused = tabHidden || windowHidden || scrolledOut;
         };
 
-        const onVisibility = () => { tabHidden = document.hidden; updateAutopause(); };
-        const onBlur  = () => { windowHidden = true;  updateAutopause(); };
-        const onFocus = () => { windowHidden = false; updateAutopause(); };
+        const onVisibility = () => {
+            tabHidden = document.hidden;
+            updateAutopause();
+        };
+        const onBlur = () => {
+            windowHidden = true;
+            updateAutopause();
+        };
+        const onFocus = () => {
+            windowHidden = false;
+            updateAutopause();
+        };
 
         document.addEventListener("visibilitychange", onVisibility);
-        window.addEventListener("blur",  onBlur);
+        window.addEventListener("blur", onBlur);
         window.addEventListener("focus", onFocus);
 
         this.intersectionObserver = new IntersectionObserver(
-            ([entry]) => { scrolledOut = !entry.isIntersecting; updateAutopause(); },
-            { threshold: 0 }
+            ([entry]) => {
+                scrolledOut = !entry.isIntersecting;
+                updateAutopause();
+            },
+            { threshold: 0 },
         );
         if (this.canvas) this.intersectionObserver.observe(this.canvas);
 
@@ -1123,7 +1135,12 @@ class EmbedApp {
             const dt = Math.min((now - this.lastTime) / 1000, 0.05);
             this.lastTime = now;
 
-            if (!this.isPaused && !this.autopaused && this.engine && !this.engineBusy) {
+            if (
+                !this.isPaused &&
+                !this.autopaused &&
+                this.engine &&
+                !this.engineBusy
+            ) {
                 try {
                     this.engine.update_frame(dt);
                     this.engine.render();

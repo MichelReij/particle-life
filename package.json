@@ -33,6 +33,7 @@
         "html-webpack-plugin": "^5.6.3",
         "interpret": "^3.1.1",
         "mini-css-extract-plugin": "^2.9.2",
+        "playwright": "^1.60.0",
         "sass": "^1.89.1",
         "sass-loader": "^16.0.5",
         "style-loader": "^4.0.0",

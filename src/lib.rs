@@ -52,8 +52,7 @@ pub mod audio_engine_wasm;
 #[cfg(target_arch = "wasm32")]
 pub mod audio_worklet_exports;
 
-// GPU stats reader: particle-type statistieken voor sonificatie (native only)
-#[cfg(not(target_arch = "wasm32"))]
+// GPU stats reader: particle-type statistieken voor sonificatie
 pub mod stats_reader;
 
 pub use buffer_utils::*;
@@ -114,6 +113,8 @@ pub struct ParticleLifeEngine {
     // Sonificatie
     audio_engine: Option<audio_engine_wasm::WasmAudioEngine>,
     sonification_state: sonification::SonificationState,
+    stats_reader: Option<stats_reader::StatsReader>,
+    last_gpu_stats: Option<([sonification::GpuTypeStats; 7], sonification::GpuGlobalStats)>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -167,6 +168,8 @@ impl ParticleLifeEngine {
             last_seen_flash_id: 0,
             audio_engine: None, // Lazy: aangemaakt bij eerste set_audio_paused(false)
             sonification_state: sonification::SonificationState::default(),
+            stats_reader: None,
+            last_gpu_stats: None,
         }
     }
 
@@ -322,11 +325,30 @@ impl ParticleLifeEngine {
         // === Continuous rule evolution (lerp) ===
         self.interaction_rules = self.rule_evolution.tick(delta_time, &mut self.rng).clone();
 
+        // Poll vorige readback
+        if let Some(ref mut sr) = self.stats_reader {
+            if let Some(stats) = sr.poll_result() {
+                self.last_gpu_stats = Some(stats);
+            }
+        }
+
         // === Sonificatie ===
+        let (gpu_type_ref, gpu_global_ref) = if self.simulation_params.current_zoom_level > 3.0 {
+            match &self.last_gpu_stats {
+                Some((per_type, global)) => (
+                    Some(per_type as &[sonification::GpuTypeStats; 7]),
+                    Some(global as &sonification::GpuGlobalStats),
+                ),
+                None => (None, None),
+            }
+        } else {
+            (None, None)
+        };
+
         self.sonification_state = sonification::compute_sonification(
             &self.simulation_params,
-            None, // GPU-stats niet beschikbaar in WASM (voor nu)
-            None,
+            gpu_type_ref,
+            gpu_global_ref,
             &self.sonification_state,
         );
         if let Some(ref engine) = self.audio_engine {
@@ -642,6 +664,13 @@ impl ParticleLifeEngine {
                 if let Some(ref mut r) = self.renderer {
                     r.update_particle_active_states(&self.particle_system);
                 }
+                // StatsReader initialiseren
+                if let Some(ref r) = self.renderer {
+                    self.stats_reader = Some(stats_reader::StatsReader::new(
+                        r.get_device(),
+                        &r.sim_params_buffer,
+                    ));
+                }
                 Ok(())
             }
             Err(e) => Err(e)
@@ -708,6 +737,27 @@ impl ParticleLifeEngine {
         } else {
             self.render_to_canvas("canvas")?;
         }
+
+        // Stats dispatch (na render, bij zoom > 3)
+        if self.simulation_params.current_zoom_level > 3.0 {
+            if let (Some(ref mut sr), Some(ref renderer)) =
+                (&mut self.stats_reader, &self.renderer)
+            {
+                let output_idx = 1 - renderer.current_buffer_index;
+                let bg = sr.make_bind_group(
+                    renderer.get_device(),
+                    &renderer.particle_buffers[output_idx],
+                    &renderer.sim_params_buffer,
+                );
+                let mut encoder = renderer.get_device().create_command_encoder(
+                    &wgpu::CommandEncoderDescriptor { label: Some("Stats Encoder") });
+                if sr.maybe_dispatch(&mut encoder, &bg, self.particle_system.get_active_count()) {
+                    renderer.queue().submit(std::iter::once(encoder.finish()));
+                    sr.start_readback();
+                }
+            }
+        }
+
         Ok(())
     }
 

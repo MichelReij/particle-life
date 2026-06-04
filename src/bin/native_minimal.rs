@@ -5,7 +5,7 @@
 
 use particle_life_wasm::audio_engine::AudioEngine;
 use particle_life_wasm::config::*;
-use particle_life_wasm::sonification::{compute_sonification, GpuGlobalStats, GpuTypeStats, SonificationState};
+use particle_life_wasm::sonification::{GpuGlobalStats, GpuTypeStats, SonificationState};
 use particle_life_wasm::stats_reader::StatsReader;
 use particle_life_wasm::*;
 use rand::prelude::*;
@@ -45,7 +45,6 @@ struct MinimalNativeApp {
     sonification_state: SonificationState,
     last_gpu_stats: Option<([GpuTypeStats; 7], GpuGlobalStats)>,
     stats_reader: Option<StatsReader>,
-    stats_dispatched_this_frame: bool,
 
     last_frame: std::time::Instant,
     current_time: f32,
@@ -97,7 +96,6 @@ impl Default for MinimalNativeApp {
             sonification_state: SonificationState::default(),
             last_gpu_stats: None,
             stats_reader: None,
-            stats_dispatched_this_frame: false,
             last_frame: std::time::Instant::now(),
             current_time: 0.0,
             fps_last_update: std::time::Instant::now(),
@@ -171,11 +169,11 @@ impl ApplicationHandler for MinimalNativeApp {
         // StatsReader initialiseren
         if let Some(renderer) = &self.renderer {
             let device = renderer.get_device();
-            let mut stats_reader = StatsReader::new(device, &renderer.sim_params_buffer);
+            let stats_reader = StatsReader::new(device, &renderer.sim_params_buffer);
             // Sla bind group referenties niet op — we maken ze elke dispatch opnieuw
             // (ping-pong buffer wisselt na elke render)
             self.stats_reader = Some(stats_reader);
-            console_log!("✅ StatsReader geïnitialiseerd (10 Hz GPU readback bij zoom > 5x)");
+            console_log!("✅ StatsReader geïnitialiseerd (niet-blokkerend, 10 Hz bij zoom > 3x)");
         }
 
         // AudioEngine initialiseren
@@ -229,7 +227,7 @@ impl ApplicationHandler for MinimalNativeApp {
 
             WindowEvent::RedrawRequested => {
                 let now = std::time::Instant::now();
-                let delta_time = (now - self.last_frame).as_secs_f32();
+                let delta_time = (now - self.last_frame).as_secs_f32().min(0.033);
                 self.last_frame = now;
 
                 // ESP32 update (~60 Hz)
@@ -261,7 +259,7 @@ impl ApplicationHandler for MinimalNativeApp {
                 self.communicate_night_alpha_to_esp32();
 
                 // Sonificatie update
-                let (gpu_type_ref, gpu_global_ref) = if self.simulation_params.current_zoom_level > 5.0 {
+                let (_gpu_type_ref, _gpu_global_ref) = if self.simulation_params.current_zoom_level > 3.0 {
                     match &self.last_gpu_stats {
                         Some((per_type, global)) => (
                             Some(per_type as &[GpuTypeStats; 7]),
@@ -275,8 +273,14 @@ impl ApplicationHandler for MinimalNativeApp {
 
                 // Standalone audio patch: sonificatie-koppeling tijdelijk uitgeschakeld
 
+                // Poll vorige readback — altijd, vóór render
+                if let Some(stats_reader) = &mut self.stats_reader {
+                    if let Some(stats) = stats_reader.poll_result() {
+                        self.last_gpu_stats = Some(stats);
+                    }
+                }
+
                 // Render
-                self.stats_dispatched_this_frame = false;
                 if let Some(renderer) = &mut self.renderer {
                     match renderer.render(&self.particle_system, &self.simulation_params,
                                           &self.interaction_rules, &[], &[]) {
@@ -285,8 +289,8 @@ impl ApplicationHandler for MinimalNativeApp {
                     }
                 }
 
-                // Stats dispatch (na render, bij hoge zoom)
-                if self.simulation_params.current_zoom_level > 5.0 {
+                // Stats dispatch (na render, bij zoom > 3)
+                if self.simulation_params.current_zoom_level > 3.0 {
                     if let (Some(stats_reader), Some(renderer)) =
                         (&mut self.stats_reader, &mut self.renderer)
                     {
@@ -294,7 +298,6 @@ impl ApplicationHandler for MinimalNativeApp {
                         // De output particles zitten in 1 - current_buffer_index.
                         let output_idx = 1 - renderer.current_buffer_index;
 
-                        // Maak bind group opnieuw aan voor het huidige output buffer
                         let bg = stats_reader.make_bind_group(
                             renderer.get_device(),
                             &renderer.particle_buffers[output_idx],
@@ -308,19 +311,7 @@ impl ApplicationHandler for MinimalNativeApp {
                             &mut encoder, &bg, self.particle_system.get_active_count())
                         {
                             renderer.queue().submit(std::iter::once(encoder.finish()));
-                            self.stats_dispatched_this_frame = true;
-                        }
-                    }
-                }
-
-                // GPU stats readback (na dispatch)
-                if self.stats_dispatched_this_frame {
-                    if let (Some(stats_reader), Some(renderer)) =
-                        (&self.stats_reader, &self.renderer)
-                    {
-                        match pollster::block_on(stats_reader.read_stats(renderer.get_device())) {
-                            Ok(stats) => { self.last_gpu_stats = Some(stats); }
-                            Err(e) => console_log!("⚠️ Stats readback: {:?}", e),
+                            stats_reader.start_readback();
                         }
                     }
                 }
