@@ -767,7 +767,41 @@ impl WebGpuRenderer {
         #[cfg(target_arch = "wasm32")]
         let fps_data_buffer: Option<wgpu::Buffer> = None;
 
+        // FPS-counter rechtsonder — alleen native (debug op rechthoekige dev-schermen;
+        // op het ronde 1080×1080 productiescherm valt de hoek buiten de zichtbare cirkel).
+        #[cfg(not(target_arch = "wasm32"))]
+        let (text_overlay_pipeline, text_overlay_bind_group) = {
+            let text_overlay_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Text Overlay BGL"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                    wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                ],
+            });
+            let text_overlay_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Text Overlay PL"), bind_group_layouts: &[&text_overlay_bgl], push_constant_ranges: &[],
+            });
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Text Overlay"), layout: Some(&text_overlay_pl),
+                vertex: wgpu::VertexState { module: &text_vert, entry_point: Some("main"), buffers: &[], compilation_options: Default::default() },
+                fragment: Some(wgpu::FragmentState { module: &text_frag, entry_point: Some("main"), targets: &[Some(wgpu::ColorTargetState { format: surface_format, blend: Some(alpha_blend), write_mask: wgpu::ColorWrites::ALL })], compilation_options: Default::default() }),
+                primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+                depth_stencil: None, multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false }, multiview: None, cache: None,
+            });
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Text Overlay BG"), layout: &text_overlay_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: sim_params_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: fps_data_buffer.as_ref().unwrap().as_entire_binding() },
+                ],
+            });
+            (Some(pipeline), Some(bind_group))
+        };
+        #[cfg(target_arch = "wasm32")]
         let text_overlay_pipeline: Option<wgpu::RenderPipeline> = None;
+        #[cfg(target_arch = "wasm32")]
         let text_overlay_bind_group: Option<wgpu::BindGroup> = None;
 
         // ── Blur H + Vignette pipelines ──────────────────────────────────────────
@@ -985,6 +1019,21 @@ impl WebGpuRenderer {
                 p.set_bind_group(0, bg, &[]);
                 p.draw(0..6, 0..1);
             }
+        }
+
+        // FPS-overlay rechtsonder (native debug build)
+        if let (Some(pipeline), Some(bind_group)) = (&self.text_overlay_pipeline, &self.text_overlay_bind_group) {
+            let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Text Overlay"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view, resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                })],
+                depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None,
+            });
+            p.set_pipeline(pipeline);
+            p.set_bind_group(0, bind_group, &[]);
+            p.draw(0..3, 0..1);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

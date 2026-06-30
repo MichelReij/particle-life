@@ -126,7 +126,7 @@ impl SimulationParams {
             background_color_r: 0.0,
             background_color_g: 0.0,
             background_color_b: 0.0,
-            lenia_enabled: true, // Disabled by default to test basic particle interactions
+            lenia_enabled: true, // Always enabled — Lenia-gedrag is bedoeld onderdeel van het artwork
             lenia_growth_mu: 0.15,
             lenia_growth_sigma: 0.02,
             lenia_kernel_radius: 60.0,
@@ -140,8 +140,10 @@ impl SimulationParams {
             transition_end_count: 0,
             transition_is_grow: true,
 
-            // Spatial grid optimization - enabled by default with optimized cell size
-            spatial_grid_enabled: true,
+            // Uitgeschakeld: de cel-afstand/probabilistische cull-heuristiek hier kost op de
+            // GPU meer (warp-divergentie) dan hij bespaart — gemeten ~1,5× sneller met dit uit.
+            // Zie PERFORMANCE_ANALYSIS.md.
+            spatial_grid_enabled: false,
             spatial_grid_cell_size: 80.0, // 80 units per cell (VIRTUAL_WORLD_WIDTH/80 = 54x54 grid)
             spatial_grid_width: (VIRTUAL_WORLD_WIDTH / 80.0) as u32, // 54 cells horizontally
             spatial_grid_height: (VIRTUAL_WORLD_HEIGHT / 80.0) as u32, // 54 cells vertically

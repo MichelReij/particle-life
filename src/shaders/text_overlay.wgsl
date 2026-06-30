@@ -198,16 +198,17 @@ fn main(@location(0) screen_pos: vec2<f32>) -> @location(0) vec4<f32> {
     // Text parameters
     let char_width = 12.0;
     let char_height = 16.0;
-    let text_y = canvas_height - 30.0;
-    // 30 pixels from bottom
+    let margin = 16.0;
+    let text_y = canvas_height - margin - char_height;
+    // Bottom-right corner — buiten beeld op het ronde productiescherm
 
     // Calculate FPS as integer: "##fps" (5 characters)
     let fps_int = u32(fps_data.fps);
 
     // Text layout: "##fps" (5 characters)
     let text_width = 5.0 * char_width;
-    let text_start_x = (canvas_width - text_width) * 0.5;
-    // Center horizontally
+    let text_start_x = canvas_width - margin - text_width;
+    // Rechts uitgelijnd
 
     var text_alpha = 0.0;
 
@@ -262,8 +263,8 @@ fn main(@location(0) screen_pos: vec2<f32>) -> @location(0) vec4<f32> {
     }
 
     if (text_alpha > 0.0) {
-        // White text with subtle transparency for less intrusion
-        return vec4<f32>(1.0, 1.0, 1.0, 0.6);
+        // #808080 grijs
+        return vec4<f32>(0.50196, 0.50196, 0.50196, 0.9);
     }
     else {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);

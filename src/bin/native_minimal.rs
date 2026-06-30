@@ -122,13 +122,29 @@ impl ApplicationHandler for MinimalNativeApp {
         test_esp32_sensor_data_conversion();
         self.esp32_manager = Some(ESP32Manager::new());
 
+        // OS-fullscreen (Fullscreen::Borderless) vult het hele monitorvlak, ook als dat
+        // niet vierkant is — de surface (altijd 1080×1080) wordt dan door de compositor
+        // uitgerekt naar die verhouding. Op het ronde 1080×1080-productiescherm is het
+        // monitorvlak zelf al vierkant, dus daar maakt dit niets uit; los daarvan vragen
+        // we hier expliciet een vierkant venster aan (grootte = kortste monitorzijde,
+        // gecentreerd), zodat de 1:1 aspect ratio altijd behouden blijft.
         #[cfg(target_os = "linux")]
         let window_attributes = {
-            use winit::window::Fullscreen;
+            let (square, position) = event_loop.primary_monitor()
+                .map(|monitor| {
+                    let size = monitor.size();
+                    let square = size.width.min(size.height).max(1);
+                    let monitor_pos = monitor.position();
+                    let x = monitor_pos.x + (size.width as i32 - square as i32) / 2;
+                    let y = monitor_pos.y + (size.height as i32 - square as i32) / 2;
+                    (square, winit::dpi::PhysicalPosition::new(x, y))
+                })
+                .unwrap_or((1080, winit::dpi::PhysicalPosition::new(0, 0)));
+
             Window::default_attributes()
                 .with_title("Origin of Life")
-                .with_inner_size(winit::dpi::LogicalSize::new(1080, 1080))
-                .with_fullscreen(Some(Fullscreen::Borderless(None)))
+                .with_inner_size(winit::dpi::PhysicalSize::new(square, square))
+                .with_position(position)
                 .with_resizable(false)
                 .with_decorations(false)
         };
@@ -282,6 +298,12 @@ impl ApplicationHandler for MinimalNativeApp {
 
                 // Render
                 if let Some(renderer) = &mut self.renderer {
+                    renderer.update_fps_data(
+                        self.current_fps,
+                        self.fps_frame_count,
+                        self.particle_system.get_active_count(),
+                        self.current_time,
+                    );
                     match renderer.render(&self.particle_system, &self.simulation_params,
                                           &self.interaction_rules, &[], &[]) {
                         Ok(_) => {}
