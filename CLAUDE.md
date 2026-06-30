@@ -69,15 +69,24 @@ cargo build --release     # Release native binary
 ./target/debug/native_minimal  # Run directly
 ```
 
-### Native — demo-versie (mp3 audio i.p.v. synthesizer)
+### Native — audio: mp3-demo (default) vs. zelfgebouwde synthesizer
+
+De `demo_audio` feature staat sinds kort **standaard aan** (`default = ["demo_audio"]` in
+`Cargo.toml`) — de supersaw-synthesizer is nog niet productierijp, dus een gewone build/run
+speelt nu `assets/brainwaves.mp3` in loop af via rodio:
 ```bash
-cargo build --release --features demo_audio
+cargo build --release       # demo_audio zit al in de default features
 ./target/release/native_minimal
 ```
+`quick-launch.sh` gebruikt deze default al (geen aparte flag nodig).
 
-Start `quick-launch.sh` aanpassen voor demo: vervang de `cargo build` regel door bovenstaande.
-De `demo_audio` feature schakelt de supersaw synthesizer uit en speelt `assets/brainwaves.mp3`
-in loop af via rodio. Alle andere functionaliteit blijft identiek.
+Om i.p.v. daarvan de zelfgebouwde supersaw-synthesizer te testen, expliciet uitschakelen:
+```bash
+cargo build --release --no-default-features
+./target/release/native_minimal
+```
+Alle andere functionaliteit blijft in beide gevallen identiek. De WASM/web-build gebruikt
+sowieso `audio_engine_wasm.rs` (Web Audio API) en wordt door deze feature niet geraakt.
 
 ## Simulation Parameters
 

@@ -51,6 +51,11 @@ struct MinimalNativeApp {
     fps_last_update: std::time::Instant,
     fps_frame_count: u32,
     current_fps: f32,
+    // Doelaantal deeltjes zoals zojuist uit de druksensor berekend — los van
+    // particle_system.get_active_count(), dat tijdens een krimp-transitie bewust nog
+    // het oude (hogere) aantal toont totdat de ~1.5s GPU-animatie is afgerond. Voor de
+    // overlay willen we het werkelijk aangevraagde aantal, niet die vertraagde waarde.
+    desired_particle_count: u32,
     fps_samples: Vec<f32>,
     fps_sample_index: usize,
     lightning_polling_enabled: bool,
@@ -78,6 +83,7 @@ impl Default for MinimalNativeApp {
 
         let interaction_rules = InteractionRules::new_random(&mut rng);
         let particle_system = ParticleSystem::new(&simulation_params, &interaction_rules, &mut rng);
+        let initial_particle_count = particle_system.get_active_count();
 
         let mut rule_evolution = RuleEvolution::new(interaction_rules.clone(), &mut rng);
         rule_evolution.set_duration(temperature_to_lerp_duration(20.0));
@@ -101,6 +107,7 @@ impl Default for MinimalNativeApp {
             fps_last_update: std::time::Instant::now(),
             fps_frame_count: 0,
             current_fps: 0.0,
+            desired_particle_count: initial_particle_count,
             fps_samples: vec![60.0; FPS_SAMPLE_COUNT],
             fps_sample_index: 0,
             lightning_polling_enabled: true,
@@ -257,6 +264,15 @@ impl ApplicationHandler for MinimalNativeApp {
                                 if let Some(e) = &self.audio_engine {
                                     e.set_master_volume(sd.to_volume_percentage() as f32 / 100.0);
                                 }
+                                // Diepte/druk stuurt ook het particle-aantal (4800-6400),
+                                // net als de web-UI via set_particle_count_from_pressure.
+                                let target_count = self.simulation_params.pressure_to_particle_count(
+                                    sd.to_pressure(),
+                                    self.particle_system.get_max_particles(),
+                                    self.particle_system.get_min_particles(),
+                                );
+                                self.desired_particle_count = target_count;
+                                self.set_particle_count(target_count);
                             }
                             Err(ESP32Error::PortNotFound) => {}
                             Err(e) => console_log!("❌ ESP32: {:?}", e),
@@ -296,12 +312,28 @@ impl ApplicationHandler for MinimalNativeApp {
                     }
                 }
 
+                // Krimp-transities houden active_count bewust hoog zolang de GPU de
+                // verdwijnende deeltjes nog animeert (anders worden ze niet meer gedispatcht
+                // en stopt de fade-out halverwege). Pas ná afloop verlagen we active_count
+                // alsnog — zelfde check als lib.rs's (web-only) render(). Zonder dit blijft
+                // het geboekte aantal voor altijd op het historische maximum staan.
+                if self.simulation_params.is_transition_complete(self.current_time)
+                    && self.simulation_params.transition_active
+                {
+                    let target_count = self.simulation_params.transition_end_count;
+                    if !self.simulation_params.transition_is_grow {
+                        self.particle_system.set_active_count(target_count);
+                        self.simulation_params.set_num_particles(target_count);
+                    }
+                    self.simulation_params.stop_particle_transition();
+                }
+
                 // Render
                 if let Some(renderer) = &mut self.renderer {
                     renderer.update_fps_data(
                         self.current_fps,
                         self.fps_frame_count,
-                        self.particle_system.get_active_count(),
+                        self.desired_particle_count,
                         self.current_time,
                     );
                     match renderer.render(&self.particle_system, &self.simulation_params,
@@ -365,6 +397,83 @@ impl ApplicationHandler for MinimalNativeApp {
 }
 
 impl MinimalNativeApp {
+    /// Native variant van `ParticleLifeEngine::set_particle_count` (lib.rs, web-only via
+    /// wasm_bindgen) — start een vloeiende groei/krimp-transitie naar `count` deeltjes.
+    /// MinimalNativeApp deelt geen struct met ParticleLifeEngine, dus dezelfde logica
+    /// wordt hier gerepliceerd op de native velden.
+    fn set_particle_count(&mut self, count: u32) {
+        if count > self.particle_system.get_max_particles() {
+            return;
+        }
+
+        // Deze functie wordt elke ESP32-tick (~60Hz) aangeroepen, niet alleen bij een
+        // echte sliderwijziging. Tijdens een krimp-transitie blijft active_count bewust
+        // nog op het oude (hoge) aantal staan totdat de 1.5s-animatie afloopt — als we
+        // dan tegen active_count zouden vergelijken, ziet elke volgende tick nog steeds
+        // "count != current_count" en herstart de transitie eindeloos, zodat hij nooit
+        // afrondt. Dus: al onderweg naar hetzelfde doel? Niets doen.
+        if self.simulation_params.transition_active && self.simulation_params.transition_end_count == count {
+            return;
+        }
+
+        let current_count = self.particle_system.get_active_count();
+        if count == current_count {
+            self.simulation_params.set_num_particles(count);
+            return;
+        }
+
+        // Vóór het overschrijven vastleggen: nodig om in de krimp-tak te bepalen welk
+        // bereik al gemarkeerd was door een eerdere (nog lopende) krimp-transitie.
+        let prev_transition_active = self.simulation_params.transition_active;
+        let prev_transition_is_grow = self.simulation_params.transition_is_grow;
+        let prev_transition_end_count = self.simulation_params.transition_end_count;
+
+        self.simulation_params.start_particle_transition(current_count, count, self.current_time);
+
+        if count > current_count {
+            self.particle_system.set_active_count(count);
+            self.simulation_params.set_num_particles(count);
+            for i in current_count..count {
+                if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
+                    particle.position = [
+                        self.rng.gen_range(0.0..self.simulation_params.virtual_world_width),
+                        self.rng.gen_range(0.0..self.simulation_params.virtual_world_height),
+                    ];
+                    particle.velocity = [self.rng.gen_range(-2.0..2.0), self.rng.gen_range(-2.0..2.0)];
+                    particle.size = 0.1;
+                    particle.transition_start = self.current_time;
+                    particle.transition_type = 0;
+                    particle.is_active = false;
+                }
+            }
+        } else {
+            // Bij een EMA-gesmoothde, geleidelijk dalende druk komt hier elke tick een
+            // iets lager doel binnen terwijl active_count (bewust) pas ná afloop daalt.
+            // Zonder correctie zou elke stap opnieuw het hele bereik [count, current_count)
+            // markeren — inclusief particles die al middenin hun fade-out zitten — en hun
+            // transition_start resetten naar nu, wat ze laat flikkeren/terugspringen.
+            // Als er al een krimp-transitie loopt, alleen het NIEUWE surplus-bereik
+            // markeren; particles die al verdwijnen blijven met rust.
+            let already_shrinking_from = if prev_transition_active && !prev_transition_is_grow {
+                prev_transition_end_count.min(current_count)
+            } else {
+                current_count
+            };
+            let mark_end = already_shrinking_from.max(count);
+
+            for i in count..mark_end {
+                if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
+                    particle.transition_start = self.current_time;
+                    particle.transition_type = 1;
+                }
+            }
+        }
+
+        if let Some(renderer) = &mut self.renderer {
+            renderer.update_particle_transitions(&self.particle_system);
+        }
+    }
+
     fn update_smart_lightning_detection(&mut self) {
         let renderer = match &mut self.renderer { Some(r) => r, None => return };
         let now = std::time::Instant::now();

@@ -140,13 +140,14 @@ impl SimulationParams {
             transition_end_count: 0,
             transition_is_grow: true,
 
-            // Uitgeschakeld: de cel-afstand/probabilistische cull-heuristiek hier kost op de
-            // GPU meer (warp-divergentie) dan hij bespaart — gemeten ~1,5× sneller met dit uit.
-            // Zie PERFORMANCE_ANALYSIS.md.
+            // Niet meer gelezen door compute.wgsl — de echte GPU-bucketed grid
+            // (spatial_grid_build.wgsl) draait nu altijd, ongeacht deze vlag.
+            // Veld blijft staan om de SimParams-bufferlayout (gedeeld met meerdere WGSL-
+            // bestanden) niet te hoeven herindexeren. Zie PERFORMANCE_ANALYSIS.md.
             spatial_grid_enabled: false,
-            spatial_grid_cell_size: 80.0, // 80 units per cell (VIRTUAL_WORLD_WIDTH/80 = 54x54 grid)
-            spatial_grid_width: (VIRTUAL_WORLD_WIDTH / 80.0) as u32, // 54 cells horizontally
-            spatial_grid_height: (VIRTUAL_WORLD_HEIGHT / 80.0) as u32, // 54 cells vertically
+            spatial_grid_cell_size: 80.0, // 80 units per cell
+            spatial_grid_width: (VIRTUAL_WORLD_WIDTH / 80.0).ceil() as u32, // 41 cells horizontally
+            spatial_grid_height: (VIRTUAL_WORLD_HEIGHT / 80.0).ceil() as u32, // 41 cells verticaal
 
             // Viewport/zoom parameters for rendering optimization
             viewport_center_x: VIRTUAL_WORLD_CENTER_X, // Default to world center

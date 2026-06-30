@@ -183,45 +183,55 @@ var<storage, read> lightning_segments: array<LightningSegment>;
 @group(0) @binding(5)
 var<storage, read_write> lightning_bolt: LightningBolt;
 
+// GPU uniform-grid buckets, gevuld door spatial_grid_build.wgsl ELKE FRAME vóór deze
+// pass draait. grid_cell_start[c]/grid_cell_count[c] geven het bereik in
+// grid_particle_indices voor cel c; alleen actieve deeltjes staan erin.
+@group(0) @binding(6)
+var<storage, read> grid_cell_start: array<u32>;
+@group(0) @binding(7)
+var<storage, read> grid_cell_count: array<u32>;
+@group(0) @binding(8)
+var<storage, read> grid_particle_indices: array<u32>;
+
 const PI: f32 = 3.141592653589793;
 const EPSILON: f32 = 0.001;
 // To avoid division by zero or sqrt(0)
 
+// Aantal cellen rondom de eigen cel dat altijd doorzocht moet worden om GEEN enkele
+// mogelijke interactie te missen. Cel_grootte = 80; de grootste mogelijk voorkomende
+// straal is max(rule.max_radius[20,80] × inter_type_radius_scale[0.1,2.0] = 160,
+// lenia_kernel_radius[20,100] = 100) = 160 → ceil(160/80) = 2. Bij wijziging van die
+// clamps (lib.rs set_inter_type_radius_scale / set_lenia_kernel_radius, of de
+// random_range in check_and_randomize_rules) moet deze waarde opnieuw afgeleid worden.
+const GRID_SEARCH_RADIUS: i32 = 2;
+
 // === Spatial Grid Utility Functions ===
 
-// Convert world position to grid cell coordinates
+// Convert world position to grid cell coordinates (geclamped binnen de grid)
 fn world_pos_to_grid_cell(pos: vec2<f32>) -> vec2<i32> {
-    if (sim_params.spatial_grid_enabled == 0u) {
-        return vec2<i32>(0, 0);
-        // Return dummy value if grid is disabled
-    }
-
-    let cell_x = i32(floor(pos.x / sim_params.spatial_grid_cell_size));
-    let cell_y = i32(floor(pos.y / sim_params.spatial_grid_cell_size));
+    let gw = i32(sim_params.spatial_grid_width);
+    let gh = i32(sim_params.spatial_grid_height);
+    let cell_x = clamp(i32(floor(pos.x / sim_params.spatial_grid_cell_size)), 0, gw - 1);
+    let cell_y = clamp(i32(floor(pos.y / sim_params.spatial_grid_cell_size)), 0, gh - 1);
     return vec2<i32>(cell_x, cell_y);
 }
 
-// Probabilistic culling for spatial grid optimization
-fn should_process_spatial_interaction(p_idx: u32, q_idx: u32, p_cell: vec2<i32>, q_cell: vec2<i32>) -> bool {
-    // Always process nearby particles
-    let cell_dist_x = abs(p_cell.x - q_cell.x);
-    let cell_dist_y = abs(p_cell.y - q_cell.y);
-    let max_cell_dist = max(cell_dist_x, cell_dist_y);
-
-    if (max_cell_dist <= 1) {
-        return true;
-        // Always process immediate neighbors
+// Geeft (start, count) terug voor cel (cx, cy), met optionele wrap-around aan de
+// wereldranden (voor toroidale buren-zoektocht). Buiten de grid en wrap == false
+// geeft dit (0u, 0u) terug — een lege/onbestaande cel.
+fn grid_cell_range(cx: i32, cy: i32, wrap: bool) -> vec2<u32> {
+    let gw = i32(sim_params.spatial_grid_width);
+    let gh = i32(sim_params.spatial_grid_height);
+    var x = cx;
+    var y = cy;
+    if (wrap) {
+        x = ((x % gw) + gw) % gw;
+        y = ((y % gh) + gh) % gh;
+    } else if (x < 0 || x >= gw || y < 0 || y >= gh) {
+        return vec2<u32>(0u, 0u);
     }
-
-    // For distant particles, use probabilistic sampling to reduce computation
-    // This creates a deterministic but pseudo-random pattern based on particle indices
-    let hash_input = (p_idx * 73u + q_idx * 101u) % 997u;
-    // Large prime for better distribution
-    let probability_threshold = 0.3;
-    // Process 30% of distant interactions
-    let random_value = f32(hash_input) / 997.0;
-
-    return random_value < probability_threshold;
+    let cell = u32(y) * sim_params.spatial_grid_width + u32(x);
+    return vec2<u32>(grid_cell_start[cell], grid_cell_count[cell]);
 }
 
 // Calculate edge damping factor for particles near world boundaries with anti-sticking
@@ -348,63 +358,47 @@ fn lenia_growth_function(density: f32, mu: f32, sigma: f32) -> f32 {
 fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32, p_idx: u32) -> f32 {
     var density = 0.0;
     let kernel_radius = sim_params.lenia_kernel_radius;
+    let kernel_sigma = kernel_radius * 0.15;
 
-    // Spatial grid optimization: only check particles in nearby cells
     let p_cell = world_pos_to_grid_cell(particle_pos);
-    let cell_radius = i32(ceil(kernel_radius / sim_params.spatial_grid_cell_size)) + 1;
+    // Lenia wrapt buren-zoektocht alleen in boundary_mode 0 — zelfde voorwaarde als de
+    // bestaande diff-wrap hieronder.
+    let wrap = sim_params.boundary_mode == 0u;
 
-    for (var i: u32 = 0u; i < sim_params.num_particles; i = i + 1u) {
-        let other_particle = particles_in[i];
+    for (var dy: i32 = -GRID_SEARCH_RADIUS; dy <= GRID_SEARCH_RADIUS; dy = dy + 1) {
+        for (var dx: i32 = -GRID_SEARCH_RADIUS; dx <= GRID_SEARCH_RADIUS; dx = dx + 1) {
+            let range = grid_cell_range(p_cell.x + dx, p_cell.y + dy, wrap);
+            let start = range.x;
+            let count = range.y;
+            for (var k: u32 = 0u; k < count; k = k + 1u) {
+                let other_particle = particles_in[grid_particle_indices[start + k]];
 
-        // Skip inactive particles in density calculations
-        if (other_particle.is_active == 0u) {
-            continue;
-        }
+                var diff = other_particle.pos - particle_pos;
 
-        // Spatial grid culling: skip particles in distant cells
-        if (sim_params.spatial_grid_enabled == 1u) {
-            let q_cell = world_pos_to_grid_cell(other_particle.pos);
-            let cell_dist_x = abs(p_cell.x - q_cell.x);
-            let cell_dist_y = abs(p_cell.y - q_cell.y);
-            let max_cell_dist = max(cell_dist_x, cell_dist_y);
+                // Apply world wrapping for density calculation
+                if (wrap) {
+                    if (diff.x > sim_params.virtual_world_width * 0.5) {
+                        diff.x = diff.x - sim_params.virtual_world_width;
+                    }
+                    else if (diff.x < - sim_params.virtual_world_width * 0.5) {
+                        diff.x = diff.x + sim_params.virtual_world_width;
+                    }
+                    if (diff.y > sim_params.virtual_world_height * 0.5) {
+                        diff.y = diff.y - sim_params.virtual_world_height;
+                    }
+                    else if (diff.y < - sim_params.virtual_world_height * 0.5) {
+                        diff.y = diff.y + sim_params.virtual_world_height;
+                    }
+                }
 
-            // Skip particles beyond the kernel radius in cell space
-            if (max_cell_dist > cell_radius) {
-                continue;
+                let distance = length(diff);
+
+                // Only consider particles within kernel radius
+                if (distance < kernel_radius && distance > EPSILON) {
+                    let kernel_weight = lenia_kernel(distance, kernel_sigma);
+                    density = density + kernel_weight;
+                }
             }
-
-            // Apply probabilistic culling for better performance
-            if (!should_process_spatial_interaction(p_idx, i, p_cell, q_cell)) {
-                continue;
-            }
-        }
-
-        var diff = other_particle.pos - particle_pos;
-
-        // Apply world wrapping for density calculation
-        if (sim_params.boundary_mode == 0u) {
-            if (diff.x > sim_params.virtual_world_width * 0.5) {
-                diff.x = diff.x - sim_params.virtual_world_width;
-            }
-            else if (diff.x < - sim_params.virtual_world_width * 0.5) {
-                diff.x = diff.x + sim_params.virtual_world_width;
-            }
-            if (diff.y > sim_params.virtual_world_height * 0.5) {
-                diff.y = diff.y - sim_params.virtual_world_height;
-            }
-            else if (diff.y < - sim_params.virtual_world_height * 0.5) {
-                diff.y = diff.y + sim_params.virtual_world_height;
-            }
-        }
-
-        let distance = length(diff);
-
-        // Only consider particles within kernel radius
-        if (distance < kernel_radius && distance > EPSILON) {
-            let kernel_sigma = kernel_radius * 0.15;
-            // More appropriate sigma
-            let kernel_weight = lenia_kernel(distance, kernel_sigma);
-            density = density + kernel_weight;
         }
     }
     // Normalize by kernel area instead of particle count for better scaling
@@ -678,130 +672,127 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         total_force = total_force + lenia_force;
     }
 
-    // Particle-particle interactions with spatial grid optimization
+    // Particle-particle interactions via GPU uniform-grid buckets (zie binding 6-8 +
+    // spatial_grid_build.wgsl). Doorzoekt alleen de buurcellen i.p.v. alle deeltjes.
     let p_cell = world_pos_to_grid_cell(particle_p.pos);
+    // Hoofdlus wrapt buren-zoektocht alleen in boundary_mode 2 — zelfde voorwaarde als
+    // de bestaande diff-wrap hieronder.
+    let main_wrap = sim_params.boundary_mode == 2u;
 
-    for (var q_idx: u32 = 0u; q_idx < sim_params.num_particles; q_idx = q_idx + 1u) {
-        if (p_idx == q_idx) {
-            continue;
-        }
+    for (var dy: i32 = -GRID_SEARCH_RADIUS; dy <= GRID_SEARCH_RADIUS; dy = dy + 1) {
+        for (var dx: i32 = -GRID_SEARCH_RADIUS; dx <= GRID_SEARCH_RADIUS; dx = dx + 1) {
+            let range = grid_cell_range(p_cell.x + dx, p_cell.y + dy, main_wrap);
+            let cell_start = range.x;
+            let cell_count = range.y;
 
-        let particle_q = particles_in[q_idx];
+            for (var k: u32 = 0u; k < cell_count; k = k + 1u) {
+                let q_idx = grid_particle_indices[cell_start + k];
+                if (p_idx == q_idx) {
+                    continue;
+                }
 
-        // Skip interactions with inactive particles
-        if (particle_q.is_active == 0u) {
-            continue;
-        }
+                let particle_q = particles_in[q_idx];
 
-        // Spatial grid culling: skip distant particles for better performance
-        if (sim_params.spatial_grid_enabled == 1u) {
-            let q_cell = world_pos_to_grid_cell(particle_q.pos);
+                var diff = particle_q.pos - particle_p.pos;
 
-            // Apply spatial culling based on interaction distance
-            if (!should_process_spatial_interaction(p_idx, q_idx, p_cell, q_cell)) {
-                continue;
-            }
-        }
+                // World wrapping for delta calculation (uses virtual world dimensions)
+                if (main_wrap) {
+                    if (diff.x > sim_params.virtual_world_width * 0.5) {
+                        diff.x = diff.x - sim_params.virtual_world_width;
+                    }
+                    else if (diff.x < - sim_params.virtual_world_width * 0.5) {
+                        diff.x = diff.x + sim_params.virtual_world_width;
+                    }
+                    if (diff.y > sim_params.virtual_world_height * 0.5) {
+                        diff.y = diff.y - sim_params.virtual_world_height;
+                    }
+                    else if (diff.y < - sim_params.virtual_world_height * 0.5) {
+                        diff.y = diff.y + sim_params.virtual_world_height;
+                    }
+                }
+                // No special delta calculation for bounce mode or disappear mode, direct distance is fine.
 
-        var diff = particle_q.pos - particle_p.pos;
+                let dist_sq = dot(diff, diff);
+                let rule_idx = particle_p.ptype * sim_params.num_types + particle_q.ptype;
+                var rule = rules[rule_idx];
+                var current_rule_attraction = rule.attraction;
+                var current_rule_min_radius = rule.min_radius;
+                var current_rule_max_radius = rule.max_radius;
 
-        // World wrapping for delta calculation (uses virtual world dimensions)
-        if (sim_params.boundary_mode == 2u) {
-            // 2u is wrap
-            if (diff.x > sim_params.virtual_world_width * 0.5) {
-                diff.x = diff.x - sim_params.virtual_world_width;
-            }
-            else if (diff.x < - sim_params.virtual_world_width * 0.5) {
-                diff.x = diff.x + sim_params.virtual_world_width;
-            }
-            if (diff.y > sim_params.virtual_world_height * 0.5) {
-                diff.y = diff.y - sim_params.virtual_world_height;
-            }
-            else if (diff.y < - sim_params.virtual_world_height * 0.5) {
-                diff.y = diff.y + sim_params.virtual_world_height;
-            }
-        }
-        // No special delta calculation for bounce mode or disappear mode, direct distance is fine.
+                // Apply inter-type scaling if particle types are different
+                if (particle_p.ptype != particle_q.ptype) {
+                    current_rule_attraction = rule.attraction * sim_params.inter_type_attraction_scale;
+                    current_rule_min_radius = rule.min_radius * sim_params.inter_type_radius_scale;
+                    current_rule_max_radius = rule.max_radius * sim_params.inter_type_radius_scale;
+                    // Ensure min_radius is not greater than max_radius after scaling
+                    if (current_rule_min_radius > current_rule_max_radius) {
+                        // Option 1: Swap them (simple fix)
+                        // let temp = current_rule_min_radius;
+                        // current_rule_min_radius = current_rule_max_radius;
+                        // current_rule_max_radius = temp;
+                        // Option 2: Clamp min_radius to max_radius (might be more stable)
+                        current_rule_min_radius = current_rule_max_radius;
+                    }
+                    // Ensure radii are positive
+                    current_rule_min_radius = max(EPSILON, current_rule_min_radius);
+                    current_rule_max_radius = max(EPSILON * 2.0, current_rule_max_radius);
+                }
 
-        let dist_sq = dot(diff, diff);
-        let rule_idx = particle_p.ptype * sim_params.num_types + particle_q.ptype;
-        var rule = rules[rule_idx];
-        var current_rule_attraction = rule.attraction;
-        var current_rule_min_radius = rule.min_radius;
-        var current_rule_max_radius = rule.max_radius;
+                if (dist_sq > current_rule_max_radius * current_rule_max_radius || dist_sq < EPSILON) {
+                    continue;
+                }
 
-        // Apply inter-type scaling if particle types are different
-        if (particle_p.ptype != particle_q.ptype) {
-            current_rule_attraction = rule.attraction * sim_params.inter_type_attraction_scale;
-            current_rule_min_radius = rule.min_radius * sim_params.inter_type_radius_scale;
-            current_rule_max_radius = rule.max_radius * sim_params.inter_type_radius_scale;
-            // Ensure min_radius is not greater than max_radius after scaling
-            if (current_rule_min_radius > current_rule_max_radius) {
-                // Option 1: Swap them (simple fix)
-                // let temp = current_rule_min_radius;
-                // current_rule_min_radius = current_rule_max_radius;
-                // current_rule_max_radius = temp;
-                // Option 2: Clamp min_radius to max_radius (might be more stable)
-                current_rule_min_radius = current_rule_max_radius;
-            }
-            // Ensure radii are positive
-            current_rule_min_radius = max(EPSILON, current_rule_min_radius);
-            current_rule_max_radius = max(EPSILON * 2.0, current_rule_max_radius);
-        }
+                let dist = sqrt(dist_sq);
+                let norm_diff = diff / dist;
+                // Normalized direction vector
 
-        if (dist_sq > current_rule_max_radius * current_rule_max_radius || dist_sq < EPSILON) {
-            continue;
-        }
-
-        let dist = sqrt(dist_sq);
-        let norm_diff = diff / dist;
-        // Normalized direction vector
-
-        var force_magnitude: f32 = 0.0;
-        if (dist > current_rule_min_radius) {
-            // Attraction/Repulsion based on rule.attraction
-            if (sim_params.flat_force == 1u) {
-                force_magnitude = current_rule_attraction;
-            }
-            else {
-                let numer = 2.0 * abs(dist - 0.5 * (current_rule_max_radius + current_rule_min_radius));
-                let denom = current_rule_max_radius - current_rule_min_radius;
-                if (denom < EPSILON) {
-                    // Avoid division by zero if min_radius is very close to max_radius
-                    force_magnitude = current_rule_attraction;
+                var force_magnitude: f32 = 0.0;
+                if (dist > current_rule_min_radius) {
+                    // Attraction/Repulsion based on rule.attraction
+                    if (sim_params.flat_force == 1u) {
+                        force_magnitude = current_rule_attraction;
+                    }
+                    else {
+                        let numer = 2.0 * abs(dist - 0.5 * (current_rule_max_radius + current_rule_min_radius));
+                        let denom = current_rule_max_radius - current_rule_min_radius;
+                        if (denom < EPSILON) {
+                            // Avoid division by zero if min_radius is very close to max_radius
+                            force_magnitude = current_rule_attraction;
+                        }
+                        else {
+                            force_magnitude = current_rule_attraction * (1.0 - numer / denom);
+                        }
+                    }
                 }
                 else {
-                    force_magnitude = current_rule_attraction * (1.0 - numer / denom);
+                    // Strong repulsion if too close (within min_radius)
+                    // f = R_SMOOTH*minR*(1.0f/(minR + R_SMOOTH) - 1.0f / (r + R_SMOOTH));
+                    // This force is repulsive, so it should be positive if minR is positive.
+                    // The C++ code implies this force pushes particles apart.
+                    // A positive f means along norm_diff (q-p), so it pushes p towards q.
+                    // For repulsion, force should be against norm_diff.
+                    // Let's ensure the formula results in repulsion.
+                    // The formula from C++ seems to be for magnitude, direction is handled by dx/dy.
+                    // If r < minR, we want to push p away from q. So force is -norm_diff * magnitude.
+                    // The C++ code adds f*dx, f*dy to velocity. If f is positive, it's attraction.
+                    // So, for repulsion, f should be negative.
+                    // The formula `R_SMOOTH*minR*(1.0f/(minR + R_SMOOTH) - 1.0f / (r + R_SMOOTH))`
+                    // with r < minR, (r + R_SMOOTH) < (minR + R_SMOOTH), so 1/(r+RS) > 1/(minR+RS)
+                    // so (1/(minR+RS) - 1/(r+RS)) is negative.
+                    // Thus, the formula naturally gives a negative force for repulsion.
+                    force_magnitude = sim_params.r_smooth * current_rule_min_radius * (1.0 / (current_rule_min_radius + sim_params.r_smooth) - 1.0 / (dist + sim_params.r_smooth));
                 }
+                // Add electromagnetic cascade effect: fast-moving particles (recently affected by lightning)
+                // create stronger interactions with nearby particles
+                let other_particle_speed = length(particle_q.vel);
+                let electromagnetic_boost = 1.0 + (other_particle_speed * 0.001);
+                // Small boost for energetic particles
+
+                force_magnitude = force_magnitude * electromagnetic_boost;
+
+                total_force = total_force + norm_diff * force_magnitude;
             }
         }
-        else {
-            // Strong repulsion if too close (within min_radius)
-            // f = R_SMOOTH*minR*(1.0f/(minR + R_SMOOTH) - 1.0f / (r + R_SMOOTH));
-            // This force is repulsive, so it should be positive if minR is positive.
-            // The C++ code implies this force pushes particles apart.
-            // A positive f means along norm_diff (q-p), so it pushes p towards q.
-            // For repulsion, force should be against norm_diff.
-            // Let's ensure the formula results in repulsion.
-            // The formula from C++ seems to be for magnitude, direction is handled by dx/dy.
-            // If r < minR, we want to push p away from q. So force is -norm_diff * magnitude.
-            // The C++ code adds f*dx, f*dy to velocity. If f is positive, it's attraction.
-            // So, for repulsion, f should be negative.
-            // The formula `R_SMOOTH*minR*(1.0f/(minR + R_SMOOTH) - 1.0f / (r + R_SMOOTH))`
-            // with r < minR, (r + R_SMOOTH) < (minR + R_SMOOTH), so 1/(r+RS) > 1/(minR+RS)
-            // so (1/(minR+RS) - 1/(r+RS)) is negative.
-            // Thus, the formula naturally gives a negative force for repulsion.
-            force_magnitude = sim_params.r_smooth * current_rule_min_radius * (1.0 / (current_rule_min_radius + sim_params.r_smooth) - 1.0 / (dist + sim_params.r_smooth));
-        }
-        // Add electromagnetic cascade effect: fast-moving particles (recently affected by lightning)
-        // create stronger interactions with nearby particles
-        let other_particle_speed = length(particle_q.vel);
-        let electromagnetic_boost = 1.0 + (other_particle_speed * 0.001);
-        // Small boost for energetic particles
-
-        force_magnitude = force_magnitude * electromagnetic_boost;
-
-        total_force = total_force + norm_diff * force_magnitude;
     }
 
     // Add lightning electromagnetic forces

@@ -172,6 +172,41 @@ fn get_char_pixel(char_code: u32, x: u32, y: u32) -> f32 {
             let char_data = array<u32, 8>(0x00u, 0x00u, 0x3Eu, 0x60u, 0x3Cu, 0x06u, 0x7Cu, 0x00u);
             return f32((char_data[y] >> (7u - x)) & 1u);
         }
+        case 97u : {
+            // 'a'
+            let char_data = array<u32, 8>(0x00u, 0x00u, 0x3Cu, 0x06u, 0x3Eu, 0x66u, 0x3Eu, 0x00u);
+            return f32((char_data[y] >> (7u - x)) & 1u);
+        }
+        case 99u : {
+            // 'c'
+            let char_data = array<u32, 8>(0x00u, 0x00u, 0x3Cu, 0x66u, 0x60u, 0x66u, 0x3Cu, 0x00u);
+            return f32((char_data[y] >> (7u - x)) & 1u);
+        }
+        case 101u : {
+            // 'e'
+            let char_data = array<u32, 8>(0x00u, 0x00u, 0x3Cu, 0x66u, 0x7Eu, 0x60u, 0x3Cu, 0x00u);
+            return f32((char_data[y] >> (7u - x)) & 1u);
+        }
+        case 105u : {
+            // 'i'
+            let char_data = array<u32, 8>(0x18u, 0x00u, 0x18u, 0x18u, 0x18u, 0x18u, 0x3Cu, 0x00u);
+            return f32((char_data[y] >> (7u - x)) & 1u);
+        }
+        case 108u : {
+            // 'l'
+            let char_data = array<u32, 8>(0x18u, 0x18u, 0x18u, 0x18u, 0x18u, 0x18u, 0x3Cu, 0x00u);
+            return f32((char_data[y] >> (7u - x)) & 1u);
+        }
+        case 114u : {
+            // 'r'
+            let char_data = array<u32, 8>(0x00u, 0x00u, 0x36u, 0x6Cu, 0x60u, 0x60u, 0x60u, 0x00u);
+            return f32((char_data[y] >> (7u - x)) & 1u);
+        }
+        case 116u : {
+            // 't'
+            let char_data = array<u32, 8>(0x18u, 0x7Eu, 0x18u, 0x18u, 0x18u, 0x1Cu, 0x00u, 0x00u);
+            return f32((char_data[y] >> (7u - x)) & 1u);
+        }
         default : {
             return 0.0;
             // Space or unknown character
@@ -183,6 +218,17 @@ fn get_char_pixel(char_code: u32, x: u32, y: u32) -> f32 {
 fn get_digit(number: u32, position: u32) -> u32 {
     let div = u32(pow(10.0, f32(position)));
     return (number / div) % 10u;
+}
+
+// Cijfer-char_code voor `value` op decimale macht `power` (2=honderdtal, 1=tiental,
+// 0=eenheden), met leidende-spatie-onderdrukking: alleen tonen als value groot genoeg
+// is voor die positie, eenheden altijd tonen.
+fn digit_code(value: u32, power: u32) -> u32 {
+    let threshold = u32(pow(10.0, f32(power)));
+    if (power == 0u || value >= threshold) {
+        return 48u + get_digit(value, power);
+    }
+    return 32u;
 }
 
 @fragment
@@ -200,71 +246,89 @@ fn main(@location(0) screen_pos: vec2<f32>) -> @location(0) vec4<f32> {
     let char_height = 16.0;
     let margin = 16.0;
     let text_y = canvas_height - margin - char_height;
-    // Bottom-right corner — buiten beeld op het ronde productiescherm
-
-    // Calculate FPS as integer: "##fps" (5 characters)
-    let fps_int = u32(fps_data.fps);
-
-    // Text layout: "##fps" (5 characters)
-    let text_width = 5.0 * char_width;
-    let text_start_x = canvas_width - margin - text_width;
-    // Rechts uitgelijnd
+    // Onderste rij — buiten beeld op het ronde productiescherm
 
     var text_alpha = 0.0;
 
-    // Check if we're in the text area
     if (canvas_y >= text_y && canvas_y < text_y + char_height) {
-        let rel_x = canvas_x - text_start_x;
         let rel_y = canvas_y - text_y;
+        let char_y = u32(rel_y * 8.0 / char_height);
 
-        if (rel_x >= 0.0 && rel_x < text_width) {
-            let char_index = u32(rel_x / char_width);
-            let char_x = u32(rel_x) % u32(char_width);
-            let char_y = u32(rel_y * 8.0 / char_height);
+        // FPS rechtsonder: "###fps" (6 tekens, 3 cijfers met leidende-spatie-
+        // onderdrukking zodat >99 fps past zonder de "fps"-suffix te verschuiven)
+        let fps_int = u32(fps_data.fps);
+        let fps_width = 6.0 * char_width;
+        let fps_start_x = canvas_width - margin - fps_width;
+        let fps_rel_x = canvas_x - fps_start_x;
+
+        // Particle-count linksonder: "#### particles" (4 cijfers + suffix, max 9999 —
+        // MAX_PARTICLES=6400)
+        let particle_count = fps_data.particle_count;
+        let particles_width = 14.0 * char_width;
+        let particles_start_x = margin;
+        let particles_rel_x = canvas_x - particles_start_x;
+
+        if (fps_rel_x >= 0.0 && fps_rel_x < fps_width) {
+            let char_index = u32(fps_rel_x / char_width);
+            let char_x = u32(fps_rel_x) % u32(char_width);
 
             if (char_x < 8u && char_y < 8u) {
                 var char_code = 32u;
-                // space
-
                 switch char_index {
-                    case 0u : {
-                        // Tens digit of FPS
-                        let tens = get_digit(fps_int, 1u);
-                        if (tens > 0u) {
-                            char_code = 48u + tens;
-                        }
-                        else {
-                            char_code = 32u;
-                            // space for leading zero suppression
-                        }
-                    }
-                    case 1u : {
-                        // Units digit of FPS
-                        char_code = 48u + get_digit(fps_int, 0u);
-                    }
-                    case 2u : {
-                        char_code = 102u;
-                        // 'f'
-                    }
-                    case 3u : {
-                        char_code = 112u;
-                        // 'p'
-                    }
-                    case 4u : {
-                        char_code = 115u;
-                        // 's'
-                    }
+                    case 0u : { char_code = digit_code(fps_int, 2u); }
+                    case 1u : { char_code = digit_code(fps_int, 1u); }
+                    case 2u : { char_code = digit_code(fps_int, 0u); }
+                    case 3u : { char_code = 102u; }
+                    // 'f'
+                    case 4u : { char_code = 112u; }
+                    // 'p'
+                    case 5u : { char_code = 115u; }
+                    // 's'
                     default : { }
                 }
+                text_alpha = get_char_pixel(char_code, char_x, char_y);
+            }
+        }
+        else if (particles_rel_x >= 0.0 && particles_rel_x < particles_width) {
+            let char_index = u32(particles_rel_x / char_width);
+            let char_x = u32(particles_rel_x) % u32(char_width);
 
+            if (char_x < 8u && char_y < 8u) {
+                var char_code = 32u;
+                switch char_index {
+                    case 0u : { char_code = digit_code(particle_count, 3u); }
+                    case 1u : { char_code = digit_code(particle_count, 2u); }
+                    case 2u : { char_code = digit_code(particle_count, 1u); }
+                    case 3u : { char_code = digit_code(particle_count, 0u); }
+                    // index 4 = spatie (default 32u)
+                    case 5u : { char_code = 112u; }
+                    // 'p'
+                    case 6u : { char_code = 97u; }
+                    // 'a'
+                    case 7u : { char_code = 114u; }
+                    // 'r'
+                    case 8u : { char_code = 116u; }
+                    // 't'
+                    case 9u : { char_code = 105u; }
+                    // 'i'
+                    case 10u : { char_code = 99u; }
+                    // 'c'
+                    case 11u : { char_code = 108u; }
+                    // 'l'
+                    case 12u : { char_code = 101u; }
+                    // 'e'
+                    case 13u : { char_code = 115u; }
+                    // 's'
+                    default : { }
+                }
                 text_alpha = get_char_pixel(char_code, char_x, char_y);
             }
         }
     }
 
     if (text_alpha > 0.0) {
-        // #808080 grijs
-        return vec4<f32>(0.50196, 0.50196, 0.50196, 0.9);
+        // #cccccc grijs
+        return vec4<f32>(0.8, 0.8, 0.8, 0.9);
     }
     else {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);

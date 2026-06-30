@@ -102,8 +102,6 @@ pub struct ESP32SharedState {
     pub status: ESP32Status,
     pub last_update: Instant,
     pub pending_lightning_events: Vec<ESP32LightningEvent>, // Queue of lightning events to send
-    pub last_logged_data: Option<ESP32SensorData>, // For throttling log output
-    pub last_log_time: Instant,                    // For periodic logging
     pub pending_night_alpha: Option<f32>,          // Set when night_alpha needs to be sent
     pub last_sent_night_alpha: f32,                // Track last sent value to avoid redundant sends
     pub last_night_send_time: Instant,             // For periodic night heartbeat
@@ -116,8 +114,6 @@ impl Default for ESP32SharedState {
             status: ESP32Status::Disconnected,
             last_update: Instant::now(),
             pending_lightning_events: Vec::new(),
-            last_logged_data: None,
-            last_log_time: Instant::now(),
             pending_night_alpha: None,
             last_sent_night_alpha: -1.0, // force first send
             last_night_send_time: Instant::now(),
@@ -271,29 +267,13 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
             match read_esp32_data(serial_port) {
                 Ok(sensor_data) => {
                     // Successfully read data - update shared state
-                    let should_log = {
-                        if let Ok(mut state) = shared_state.lock() {
-                            // Check if we should log this data (throttled logging)
-                            let should_log = should_log_sensor_data(&sensor_data, &mut state);
-
-                            state.sensor_data = sensor_data;
-                            state.status = ESP32Status::Connected;
-                            state.last_update = Instant::now();
-
-                            should_log
-                        } else {
-                            false
-                        }
-                    };
-
-                    // Log outside of the mutex to avoid holding the lock
-                    if should_log {
-                        println!(
-                            "📡 ESP32: zoom={} pan=({},{}) temp={} pressure={} ph={} electrical={} volume={} sleep={}",
-                            sensor_data.zoom, sensor_data.pan_x, sensor_data.pan_y,
-                            sensor_data.temperature, sensor_data.pressure, sensor_data.ph,
-                            sensor_data.electrical, sensor_data.volume, sensor_data.sleep
-                        );
+                    // (vroeger stond hier elke ~1s een "📡 ESP32: zoom=... pan=..."
+                    // telemetrieregel — té storend voor een always-on installatie, dus
+                    // verwijderd. Echte fouten/statuswissels worden nog wel gelogd.)
+                    if let Ok(mut state) = shared_state.lock() {
+                        state.sensor_data = sensor_data;
+                        state.status = ESP32Status::Connected;
+                        state.last_update = Instant::now();
                     }
 
                     // Check for pending lightning events to send
@@ -1115,18 +1095,6 @@ impl ESP32SensorData {
 }
 
 // Determine if we should log sensor data (throttled logging for human readability)
-fn should_log_sensor_data(new_data: &ESP32SensorData, state: &mut ESP32SharedState) -> bool {
-    // Log every 1 second regardless of changes
-    let time_since_last_log = state.last_log_time.elapsed();
-    if time_since_last_log >= Duration::from_secs(1) {
-        state.last_log_time = Instant::now();
-        state.last_logged_data = Some(*new_data);
-        return true;
-    }
-
-    false // Remove significant change detection for cleaner output
-}
-
 // Alternative approach for PTY devices (socat virtual ports)
 struct PtySerialPort {
     file: std::fs::File,
@@ -1370,9 +1338,10 @@ fn send_pending_night_alpha(
             (raw & 0xFF) as u8,
             0xCE,
         ];
-        match port.write_all(&packet) {
-            Ok(()) => println!("🌙 ESP32: Night alpha {:.3} (raw {}) sent", alpha, raw),
-            Err(e) => println!("❌ ESP32: Failed to send night packet: {}", e),
+        // Stille heartbeat — elke seconde een pakket sturen is functioneel nodig
+        // (ESP32 heeft altijd een actuele waarde), maar hoeft niet gelogd te worden.
+        if let Err(e) = port.write_all(&packet) {
+            println!("❌ ESP32: Failed to send night packet: {}", e);
         }
     }
 }

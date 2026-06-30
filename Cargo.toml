@@ -11,7 +11,11 @@ crate-type = ["cdylib", "rlib"]  # cdylib for WASM, rlib for native
 
 # Features for conditional compilation
 [features]
-default = []
+# demo_audio (mp3-afspelen via rodio i.p.v. de zelfgebouwde supersaw-synthesizer) staat
+# standaard aan — die synthesizer is nog niet productierijp. native_minimal is het enige
+# dat deze feature leest (audio_engine.rs is al native-only); de WASM-build gebruikt
+# audio_engine_wasm.rs en wordt hier niet door geraakt.
+default = ["demo_audio"]
 demo_audio = []
 
 # Dependencies that work for both WASM and native

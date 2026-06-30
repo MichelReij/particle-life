@@ -22,6 +22,13 @@ pub const DEFAULT_NUM_PARTICLES: u32 = 6400;
 pub const MAX_PARTICLES: u32 = 6400;
 pub const MIN_PARTICLES: u32 = 4800;
 
+/// GPU uniform-grid bucket sort (zie compute.wgsl + spatial_grid_build.wgsl).
+/// Aantal cellen per as = ceil(wereldbreedte / cel_grootte) = ceil(3240/80) = 41.
+/// Blijft 41×41 ongeacht canvas-grootte: in lib.rs schaalt cel_grootte mee met de
+/// wereld, dus de celverhouding (en dus dit aantal) is constant.
+pub const SPATIAL_GRID_DIM: u32 = 41;
+pub const SPATIAL_GRID_CELLS: u32 = SPATIAL_GRID_DIM * SPATIAL_GRID_DIM;
+
 /// FPS display configuration - no longer capped to allow 3-digit display
 pub const FPS_SAMPLE_COUNT: usize = 10; // Number of samples for moving average
 pub const FPS_UPDATE_INTERVAL: f32 = 0.5; // Update interval in seconds

@@ -201,6 +201,20 @@ pub struct WebGpuRenderer {
     fisheye_render_pipeline: wgpu::RenderPipeline,
     zoom_render_pipeline: wgpu::RenderPipeline,
 
+    // GPU uniform-grid bucket sort (zie spatial_grid_build.wgsl) — draait elke frame
+    // vóór compute_pipeline om de buren-buckets te vullen.
+    grid_cell_count_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    grid_cell_start_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    grid_fill_cursor_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    grid_particle_indices_buffer: wgpu::Buffer,
+    spatial_grid_build_bind_groups: [wgpu::BindGroup; 2],
+    spatial_grid_count_pipeline: wgpu::ComputePipeline,
+    spatial_grid_prefix_sum_pipeline: wgpu::ComputePipeline,
+    spatial_grid_scatter_pipeline: wgpu::ComputePipeline,
+
     compute_bind_groups: [wgpu::BindGroup; 2],
     render_bind_groups: [wgpu::BindGroup; 2],
     lightning_compute_bind_group: wgpu::BindGroup,
@@ -282,11 +296,16 @@ impl WebGpuRenderer {
             .await
             .map_err(|e| renderer_error("Failed to request adapter", e))?;
 
+        // De compute bind group voor de fysica-pass heeft 8 storage buffers nodig
+        // (incl. de spatial-grid-buckets) — boven de krappe WebGPU-spec default van 8.
+        // Vraag daarom de eigen (al beschikbare) adapter-limieten op i.p.v. het default.
+        let required_limits = adapter.limits();
+
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Particle Life Device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_limits,
                 memory_hints: wgpu::MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
             })
@@ -304,7 +323,12 @@ impl WebGpuRenderer {
             format: surface_format,
             width,
             height,
-            present_mode: surface_caps.present_modes[0],
+            // Fifo = vsync, hard gesynchroniseerd op de echte beeldverversing van het
+            // scherm (altijd beschikbaar, vereist door de WebGPU/Vulkan-spec). Eerder
+            // pakte dit `present_modes[0]` — op deze AMD/Mesa-driver bleek dat een
+            // ongecapte modus (~278fps gemeten), puur verspilde stroom/warmte voor een
+            // always-on installatie zonder enig visueel voordeel.
+            present_mode: wgpu::PresentMode::Fifo,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -403,6 +427,34 @@ impl WebGpuRenderer {
             mapped_at_creation: false,
         });
 
+        // GPU uniform-grid bucket sort (zie spatial_grid_build.wgsl + compute.wgsl
+        // binding 6-8). grid_cell_count/grid_fill_cursor zijn atomic<u32> in WGSL —
+        // qua GPU-geheugen gewoon plain u32, dus geen aparte usage-flags nodig.
+        let grid_cell_count_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Grid Cell Count Buffer"),
+            size: (SPATIAL_GRID_CELLS as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let grid_cell_start_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Grid Cell Start Buffer"),
+            size: (SPATIAL_GRID_CELLS as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let grid_fill_cursor_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Grid Fill Cursor Buffer"),
+            size: (SPATIAL_GRID_CELLS as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let grid_particle_indices_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Grid Particle Indices Buffer"),
+            size: (max_particles as u64) * 4,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+
         let zoom_uniforms_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Zoom Uniforms Buffer"),
             size: 48,
@@ -483,6 +535,14 @@ impl WebGpuRenderer {
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
                 wgpu::BindGroupLayoutEntry { binding: 5, visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // Spatial-grid buckets (read-only hier; geschreven door de aparte
+                // spatial_grid_build-pas die elke frame vóór deze pass draait).
+                wgpu::BindGroupLayoutEntry { binding: 6, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 7, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 8, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
             ],
         });
 
@@ -565,6 +625,9 @@ impl WebGpuRenderer {
                     wgpu::BindGroupEntry { binding: 3, resource: particle_buffers[1].as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 4, resource: lightning_segments_buffer.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 5, resource: lightning_bolt_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 6, resource: grid_cell_start_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 7, resource: grid_cell_count_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 8, resource: grid_particle_indices_buffer.as_entire_binding() },
                 ],
             }),
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -576,6 +639,54 @@ impl WebGpuRenderer {
                     wgpu::BindGroupEntry { binding: 3, resource: particle_buffers[0].as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 4, resource: lightning_segments_buffer.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 5, resource: lightning_bolt_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 6, resource: grid_cell_start_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 7, resource: grid_cell_count_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 8, resource: grid_particle_indices_buffer.as_entire_binding() },
+                ],
+            }),
+        ];
+
+        // ── Spatial-grid build bind groups (count/prefix_sum/scatter) ─────────────
+        // particles_in moet ping-ponged worden net als bij compute_bind_groups: de
+        // grid moet de actuele input-posities van DEZE frame bucketen.
+        let spatial_grid_build_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Spatial Grid Build BGL"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 4, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 5, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+            ],
+        });
+        let spatial_grid_build_bind_groups = [
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Spatial Grid Build BG A"), layout: &spatial_grid_build_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: sim_params_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: particle_buffers[0].as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: grid_cell_count_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: grid_cell_start_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: grid_fill_cursor_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 5, resource: grid_particle_indices_buffer.as_entire_binding() },
+                ],
+            }),
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Spatial Grid Build BG B"), layout: &spatial_grid_build_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: sim_params_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 1, resource: particle_buffers[1].as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 2, resource: grid_cell_count_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: grid_cell_start_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 4, resource: grid_fill_cursor_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 5, resource: grid_particle_indices_buffer.as_entire_binding() },
                 ],
             }),
         ];
@@ -730,6 +841,12 @@ impl WebGpuRenderer {
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("Particle Compute"), layout: Some(&compute_pl), module: &compute_shader, entry_point: Some("main"), compilation_options: Default::default(), cache: None });
         let lightning_compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("Lightning Compute"), layout: Some(&lc_pl), module: &lc_shader, entry_point: Some("main"), compilation_options: Default::default(), cache: None });
 
+        let spatial_grid_build_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Spatial Grid Build"), source: wgpu::ShaderSource::Wgsl(include_str!("shaders/spatial_grid_build.wgsl").into()) });
+        let spatial_grid_build_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("Spatial Grid Build PL"), bind_group_layouts: &[&spatial_grid_build_bgl], push_constant_ranges: &[] });
+        let spatial_grid_count_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("Grid Count"), layout: Some(&spatial_grid_build_pl), module: &spatial_grid_build_shader, entry_point: Some("count"), compilation_options: Default::default(), cache: None });
+        let spatial_grid_prefix_sum_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("Grid Prefix Sum"), layout: Some(&spatial_grid_build_pl), module: &spatial_grid_build_shader, entry_point: Some("prefix_sum"), compilation_options: Default::default(), cache: None });
+        let spatial_grid_scatter_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor { label: Some("Grid Scatter"), layout: Some(&spatial_grid_build_pl), module: &spatial_grid_build_shader, entry_point: Some("scatter"), compilation_options: Default::default(), cache: None });
+
         let make_fullscreen_pipeline = |label, layout: &wgpu::PipelineLayout, frag, blend| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label), layout: Some(layout),
@@ -841,6 +958,14 @@ impl WebGpuRenderer {
         });
 
         Ok(WebGpuRenderer {
+            grid_cell_count_buffer,
+            grid_cell_start_buffer,
+            grid_fill_cursor_buffer,
+            grid_particle_indices_buffer,
+            spatial_grid_build_bind_groups,
+            spatial_grid_count_pipeline,
+            spatial_grid_prefix_sum_pipeline,
+            spatial_grid_scatter_pipeline,
             post_texture,
             post_texture_view,
             blur_temp_texture,
@@ -935,12 +1060,30 @@ impl WebGpuRenderer {
           p.set_bind_group(0, &self.lightning_compute_bind_group, &[]);
           p.dispatch_workgroups(1, 1, 1); }
 
+        // Spatial-grid build: bucket alle actieve deeltjes per cel zodat de fysica-pass
+        // hierna buren via grid_cell_start/grid_particle_indices kan opzoeken i.p.v.
+        // over alle deeltjes te loopen. Moet vóór "Physics compute" draaien.
+        let n = particle_system.get_active_count();
+        let grid_workgroups = (n + 63) / 64;
+        encoder.clear_buffer(&self.grid_cell_count_buffer, 0, None);
+        { let mut p = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Grid Count"), timestamp_writes: None });
+          p.set_pipeline(&self.spatial_grid_count_pipeline);
+          p.set_bind_group(0, &self.spatial_grid_build_bind_groups[self.current_buffer_index], &[]);
+          p.dispatch_workgroups(grid_workgroups, 1, 1); }
+        { let mut p = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Grid Prefix Sum"), timestamp_writes: None });
+          p.set_pipeline(&self.spatial_grid_prefix_sum_pipeline);
+          p.set_bind_group(0, &self.spatial_grid_build_bind_groups[self.current_buffer_index], &[]);
+          p.dispatch_workgroups(1, 1, 1); }
+        { let mut p = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Grid Scatter"), timestamp_writes: None });
+          p.set_pipeline(&self.spatial_grid_scatter_pipeline);
+          p.set_bind_group(0, &self.spatial_grid_build_bind_groups[self.current_buffer_index], &[]);
+          p.dispatch_workgroups(grid_workgroups, 1, 1); }
+
         // Physics compute
         { let mut p = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("Particle Compute"), timestamp_writes: None });
           p.set_pipeline(&self.compute_pipeline);
           p.set_bind_group(0, &self.compute_bind_groups[self.current_buffer_index], &[]);
-          let n = particle_system.get_active_count();
-          p.dispatch_workgroups((n + 63) / 64, 1, 1); }
+          p.dispatch_workgroups(grid_workgroups, 1, 1); }
 
         let out_idx = 1 - self.current_buffer_index;
 
@@ -1155,7 +1298,16 @@ impl WebGpuRenderer {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn update_fps_data(&mut self, fps: f32, frame_count: u32, particle_count: u32, time: f32) {
         if let Some(b) = &self.fps_data_buffer {
-            self.queue.write_buffer(b, 0, bytemuck::cast_slice(&[fps, frame_count as f32, particle_count as f32, time]));
+            // FpsData in WGSL is { fps: f32, frame_count: u32, particle_count: u32, time: f32 }.
+            // frame_count/particle_count moeten als ruwe u32-bits geschreven worden — een
+            // `as f32`-cast hier zou hun IEEE-754 bitpatroon i.p.v. hun integer-bitpatroon
+            // schrijven, en de shader leest ze terug als willekeurige grote/foute getallen.
+            let mut data = [0u8; 16];
+            data[0..4].copy_from_slice(&fps.to_le_bytes());
+            data[4..8].copy_from_slice(&frame_count.to_le_bytes());
+            data[8..12].copy_from_slice(&particle_count.to_le_bytes());
+            data[12..16].copy_from_slice(&time.to_le_bytes());
+            self.queue.write_buffer(b, 0, &data);
         }
     }
 
