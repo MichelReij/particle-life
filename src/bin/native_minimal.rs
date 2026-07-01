@@ -17,6 +17,8 @@ use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
+#[cfg(target_os = "linux")]
+use winit::window::Fullscreen;
 
 fn temperature_to_lerp_duration(temp_celsius: f32) -> f32 {
     const MIN_TEMP: f32 = 3.0;
@@ -137,22 +139,15 @@ impl ApplicationHandler for MinimalNativeApp {
         // gecentreerd), zodat de 1:1 aspect ratio altijd behouden blijft.
         #[cfg(target_os = "linux")]
         let window_attributes = {
-            let (square, position) = event_loop.primary_monitor()
-                .map(|monitor| {
-                    let size = monitor.size();
-                    let square = size.width.min(size.height).max(1);
-                    let monitor_pos = monitor.position();
-                    let x = monitor_pos.x + (size.width as i32 - square as i32) / 2;
-                    let y = monitor_pos.y + (size.height as i32 - square as i32) / 2;
-                    (square, winit::dpi::PhysicalPosition::new(x, y))
-                })
-                .unwrap_or((1080, winit::dpi::PhysicalPosition::new(0, 0)));
+            // Borderless fullscreen duwt de GNOME-topbar (met systeemklok) weg.
+            // Op het ronde 1080×1080 productiescherm is de monitor al vierkant,
+            // dus er treedt geen uitrekking op.
+            let fullscreen = event_loop.primary_monitor()
+                .map(|m| Fullscreen::Borderless(Some(m)));
 
             Window::default_attributes()
                 .with_title("Origin of Life")
-                .with_inner_size(winit::dpi::PhysicalSize::new(square, square))
-                .with_position(position)
-                .with_resizable(false)
+                .with_fullscreen(fullscreen)
                 .with_decorations(false)
         };
 
