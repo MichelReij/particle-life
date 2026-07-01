@@ -142,8 +142,14 @@ impl ApplicationHandler for MinimalNativeApp {
             // Borderless fullscreen duwt de GNOME-topbar (met systeemklok) weg.
             // Op het ronde 1080×1080 productiescherm is de monitor al vierkant,
             // dus er treedt geen uitrekking op.
-            let fullscreen = event_loop.primary_monitor()
-                .map(|m| Fullscreen::Borderless(Some(m)));
+            //
+            // primary_monitor() geeft op Wayland vaak None terug (het protocol kent
+            // geen "primaire monitor"-concept zoals X11 RandR) — zonder fallback
+            // valt with_fullscreen(None) dan stil terug op een klein, gecentreerd
+            // venster i.p.v. fullscreen. available_monitors() werkt wel op Wayland.
+            let monitor = event_loop.primary_monitor()
+                .or_else(|| event_loop.available_monitors().next());
+            let fullscreen = monitor.map(|m| Fullscreen::Borderless(Some(m)));
 
             Window::default_attributes()
                 .with_title("Origin of Life")
