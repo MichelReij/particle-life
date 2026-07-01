@@ -76,7 +76,7 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
 
     // Band geometry: core wider than the canvas so at peak night the
     // entire screen is covered uniformly.
-    let fuzz       = 0.20;
+    let fuzz       = 0.30;
     let core_width = 1.4;
     let band_width = core_width + 2.0 * fuzz;
 
