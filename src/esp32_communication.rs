@@ -1283,29 +1283,25 @@ fn send_pending_lightning_events(
         }
     };
 
-    // Send each lightning event
+    // Send each lightning event as binary LightningPacket (9 bytes):
+    // [0xBB] [flash_id u32 BE] [lightning_type u8] [intensity u16 BE] [0xCC]
     for event in events_to_send {
-        let lightning_command = format!(
-            "LIGHTNING:{},{},{:.2},{:.2}\n",
-            event.flash_id, event.lightning_type, event.start_time, event.intensity
-        );
+        let intensity_raw = (event.intensity * 4096.0).clamp(0.0, 4096.0) as u16;
+        let packet: [u8; 9] = [
+            0xBB,
+            ((event.flash_id >> 24) & 0xFF) as u8,
+            ((event.flash_id >> 16) & 0xFF) as u8,
+            ((event.flash_id >> 8)  & 0xFF) as u8,
+            (event.flash_id         & 0xFF) as u8,
+            event.lightning_type,
+            ((intensity_raw >> 8) & 0xFF) as u8,
+            (intensity_raw        & 0xFF) as u8,
+            0xCC,
+        ];
 
-        match port.write_all(lightning_command.as_bytes()) {
-            Ok(()) => {
-                println!(
-                    "📤 ESP32: Sent lightning event (Flash ID: {}, Type: {})",
-                    event.flash_id,
-                    if event.is_super_lightning() {
-                        "Super"
-                    } else {
-                        "Normal"
-                    }
-                );
-            }
-            Err(e) => {
-                println!("❌ ESP32: Failed to send lightning event: {}", e);
-                break; // Stop sending if there's an error
-            }
+        if let Err(e) = port.write_all(&packet) {
+            println!("❌ ESP32: Failed to send lightning event: {}", e);
+            break;
         }
     }
 }
