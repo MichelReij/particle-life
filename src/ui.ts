@@ -1407,7 +1407,7 @@ function initializeEnvironmentalSliders(): void {
     if (tempSlider && tempValueDisplay) {
         temperature = loadSlider(sliderKey(HYPOTHESIS_KEYS, "temp", activeHypothesis), temperature);
         tempSlider.value = temperature.toString();
-        tempValueDisplay.textContent = `${temperature}°C`;
+        tempValueDisplay.textContent = `${temperature}`;
         applySliderGradient(tempSlider, "tempSlider");
         updateThumbColor(tempSlider);
         syncValueColor(tempSlider, "tempValue");
@@ -1417,7 +1417,7 @@ function initializeEnvironmentalSliders(): void {
         tempSlider.addEventListener("input", (event) => {
             const newValue = parseFloat((event.target as HTMLInputElement).value);
             temperature = newValue;
-            tempValueDisplay.textContent = `${newValue}°C`;
+            tempValueDisplay.textContent = `${newValue}`;
             updateThumbColor(tempSlider, activeHypothesis === "wlp" ? "ol-temp-wlp" : "tempSlider");
             syncValueColor(tempSlider, "tempValue");
             saveSlider(sliderKey(HYPOTHESIS_KEYS, "temp", activeHypothesis), newValue);
