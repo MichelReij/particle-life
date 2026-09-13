@@ -975,17 +975,25 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 particle_p.pos.y = clamp(particle_p.pos.y + y_offset_world, 0.0, sim_params.virtual_world_height);
             }
 
-            // X respawn only when X is actually out of bounds — not for Y-edge-only particles.
-            // Y-edge particles keep their X; otherwise they'd be teleported to the right edge
-            // and appear as fast leftward shots when attracted back toward the cluster.
-            let is_out_of_bounds_x = particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width;
-            if (is_out_of_bounds_x) {
-                particle_p.spawn_time = sim_params.time;
-                if (sim_params.drift_x_per_second > EPSILON) {
-                    particle_p.pos.x = 0.0;
-                }
-                else {
-                    particle_p.pos.x = sim_params.virtual_world_width - 1.0;
+            // Every respawn — whether triggered by actually leaving the world or
+            // just drifting near a Y edge — must land on the spawn edge (right,
+            // or left when drift_x_per_second reverses the flow direction), never
+            // at the particle's old X. Previously only the "actually out of bounds
+            // in X" case did this; a particle that merely drifted near the top/
+            // bottom edge kept its old (possibly mid-screen) X while only getting
+            // a new Y, which looked like it materialised out of nowhere in the
+            // middle of the screen. spawn_time is set unconditionally too, so the
+            // 2s spawn-velocity-freeze (see above) always applies and prevents
+            // the "fast leftward shot" the old X-preservation was working around.
+            particle_p.spawn_time = sim_params.time;
+            if (sim_params.drift_x_per_second > EPSILON) {
+                particle_p.pos.x = 0.0;
+            }
+            else {
+                particle_p.pos.x = sim_params.virtual_world_width - 1.0;
+                if (!is_near_y_edge) {
+                    // Y-edge respawns already got a clustered Y position above;
+                    // only randomize Y here for a "pure" X-boundary exit.
                     let bell_seed = hash(global_id.x * 97u + u32(sim_params.time * 1000.0) + particle_p.ptype * 53u);
                     particle_p.pos.y = bell_random(bell_seed, 2u) * sim_params.virtual_world_height;
                 }
