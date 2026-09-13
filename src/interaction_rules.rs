@@ -3,6 +3,7 @@
 
 use rand::prelude::*;
 use rand::rngs::SmallRng;
+use std::ops::Range;
 
 #[derive(Debug, Clone)]
 pub struct InteractionRule {
@@ -17,35 +18,76 @@ pub struct InteractionRules {
     num_types: usize,
 }
 
+// Number of particle types (see particle_system::NUM_TYPES, which this must stay
+// in sync with — types 0-7 are HTV, 8-10 are WLP-exclusive "flavor" types).
+const NUM_TYPES: usize = 11;
+
+// Default inter-type attraction range, used everywhere except the WLP-biased
+// reshuffle of types 8-10 (see InteractionRules::reshuffle_biased).
+pub const DEFAULT_INTER_TYPE_ATTRACTION: Range<f32> = -0.5..1.5;
+
 impl InteractionRules {
+    fn random_rule(is_self: bool, attraction_range: Range<f32>, rng: &mut SmallRng) -> InteractionRule {
+        if is_self {
+            // Self-interaction: stronger repulsive (attraction range unaffected by bias —
+            // biasing is only meaningful for how a type relates to *other* types).
+            InteractionRule {
+                attraction: rng.gen_range(-2.0..-0.5), // -2.0 to -0.5 (stronger repulsion)
+                min_radius: rng.gen_range(5.0..15.0),  // 5 to 15
+                max_radius: rng.gen_range(20.0..50.0), // min_radius + (15 to 35)
+            }
+        } else {
+            let min_radius = rng.gen_range(10.0..30.0);
+            InteractionRule {
+                attraction: rng.gen_range(attraction_range),
+                min_radius,
+                max_radius: min_radius + rng.gen_range(20.0..80.0), // min + (20 to 80)
+            }
+        }
+    }
+
     pub fn new_random(rng: &mut SmallRng) -> Self {
-        let num_types = 8;
+        let num_types = NUM_TYPES;
         let mut rules = Vec::with_capacity(num_types);
 
         for i in 0..num_types {
             let mut type_rules = Vec::with_capacity(num_types);
             for j in 0..num_types {
-                let rule = if i == j {
-                    // Self-interaction: stronger repulsive
-                    InteractionRule {
-                        attraction: rng.gen_range(-2.0..-0.5), // -2.0 to -0.5 (stronger repulsion)
-                        min_radius: rng.gen_range(5.0..15.0),  // 5 to 15
-                        max_radius: rng.gen_range(20.0..50.0), // min_radius + (15 to 35)
-                    }
+                type_rules.push(Self::random_rule(i == j, DEFAULT_INTER_TYPE_ATTRACTION, rng));
+            }
+            rules.push(type_rules);
+        }
+
+        Self { rules, num_types }
+    }
+
+    /// Like new_random(), but keeps every cell of `base` unchanged except those
+    /// where `i` or `j` is in `type_indices`, which are re-rolled using
+    /// `attraction_range` instead of the default. Used to give a subset of
+    /// particle types (e.g. WLP's exclusive 8/9/10) a distinct "personality"
+    /// bias — cooperative/clustering vs. hostile/repulsive — without disturbing
+    /// the shared types' (0-7) already-evolving matrix (see RuleEvolution::reshuffle_biased).
+    pub fn new_random_partial(
+        base: &InteractionRules,
+        type_indices: &[usize],
+        attraction_range: Range<f32>,
+        rng: &mut SmallRng,
+    ) -> Self {
+        let num_types = base.num_types;
+        let mut rules = Vec::with_capacity(num_types);
+        for i in 0..num_types {
+            let mut type_rules = Vec::with_capacity(num_types);
+            for j in 0..num_types {
+                let touches_special = type_indices.contains(&i) || type_indices.contains(&j);
+                let rule = if touches_special {
+                    Self::random_rule(i == j, attraction_range.clone(), rng)
                 } else {
-                    // Inter-type interaction
-                    let min_radius = rng.gen_range(10.0..30.0);
-                    InteractionRule {
-                        attraction: rng.gen_range(-0.5..1.5), // -0.5 to 1.5 (stronger forces)
-                        min_radius,
-                        max_radius: min_radius + rng.gen_range(20.0..80.0), // min + (20 to 80)
-                    }
+                    base.rules[i][j].clone()
                 };
                 type_rules.push(rule);
             }
             rules.push(type_rules);
         }
-
         Self { rules, num_types }
     }
 
@@ -146,6 +188,18 @@ impl RuleEvolution {
         self.source = self.target.clone();
         self.current = self.source.clone();
         self.target = InteractionRules::new_random(rng);
+        self.t = 0.0;
+    }
+
+    /// Same snap pattern as snap_to_new(), but only reshuffles the rules touching
+    /// `type_indices` (using the given, possibly biased, attraction range) — every
+    /// other type's evolving matrix is left completely untouched. Called on a
+    /// HTV -> WLP hypothesis transition to give WLP's exclusive types (8/9/10) a
+    /// fresh "personality" bias each time WLP is (re-)entered.
+    pub fn reshuffle_biased(&mut self, type_indices: &[usize], attraction_range: Range<f32>, rng: &mut SmallRng) {
+        self.source = self.target.clone();
+        self.current = self.source.clone();
+        self.target = InteractionRules::new_random_partial(&self.source, type_indices, attraction_range, rng);
         self.t = 0.0;
     }
 

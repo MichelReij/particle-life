@@ -161,7 +161,7 @@ struct SimParams {
     // Padding to ensure 16-byte alignment (3 × f32 = 12 bytes)
     night_alpha: f32,
     _viewport_padding2: f32,
-    _viewport_padding3: f32,
+    is_wlp: f32, // was unused padding; 1.0 = WLP hypothesis active, 0.0 = HTV
 }
 
 // Particle data (input)
@@ -573,6 +573,34 @@ fn bell_random(seed: u32, n: u32) -> f32 {
     return sum / f32(n);
 }
 
+// === Hypothesis-aware particle type/size reroll on respawn ===
+//
+// Mirrors particle_system.rs's PARTICLE_TYPE_WEIGHTS/PARTICLE_TYPE_SIZE_MULTIPLIERS
+// (must stay in sync with those — see particle_system::NUM_TYPES = 11). HTV keeps
+// spawning only types 0-7 exactly as before; WLP spawns types 0-4 (shared baseline)
+// plus its exclusive 8-10, never 5-7. Weights need not sum to 1.0 — normalized below.
+const HTV_TYPE_WEIGHTS = array<f32, 11>(0.22, 0.15, 0.11, 0.08, 0.18, 0.08, 0.15, 0.10, 0.0, 0.0, 0.0);
+const WLP_TYPE_WEIGHTS = array<f32, 11>(0.22, 0.15, 0.11, 0.08, 0.18, 0.0, 0.0, 0.0, 0.08, 0.15, 0.10);
+const TYPE_SIZE_MULTIPLIERS = array<f32, 11>(1.4, 2.2, 0.4, 0.7, 1.0, 1.8, 0.6, 1.2, 2.6, 0.5, 1.5);
+
+// Weighted pick of a particle type index, mirroring the cumulative-threshold
+// approach in particle_system.rs's ParticleSystem::new().
+fn weighted_type_pick(seed: u32, is_wlp: bool) -> u32 {
+    var weight_sum = 0.0;
+    for (var i = 0u; i < 11u; i++) {
+        weight_sum += select(HTV_TYPE_WEIGHTS[i], WLP_TYPE_WEIGHTS[i], is_wlp);
+    }
+    let r = random_float(seed) * weight_sum;
+    var cumulative = 0.0;
+    for (var i = 0u; i < 11u; i++) {
+        cumulative += select(HTV_TYPE_WEIGHTS[i], WLP_TYPE_WEIGHTS[i], is_wlp);
+        if (r < cumulative) {
+            return i;
+        }
+    }
+    return 10u; // fallback, matches Rust's unwrap_or(num_types - 1)
+}
+
 // === Super Lightning Interaction Rules Randomization ===
 
 // Check if super lightning is active and randomize interaction rules
@@ -894,6 +922,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (is_out_of_bounds || is_near_y_edge) {
             // Spawn with zero velocity — particles integrate naturally into the flow.
             particle_p.vel = vec2<f32>(0.0, 0.0);
+
+            // Reroll type + size for this respawn, from the current hypothesis's
+            // weight table (see weighted_type_pick above) — only newly-(re)spawning
+            // particles ever pick up WLP's exclusive 8-10 types; already-visible
+            // particles elsewhere in this buffer are untouched by this branch.
+            let type_seed = hash(global_id.x * 53u + u32(sim_params.time * 1000.0) + particle_p.ptype * 41u);
+            particle_p.ptype = weighted_type_pick(type_seed, sim_params.is_wlp > 0.5);
+            let size_jitter = random_range(hash(type_seed + 1u), -0.4, 0.4);
+            let new_size = sim_params.particle_render_size * TYPE_SIZE_MULTIPLIERS[particle_p.ptype] * (1.0 + size_jitter);
+            particle_p.target_size = new_size;
+            particle_p.size = new_size;
+
             if (is_near_y_edge) {
                 // Particles near Y edges get clustered Y positioning for more natural distribution
                 let y_seed = hash(global_id.x * 13u + u32(sim_params.time * 1000.0) + particle_p.ptype * 17u);

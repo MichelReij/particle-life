@@ -45,7 +45,22 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     // Sample from the central region of the fisheye buffer
     let scene_color = textureSample(scene_texture, scene_sampler, fisheye_uv);
 
-    let final_rgb = scene_color.rgb;
+    var final_rgb = scene_color.rgb;
+
+    // Hard circular cutoff at the true visible edge (canvas is square, circle
+    // is inscribed: radius = canvas_width/2). Particle glow halos are culled
+    // vertex-side with a margin (see vert.wgsl's CIRCULAR CULLING) that lets
+    // glow render slightly past this radius — invisible against a bright
+    // background, but a very visible faint ring against the near-black night
+    // background. This is the final pass before the swapchain (both native
+    // and WASM), so clamping here guarantees nothing can ever bleed past the
+    // true edge regardless of any upstream culling margin.
+    let center = vec2<f32>(zoom_uniforms.canvas_width, zoom_uniforms.canvas_height) * 0.5;
+    let dist_from_center = distance(frag_coord.xy, center);
+    let visible_radius = zoom_uniforms.canvas_width * 0.5;
+    if (dist_from_center > visible_radius) {
+        final_rgb = vec3<f32>(0.0, 0.0, 0.0);
+    }
 
     // Platform-specific gamma correction for color matching
     // Native gets extra gamma correction to match browser appearance

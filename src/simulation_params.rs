@@ -351,7 +351,7 @@ impl SimulationParams {
 
         buffer.extend_from_slice(&self.night_alpha.to_le_bytes()); // 45 - night overlay alpha
         buffer.extend_from_slice(&self.wlp_start_time.to_le_bytes()); // 46 - wlp_start_time (for night shader sync)
-        buffer.extend_from_slice(&0.0f32.to_le_bytes()); // 47 - padding
+        buffer.extend_from_slice(&(if self.is_wlp { 1.0f32 } else { 0.0f32 }).to_le_bytes()); // 47 - is_wlp (was unused padding; compute.wgsl reads this for hypothesis-aware respawn type selection)
 
         buffer
     }

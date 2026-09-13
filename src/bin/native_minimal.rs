@@ -20,12 +20,14 @@ use winit::{
 #[cfg(target_os = "linux")]
 use winit::window::Fullscreen;
 
-fn temperature_to_lerp_duration(temp_celsius: f32) -> f32 {
-    const MIN_TEMP: f32 = 3.0;
-    const MAX_TEMP: f32 = 160.0;
+fn temperature_to_lerp_duration(temp_celsius: f32, is_wlp: bool) -> f32 {
+    // Range must match apply_temperature_htv/wlp's own clamp range, otherwise a
+    // WLP temperature fed through the HTV range never reaches the fast end of
+    // the duration scale (WLP tops out at 80°C, HTV at 160°C).
+    let (min_temp, max_temp) = if is_wlp { (10.0, 80.0) } else { (3.0, 160.0) };
     const MAX_DURATION: f32 = 1800.0;
     const MIN_DURATION: f32 = 180.0;
-    let t = ((temp_celsius - MIN_TEMP) / (MAX_TEMP - MIN_TEMP)).clamp(0.0, 1.0);
+    let t = ((temp_celsius - min_temp) / (max_temp - min_temp)).clamp(0.0, 1.0);
     MAX_DURATION - t * (MAX_DURATION - MIN_DURATION)
 }
 
@@ -88,7 +90,7 @@ impl Default for MinimalNativeApp {
         let initial_particle_count = particle_system.get_active_count();
 
         let mut rule_evolution = RuleEvolution::new(interaction_rules.clone(), &mut rng);
-        rule_evolution.set_duration(temperature_to_lerp_duration(20.0));
+        rule_evolution.set_duration(temperature_to_lerp_duration(20.0, false));
 
         Self {
             window: None,
@@ -260,8 +262,24 @@ impl ApplicationHandler for MinimalNativeApp {
                         self.last_esp32_update = now;
                         match esp32.get_sensor_data() {
                             Ok(sd) => {
+                                let was_wlp = self.simulation_params.is_wlp;
                                 self.simulation_params.apply_esp32_sensor_data(&sd, delta_time);
-                                self.rule_evolution.set_duration(temperature_to_lerp_duration(sd.to_temperature_celsius()));
+                                if self.simulation_params.is_wlp && !was_wlp {
+                                    // HTV -> WLP: give WLP's exclusive types (8/9/10) a fresh
+                                    // random roll, same snap-mechanism as major lightning — types
+                                    // 0-7's already-evolving matrix is left untouched. Uses the
+                                    // same default attraction range as everywhere else (an earlier
+                                    // attraction-only bias made WLP look hyperactive rather than
+                                    // organized — no repulsive pairs meant nothing to settle into
+                                    // stable clusters).
+                                    self.rule_evolution.reshuffle_biased(&[8, 9, 10], DEFAULT_INTER_TYPE_ATTRACTION, &mut self.rng);
+                                }
+                                let evolution_temp = if self.simulation_params.is_wlp {
+                                    sd.to_temperature_wlp()
+                                } else {
+                                    sd.to_temperature_celsius()
+                                };
+                                self.rule_evolution.set_duration(temperature_to_lerp_duration(evolution_temp, self.simulation_params.is_wlp));
                                 if let Some(e) = &self.audio_engine {
                                     e.set_master_volume(sd.to_volume_percentage() as f32 / 100.0);
                                 }

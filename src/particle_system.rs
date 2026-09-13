@@ -20,18 +20,34 @@ pub struct Particle {
 
 // Size ranges for each particle type (multipliers of base size)
 // We'll use the middle value of each range with ±20% randomization
-const NUM_TYPES: usize = 8;
+//
+// Types 8-10 are WLP-exclusive "flavor" particles (see compute.wgsl's respawn
+// logic): HTV spawns only draw from types 0-7 exactly as before, WLP spawns
+// draw from 0-4 (shared "same molecules" baseline) plus 8-10. Types 5-7 remain
+// HTV-only. Kept as new slots rather than repainting 5-7 so already-visible
+// particles never change appearance when the hypothesis switches — only new
+// spawns (at the edge, via the existing respawn system) reflect it.
+const NUM_TYPES: usize = 11;
 
-// Probability weight per particle type (must sum to 1.0)
+// Probability weight per particle type, used by the CPU-side initial spawn
+// (ParticleSystem::new) only. Deliberately zero for 8-10: the initial
+// population always starts HTV-flavored regardless of the active hypothesis
+// at boot — it self-corrects to the right mix within the first respawn cycle,
+// since particles constantly cycle through the edge-respawn system. The
+// hypothesis-aware weight tables that actually matter live in compute.wgsl
+// (HTV_TYPE_WEIGHTS / WLP_TYPE_WEIGHTS), applied on every respawn.
 const PARTICLE_TYPE_WEIGHTS: [f32; NUM_TYPES] = [
     0.22, // Type 0: Blue
     0.15, // Type 1: Yellow
     0.11, // Type 2: Red
     0.08, // Type 3: Purple
     0.18, // Type 4: Green
-    0.08, // Type 5: Olive
-    0.15, // Type 6: Blue-gray
-    0.10, // Type 7: Blue-green
+    0.08, // Type 5: Olive (HTV-only)
+    0.15, // Type 6: Blue-gray (HTV-only)
+    0.10, // Type 7: Blue-green (HTV-only)
+    0.0,  // Type 8: WLP-only, never spawned at boot
+    0.0,  // Type 9: WLP-only, never spawned at boot
+    0.0,  // Type 10: WLP-only, never spawned at boot
 ];
 
 const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; NUM_TYPES] = [
@@ -43,18 +59,26 @@ const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; NUM_TYPES] = [
     1.8, // Type 5: Olive
     0.6, // Type 6: Cyan
     1.2, // Type 7: Blue-green
+    2.6, // Type 8: WLP-only — large "photosynthetic bloom"
+    0.5, // Type 9: WLP-only — tiny "microbial"
+    1.5, // Type 10: WLP-only — medium
 ];
 
-// Default color palette (sRGB 0-1), evenly spaced in OkLCH hue
-const DEFAULT_COLORS: [[f32; 3]; 8] = [
-    [0.4596, 0.6745, 0.5871], // #75ac96 - Blue
-    [0.9352, 0.8674, 0.6573], // #eedda8 - Yellow
-    [0.8126, 0.4163, 0.5183], // #cf6a84 - Red
-    [0.6718, 0.4511, 0.6439], // #ab73a4 - Purple
-    [0.3582, 0.6903, 0.4753], // #5bb079 - Green
-    [0.5833, 0.6397, 0.4227], // #95a36c - Olive green
-    [0.4863, 0.5691, 0.6656], // #7c91aa - Blue-gray (Cyan)
-    [0.5253, 0.7727, 0.7534], // #86c5c0 - Blue-green
+// Default color palette (sRGB 0-1), tuned live via the in-app palette tool.
+// Types 0-7 are HTV's palette; 8-10 are WLP-exclusive tones, contrasting with
+// the HTV palette above them.
+const DEFAULT_COLORS: [[f32; 3]; NUM_TYPES] = [
+    [0.4602, 0.6745, 0.5824], // #75ac95 - Blue
+    [0.9295, 0.8680, 0.6701], // #edddab - Yellow
+    [0.8097, 0.4168, 0.5260], // #ce6a86 - Red
+    [0.6729, 0.4512, 0.6373], // #ac73a3 - Purple
+    [0.3557, 0.6904, 0.4759], // #5bb079 - Green
+    [0.5786, 0.6402, 0.4325], // #94a36e - Olive green
+    [0.4899, 0.5695, 0.6537], // #7d91a7 - Orange
+    [0.7424, 0.6727, 0.8127], // #bdaccf - WLP: lavender
+    [1.0000, 0.7363, 0.7390], // #ffbcbc - WLP: pink
+    [0.8845, 0.5614, 0.8610], // #e28fdc - WLP: orchid
+    [0.6577, 0.8178, 0.9299], // #a8d1ed - WLP: sky blue
 ];
 
 #[derive(Debug)]

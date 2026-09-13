@@ -470,7 +470,18 @@ impl ParticleLifeEngine {
 
     #[wasm_bindgen]
     pub fn set_pressure(&mut self, pressure: f32) {
+        let was_wlp = self.simulation_params.is_wlp;
         self.simulation_params.apply_pressure(pressure);
+        if self.simulation_params.is_wlp && !was_wlp {
+            // HTV -> WLP: give WLP's exclusive types (8/9/10) a fresh random roll,
+            // same snap-mechanism as major lightning — types 0-7's already-evolving
+            // matrix is left untouched. Uses the same default attraction range as
+            // everywhere else (an earlier attraction-only bias made WLP look
+            // hyperactive rather than organized — no repulsive pairs meant nothing
+            // to settle into stable clusters). See native_minimal.rs for the
+            // equivalent native/ESP32-driven hook.
+            self.rule_evolution.reshuffle_biased(&[8, 9, 10], interaction_rules::DEFAULT_INTER_TYPE_ATTRACTION, &mut self.rng);
+        }
     }
 
     #[wasm_bindgen]

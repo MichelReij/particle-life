@@ -1694,8 +1694,12 @@ function hexToSrgb(hex: string): [number, number, number] {
     return [r, g, b];
 }
 
-// Current OKLCH state per type [L, C, H]
+// Current OKLCH state per type [L, C, H]. 11 entries: types 0-7 (HTV) + 8-10 (WLP-only).
 const typeOklch: [number, number, number][] = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
     [0, 0, 0],
     [0, 0, 0],
     [0, 0, 0],
@@ -1707,6 +1711,10 @@ const typeOklch: [number, number, number][] = [
 
 // Built-in defaults captured at startup from HTML slider values
 const builtinTypeOklch: [number, number, number][] = [
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
+    [0, 0, 0],
     [0, 0, 0],
     [0, 0, 0],
     [0, 0, 0],
@@ -1952,7 +1960,7 @@ export function initColorPanel(): void {
 
         const rows = document.querySelectorAll<HTMLElement>(".color-type-row");
         palette.colors.forEach((hex, i) => {
-            if (i >= 8) return;
+            if (i >= rows.length) return;
             const [r, g2, b] = hexToSrgb(hex);
             const [l, c, h] = srgbToOklch(r, g2, b);
             typeOklch[i] = [l, c, h];
