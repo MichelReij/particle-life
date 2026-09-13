@@ -12,7 +12,7 @@
 #define H_BLUE    251.0f
 #define H_GREEN   148.0f
 #define H_YELLOW  72.5f
-#define H_RED     24.0f
+#define H_RED     30.0f
 
 #define NUM_SLIDERS 4
 
