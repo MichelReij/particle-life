@@ -1191,10 +1191,26 @@ impl WebGpuRenderer {
         let center_x = simulation_params.virtual_world_offset_x + simulation_params.viewport_width / 2.0;
         let center_y = simulation_params.virtual_world_offset_y + simulation_params.viewport_height / 2.0;
 
+        // Compensates for the physical display's actual gamma response deviating
+        // from the assumed sRGB curve — e.g. the round native screen (Kingston
+        // WS050R) has no real measured ICC gamma table (colord/mutter only ever
+        // derived a generic EDID-default profile for it), so colours render
+        // visibly paler/flatter there than in a browser on a normally-profiled
+        // monitor. Overridable via PARTICLE_LIFE_NATIVE_GAMMA for fast on-device
+        // calibration without a rebuild each time (native only — WASM has no
+        // env var access and defaults to 0.0, which the shader treats as "off").
         #[cfg(target_arch = "wasm32")]
         let gamma = 0.0f32;
         #[cfg(not(target_arch = "wasm32"))]
-        let gamma = 1.0f32;
+        let gamma = {
+            static NATIVE_GAMMA: std::sync::OnceLock<f32> = std::sync::OnceLock::new();
+            *NATIVE_GAMMA.get_or_init(|| {
+                std::env::var("PARTICLE_LIFE_NATIVE_GAMMA")
+                    .ok()
+                    .and_then(|v| v.parse::<f32>().ok())
+                    .unwrap_or(1.0)
+            })
+        };
 
         let fw = self.fisheye_buffer_width as f32;
         let fh = self.fisheye_buffer_height as f32;

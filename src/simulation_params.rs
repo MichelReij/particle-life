@@ -71,6 +71,13 @@ pub struct SimulationParams {
     // Smoothed zoom level for ESP32 input (EMA filter against ADC noise)
     pub smoothed_zoom: f32,
 
+    // EMA-smoothed background hue (degrees). -1 = not yet initialised (first
+    // call snaps straight to the target). Matches the physical RGB-ball's
+    // ~20s smoothing time constant (see BACKGROUND_HUE_TAU_SECONDS below) so
+    // the on-screen background changes colour at the same visual speed as
+    // the ball instead of snapping instantly on every sensor update.
+    pub background_hue: f32,
+
     // Environmental control levels (stored for cross-dependency computation)
     pub ph: f32,                        // pH scale 0-14, optimum for life ~10
     pub pressure_level: f32,            // bar (0-1000), ~0-10000m depth
@@ -157,6 +164,7 @@ impl SimulationParams {
             // Default zoom level
             current_zoom_level: 1.0,
             smoothed_zoom: 1.0,
+            background_hue: -1.0,
 
             // Environmental control levels (start at non-optimal to encourage exploration)
             ph: 7.0,             // Neutral pH — optimum is 10
@@ -386,7 +394,12 @@ impl SimulationParams {
     // These functions handle the complex mappings from user-friendly parameters
     // to internal simulation parameters, used by both WASM and native
 
-    // Set temperature — dispatches to HTV or WLP variant based on active hypothesis
+    // Set temperature — dispatches to HTV or WLP variant based on active hypothesis.
+    // Also drives an instant (unsmoothed) background-colour update — this is the
+    // fallback for callers with no live pre-smoothed hue available (WASM UI slider,
+    // native startup default). The native ESP32 sensor loop overrides this right
+    // after with apply_display_hue() using the ESP32's own pre-smoothed value —
+    // see that function's doc comment for why the smoothing moved there.
     pub fn apply_temperature(&mut self, temp: f32) {
         self.temperature_level = temp;
         if self.is_wlp {
@@ -394,6 +407,30 @@ impl SimulationParams {
         } else {
             self.apply_temperature_htv(temp);
         }
+    }
+
+    // Sets the background colour directly from an already-smoothed hue (degrees),
+    // as received from the liaison ESP32 over UART. The physical RGB-ball and this
+    // background are now driven by the literal same tickHueEma() computation
+    // (same alpha, same 50Hz tick, same hypothesis) instead of two independent
+    // EMA implementations that could drift apart or run at different speeds —
+    // this is what fixed the "background changes much faster than the ball"
+    // mismatch. Call this AFTER apply_temperature()/apply_esp32_sensor_data() so
+    // it overrides the instant background colour those set.
+    // Only ever called from the native ESP32 sensor loop (see apply_esp32_sensor_data,
+    // which is itself cfg(not(wasm32))), so this always uses the *_NATIVE constants —
+    // there is no ESP32/liaison hardware feeding the WASM build.
+    pub fn apply_display_hue(&mut self, hue_deg: f32) {
+        self.background_hue = hue_deg;
+        let (l, c) = if self.is_wlp {
+            (crate::life_params_gen::BACKGROUND_L_WLP_NATIVE, crate::life_params_gen::BACKGROUND_C_WLP_NATIVE)
+        } else {
+            (crate::life_params_gen::BACKGROUND_L_HTV_NATIVE, crate::life_params_gen::BACKGROUND_C_HTV_NATIVE)
+        };
+        let (r, g, b) = crate::buffer_utils::oklch_to_srgb(l, c, hue_deg);
+        self.background_color_r = r;
+        self.background_color_g = g;
+        self.background_color_b = b;
     }
 
     fn apply_temperature_htv(&mut self, temp: f32) {
@@ -415,7 +452,7 @@ impl SimulationParams {
         // Apply pressure modifier so extreme depth also disrupts particle order
         self.friction = friction * self.pressure_friction_modifier_htv();
 
-        // 3. Update background color using OkLCH: temp [3, 160] → hue [251° blauw → 24.0° rood]
+        // 3. Update background color using OkLCH: temp [3, 160] → hue [251° blauw → 30° rood]
         let (r, g, b) = Self::temperature_to_background_color(clamped_temp);
         self.background_color_r = r;
         self.background_color_g = g;
@@ -668,7 +705,11 @@ impl SimulationParams {
     // HTV: achtergrondkleur via OKLCH — zelfde hue-stops als de temperatuurslider.
     // Bereiken uit life_params.json: blauw(3–80°C) → groen(95–115°C) → rood(125–160°C)
     fn temperature_to_background_color(temp: f32) -> (f32, f32, f32) {
-        use crate::life_params_gen::{H_BLUE, H_GREEN, H_RED, BACKGROUND_L_HTV, BACKGROUND_C_HTV};
+        use crate::life_params_gen::{H_BLUE, H_GREEN, H_RED};
+        #[cfg(target_arch = "wasm32")]
+        use crate::life_params_gen::{BACKGROUND_L_HTV_WASM as BACKGROUND_L_HTV, BACKGROUND_C_HTV_WASM as BACKGROUND_C_HTV};
+        #[cfg(not(target_arch = "wasm32"))]
+        use crate::life_params_gen::{BACKGROUND_L_HTV_NATIVE as BACKGROUND_L_HTV, BACKGROUND_C_HTV_NATIVE as BACKGROUND_C_HTV};
         let hue = Self::temp_to_hue_htv(temp, H_BLUE, H_GREEN, H_RED);
         crate::buffer_utils::oklch_to_srgb(BACKGROUND_L_HTV, BACKGROUND_C_HTV, hue)
     }
@@ -676,7 +717,11 @@ impl SimulationParams {
     // WLP: achtergrondkleur via OKLCH — zelfde hue-stops als de temperatuurslider.
     // Bereiken uit life_params.json: blauw(3–30°C) → groen(30–50°C) → rood(70–160°C)
     fn temperature_to_background_color_wlp(temp: f32) -> (f32, f32, f32) {
-        use crate::life_params_gen::{H_BLUE, H_GREEN, H_RED, BACKGROUND_L_WLP, BACKGROUND_C_WLP};
+        use crate::life_params_gen::{H_BLUE, H_GREEN, H_RED};
+        #[cfg(target_arch = "wasm32")]
+        use crate::life_params_gen::{BACKGROUND_L_WLP_WASM as BACKGROUND_L_WLP, BACKGROUND_C_WLP_WASM as BACKGROUND_C_WLP};
+        #[cfg(not(target_arch = "wasm32"))]
+        use crate::life_params_gen::{BACKGROUND_L_WLP_NATIVE as BACKGROUND_L_WLP, BACKGROUND_C_WLP_NATIVE as BACKGROUND_C_WLP};
         let hue = Self::temp_to_hue_wlp(temp, H_BLUE, H_GREEN, H_RED);
         crate::buffer_utils::oklch_to_srgb(BACKGROUND_L_WLP, BACKGROUND_C_WLP, hue)
     }
@@ -777,6 +822,14 @@ impl SimulationParams {
             sensor_data.to_temperature_celsius()
         };
         self.apply_temperature(temperature);
+
+        // Override the instant background colour apply_temperature() just set
+        // with the liaison ESP32's own pre-smoothed hue (see apply_display_hue's
+        // doc comment) — this is what keeps the screen and the physical RGB-ball
+        // in sync, both in speed and in exact colour, since they're now driven by
+        // the literal same tickHueEma() computation instead of two independent
+        // EMA implementations.
+        self.apply_display_hue(sensor_data.to_display_hue());
 
         // Apply pH (HTV) or UV (WLP) — same slider, different ranges
         if self.is_wlp {

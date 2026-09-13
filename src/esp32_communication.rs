@@ -58,6 +58,13 @@ pub struct ESP32SensorData {
     pub joystick_button: bool, // true when joystick button pressed (bit 1 of sleep byte)
     pub joy_click: bool,       // true when joystick click detected (byte 18, latched)
     pub system_move_mask: u8,  // bit i = slider i currently moved by the system, not a human (byte 19)
+    // Pre-smoothed display hue (0-4096 <=> 0-360°): the liaison ESP32's own
+    // LifeParams::tickHueEma() output — the literal same computation that
+    // drives the physical RGB-ball, sent over the wire instead of Rust
+    // re-implementing a separate EMA that could drift out of sync (speed or
+    // exact colour) with the ball. See to_display_hue() and
+    // SimulationParams::apply_display_hue().
+    pub display_hue: u16,
 }
 
 impl Default for ESP32SensorData {
@@ -75,6 +82,8 @@ impl Default for ESP32SensorData {
             joystick_button: false, // Default not pressed
             joy_click: false,       // Default no click
             system_move_mask: 0,    // Default: no slider system-driven
+            // Default ~20°C is near the cold end of the range, so default to H_BLUE.
+            display_hue: (crate::life_params_gen::H_BLUE / 360.0 * 4096.0) as u16,
         }
     }
 }
@@ -690,13 +699,13 @@ fn test_esp32_communication(port: &mut Box<dyn SerialPort>) -> Result<bool, ESP3
 
 // Read sensor data from ESP32
 fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ESP32Error> {
-    // ESP32 sends data in this format (21 bytes total):
+    // ESP32 sends data in this format (23 bytes total):
     // [0xAA] [zoom_high] [zoom_low] [pan_x_high] [pan_x_low] [pan_y_high] [pan_y_low]
     // [temp_high] [temp_low] [pressure_high] [pressure_low] [ph_high] [ph_low]
     // [electrical_high] [electrical_low] [volume_high] [volume_low] [sleep_flags]
-    // [joy_click] [system_move_mask] [0x55]
+    // [joy_click] [system_move_mask] [display_hue_high] [display_hue_low] [0x55]
 
-    let mut buffer = [0u8; 21];
+    let mut buffer = [0u8; 23];
 
     // Scan for 0xAA start marker — resynchronises after any misalignment without reconnecting.
     loop {
@@ -724,9 +733,9 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
         }
     }
 
-    // Read the remaining 20 bytes of the packet.
+    // Read the remaining 22 bytes of the packet.
     let mut bytes_read = 1;
-    while bytes_read < 21 {
+    while bytes_read < 23 {
         match port.read(&mut buffer[bytes_read..]) {
             Ok(n) => {
                 bytes_read += n;
@@ -744,8 +753,8 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
     }
 
     // Validate footer only (header is guaranteed 0xAA by the scan above).
-    if buffer[20] != 0x55 {
-        println!("⚠️  ESP32: bad footer 0x{:02X} (expected 0x55) — resyncing", buffer[20]);
+    if buffer[22] != 0x55 {
+        println!("⚠️  ESP32: bad footer 0x{:02X} (expected 0x55) — resyncing", buffer[22]);
         return Err(ESP32Error::InvalidData);
     }
 
@@ -762,6 +771,7 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
     let joystick_button = (buffer[17] & 0x02) != 0;
     let joy_click = buffer[18] != 0;
     let system_move_mask = buffer[19];
+    let display_hue = u16::from_be_bytes([buffer[20], buffer[21]]);
 
     // Validate ranges (all values should be 0-4096)
     if zoom > 4096
@@ -772,6 +782,7 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
         || ph > 4096
         || electrical > 4096
         || volume > 4096
+        || display_hue > 4096
     {
         println!("❌ ESP32 InvalidData - Value out of range:");
         println!("   Raw buffer: {:02X?}", buffer);
@@ -794,6 +805,7 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
         joystick_button,
         joy_click,
         system_move_mask,
+        display_hue,
     })
 }
 
@@ -847,6 +859,14 @@ impl ESP32SensorData {
         SLIDER0_MIN + (self.pressure as f32 / 4096.0) * (SLIDER0_MAX - SLIDER0_MIN)
     }
 
+    // Convert display_hue (0-4096) to degrees (0-360). This is the liaison
+    // ESP32's own pre-smoothed LifeParams::tickHueEma() output — see
+    // SimulationParams::apply_display_hue() for why it's used as-is rather
+    // than smoothed again on this side.
+    pub fn to_display_hue(&self) -> f32 {
+        (self.display_hue as f32 / 4096.0) * 360.0
+    }
+
     // Convert pH (0-4096) to pH units (0-14)
     // Optimal pH for life (hydrothermal vent theory) is ~10
     pub fn to_ph(&self) -> f32 {
@@ -895,6 +915,7 @@ impl ESP32SensorData {
             joystick_button: false,
             joy_click: false,
             system_move_mask: 0,
+            display_hue: 2048, // ~180° (arbitrary mid-range for test data)
         }
     }
 
@@ -913,6 +934,7 @@ impl ESP32SensorData {
             joystick_button: false,
             joy_click: false,
             system_move_mask: 0,
+            display_hue: 4096, // Max hue (360°)
         }
     }
 
@@ -987,6 +1009,7 @@ impl ESP32SensorData {
                 joystick_button: false,
                 joy_click: false,
                 system_move_mask: 0,
+                display_hue: 0,
             },
             ESP32SensorData {
                 zoom: 1024,
@@ -1001,6 +1024,7 @@ impl ESP32SensorData {
                 joystick_button: false,
                 joy_click: false,
                 system_move_mask: 0,
+                display_hue: 0,
             }, // Below volume threshold
             ESP32SensorData {
                 zoom: 1024,
@@ -1015,6 +1039,7 @@ impl ESP32SensorData {
                 joystick_button: false,
                 joy_click: false,
                 system_move_mask: 0,
+                display_hue: 0,
             }, // At volume threshold
             ESP32SensorData {
                 zoom: 2047,
@@ -1029,6 +1054,7 @@ impl ESP32SensorData {
                 joystick_button: false,
                 joy_click: false,
                 system_move_mask: 0,
+                display_hue: 0,
             },
             ESP32SensorData {
                 zoom: 4095,
@@ -1043,6 +1069,7 @@ impl ESP32SensorData {
                 joystick_button: false,
                 joy_click: false,
                 system_move_mask: 0,
+                display_hue: 0,
             },
         ];
 

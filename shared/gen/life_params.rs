@@ -9,11 +9,19 @@ pub const H_GREEN:  f32 = 148.0;
 pub const H_YELLOW: f32 = 72.5;
 pub const H_RED:    f32 = 30.0;
 
-// OKLCH L/C voor simulatie-achtergrond (lichter en minder verzadigd dan slider-thumb)
-pub const BACKGROUND_L_HTV: f32 = 0.92;
-pub const BACKGROUND_C_HTV: f32 = 0.07;
-pub const BACKGROUND_L_WLP: f32 = 0.92;
-pub const BACKGROUND_C_WLP: f32 = 0.07;
+// OKLCH L/C voor simulatie-achtergrond (lichter en minder verzadigd dan slider-thumb).
+// Native en WASM hebben elk hun eigen waarden: het fysieke ronde scherm rendert
+// merkbaar fletser dan een browser bij gelijke OkLCH-waarden (geen matched ICC-
+// profiel voor dat paneel — zie SimulationParams::apply_temperature_htv/wlp),
+// dus native gebruikt een hogere chroma om ditzelfde effect te bereiken.
+pub const BACKGROUND_L_HTV_NATIVE: f32 = 0.92;
+pub const BACKGROUND_C_HTV_NATIVE: f32 = 0.09;
+pub const BACKGROUND_L_WLP_NATIVE: f32 = 0.92;
+pub const BACKGROUND_C_WLP_NATIVE: f32 = 0.09;
+pub const BACKGROUND_L_HTV_WASM: f32 = 0.97;
+pub const BACKGROUND_C_HTV_WASM: f32 = 0.05;
+pub const BACKGROUND_L_WLP_WASM: f32 = 0.97;
+pub const BACKGROUND_C_WLP_WASM: f32 = 0.05;
 
 pub mod htv {
     pub const SLIDER0_MIN: f32 = 0.0;

@@ -369,11 +369,19 @@ function genRust() {
     lines.push(`pub const H_YELLOW: f32 = ${f32(oklch.h_yellow)};`);
     lines.push(`pub const H_RED:    f32 = ${f32(oklch.h_red)};`);
     lines.push(``);
-    lines.push(`// OKLCH L/C voor simulatie-achtergrond (lichter en minder verzadigd dan slider-thumb)`);
-    lines.push(`pub const BACKGROUND_L_HTV: f32 = ${f32(oklch.background_l_htv)};`);
-    lines.push(`pub const BACKGROUND_C_HTV: f32 = ${f32(oklch.background_c_htv)};`);
-    lines.push(`pub const BACKGROUND_L_WLP: f32 = ${f32(oklch.background_l_wlp)};`);
-    lines.push(`pub const BACKGROUND_C_WLP: f32 = ${f32(oklch.background_c_wlp)};`);
+    lines.push(`// OKLCH L/C voor simulatie-achtergrond (lichter en minder verzadigd dan slider-thumb).`);
+    lines.push(`// Native en WASM hebben elk hun eigen waarden: het fysieke ronde scherm rendert`);
+    lines.push(`// merkbaar fletser dan een browser bij gelijke OkLCH-waarden (geen matched ICC-`);
+    lines.push(`// profiel voor dat paneel — zie SimulationParams::apply_temperature_htv/wlp),`);
+    lines.push(`// dus native gebruikt een hogere chroma om ditzelfde effect te bereiken.`);
+    lines.push(`pub const BACKGROUND_L_HTV_NATIVE: f32 = ${f32(oklch.background_native.l_htv)};`);
+    lines.push(`pub const BACKGROUND_C_HTV_NATIVE: f32 = ${f32(oklch.background_native.c_htv)};`);
+    lines.push(`pub const BACKGROUND_L_WLP_NATIVE: f32 = ${f32(oklch.background_native.l_wlp)};`);
+    lines.push(`pub const BACKGROUND_C_WLP_NATIVE: f32 = ${f32(oklch.background_native.c_wlp)};`);
+    lines.push(`pub const BACKGROUND_L_HTV_WASM: f32 = ${f32(oklch.background_wasm.l_htv)};`);
+    lines.push(`pub const BACKGROUND_C_HTV_WASM: f32 = ${f32(oklch.background_wasm.c_htv)};`);
+    lines.push(`pub const BACKGROUND_L_WLP_WASM: f32 = ${f32(oklch.background_wasm.l_wlp)};`);
+    lines.push(`pub const BACKGROUND_C_WLP_WASM: f32 = ${f32(oklch.background_wasm.c_wlp)};`);
     lines.push(``);
 
     const s2wlp = sliders[2].wlp;

@@ -8,10 +8,18 @@
         "h_green": 148.0,
         "h_yellow": 72.5,
         "h_red": 30.0,
-        "background_l_htv": 0.92,
-        "background_c_htv": 0.07,
-        "background_l_wlp": 0.92,
-        "background_c_wlp": 0.07
+        "background_native": {
+            "l_htv": 0.92,
+            "c_htv": 0.09,
+            "l_wlp": 0.92,
+            "c_wlp": 0.09
+        },
+        "background_wasm": {
+            "l_htv": 0.97,
+            "c_htv": 0.05,
+            "l_wlp": 0.97,
+            "c_wlp": 0.05
+        }
     },
     "sliders": [
         {
