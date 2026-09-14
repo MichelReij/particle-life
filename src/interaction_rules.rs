@@ -22,9 +22,18 @@ pub struct InteractionRules {
 // in sync with — types 0-7 are HTV, 8-10 are WLP-exclusive "flavor" types).
 const NUM_TYPES: usize = 11;
 
-// Default inter-type attraction range, used everywhere except the WLP-biased
-// reshuffle of types 8-10 (see InteractionRules::reshuffle_biased).
+// Default inter-type attraction range, used for the original 8-type system.
 pub const DEFAULT_INTER_TYPE_ATTRACTION: Range<f32> = -0.5..1.5;
+
+// Types 8-10 (WLP's exclusive "flavor" particles) are meant to add visual
+// variety, not extra chaos on top of the original 8-type baseline. Any pair
+// involving one of them gets this much narrower, near-neutral range instead
+// of the default — a fraction of the force/repulsion swing, so they mix in
+// gently rather than adding a whole new layer of dynamic movement.
+pub const WLP_EXTRA_ATTRACTION: Range<f32> = -0.05..0.15;
+
+// First type index that's "extra" beyond the original 8-type system.
+const FIRST_EXTRA_TYPE: usize = 8;
 
 impl InteractionRules {
     fn random_rule(is_self: bool, attraction_range: Range<f32>, rng: &mut SmallRng) -> InteractionRule {
@@ -53,7 +62,9 @@ impl InteractionRules {
         for i in 0..num_types {
             let mut type_rules = Vec::with_capacity(num_types);
             for j in 0..num_types {
-                type_rules.push(Self::random_rule(i == j, DEFAULT_INTER_TYPE_ATTRACTION, rng));
+                let touches_extra = i >= FIRST_EXTRA_TYPE || j >= FIRST_EXTRA_TYPE;
+                let range = if touches_extra { WLP_EXTRA_ATTRACTION } else { DEFAULT_INTER_TYPE_ATTRACTION };
+                type_rules.push(Self::random_rule(i == j, range, rng));
             }
             rules.push(type_rules);
         }

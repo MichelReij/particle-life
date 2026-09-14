@@ -267,12 +267,12 @@ impl ApplicationHandler for MinimalNativeApp {
                                 if self.simulation_params.is_wlp && !was_wlp {
                                     // HTV -> WLP: give WLP's exclusive types (8/9/10) a fresh
                                     // random roll, same snap-mechanism as major lightning — types
-                                    // 0-7's already-evolving matrix is left untouched. Uses the
-                                    // same default attraction range as everywhere else (an earlier
-                                    // attraction-only bias made WLP look hyperactive rather than
-                                    // organized — no repulsive pairs meant nothing to settle into
-                                    // stable clusters).
-                                    self.rule_evolution.reshuffle_biased(&[8, 9, 10], DEFAULT_INTER_TYPE_ATTRACTION, &mut self.rng);
+                                    // 0-7's already-evolving matrix is left untouched. Uses
+                                    // WLP_EXTRA_ATTRACTION (narrow, near-neutral) rather than the
+                                    // default range: these types add visual variety, not a whole
+                                    // extra layer of dynamic movement on top of the original
+                                    // 8-type baseline.
+                                    self.rule_evolution.reshuffle_biased(&[8, 9, 10], WLP_EXTRA_ATTRACTION, &mut self.rng);
                                 }
                                 let evolution_temp = if self.simulation_params.is_wlp {
                                     sd.to_temperature_wlp()
