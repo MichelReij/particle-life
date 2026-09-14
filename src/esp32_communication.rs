@@ -22,10 +22,15 @@ pub struct ESP32LightningEvent {
     pub start_time: f32,    // When the lightning started (simulation time)
     pub intensity: f32,     // Lightning intensity (0.0 - 1.0)
     pub timestamp: u64,     // System timestamp when detected (milliseconds)
+    // Rough angular position of the bolt's origin around the virtual world's
+    // center, 0-255 mapping to 0-360°. Lets hardware (the neopixel ring) place
+    // its own flash roughly where the bolt appeared on screen instead of at a
+    // fully random spot — not meant to be precise, just roughly correlated.
+    pub position: u8,
 }
 
 impl ESP32LightningEvent {
-    pub fn new(flash_id: u32, lightning_type: u8, start_time: f32, intensity: f32) -> Self {
+    pub fn new(flash_id: u32, lightning_type: u8, start_time: f32, intensity: f32, position: u8) -> Self {
         Self {
             flash_id,
             lightning_type,
@@ -35,6 +40,7 @@ impl ESP32LightningEvent {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64,
+            position,
         }
     }
 
@@ -191,21 +197,23 @@ impl ESP32Manager {
         lightning_type: u8,
         start_time: f32,
         intensity: f32,
+        position: u8,
     ) {
         let lightning_event =
-            ESP32LightningEvent::new(flash_id, lightning_type, start_time, intensity);
+            ESP32LightningEvent::new(flash_id, lightning_type, start_time, intensity, position);
 
         if let Ok(mut state) = self.shared_state.lock() {
             state.pending_lightning_events.push(lightning_event);
             println!(
-                "⚡ ESP32: Queued lightning event (Flash ID: {}, Type: {}, Intensity: {:.2})",
+                "⚡ ESP32: Queued lightning event (Flash ID: {}, Type: {}, Intensity: {:.2}, Position: {})",
                 flash_id,
                 if lightning_type == 1 {
                     "Super"
                 } else {
                     "Normal"
                 },
-                intensity
+                intensity,
+                position
             );
         }
     }
@@ -1322,11 +1330,11 @@ fn send_pending_lightning_events(
         }
     };
 
-    // Send each lightning event as binary LightningPacket (9 bytes):
-    // [0xBB] [flash_id u32 BE] [lightning_type u8] [intensity u16 BE] [0xCC]
+    // Send each lightning event as binary LightningPacket (10 bytes):
+    // [0xBB] [flash_id u32 BE] [lightning_type u8] [intensity u16 BE] [position u8] [0xCC]
     for event in events_to_send {
         let intensity_raw = (event.intensity * 4096.0).clamp(0.0, 4096.0) as u16;
-        let packet: [u8; 9] = [
+        let packet: [u8; 10] = [
             0xBB,
             ((event.flash_id >> 24) & 0xFF) as u8,
             ((event.flash_id >> 16) & 0xFF) as u8,
@@ -1335,6 +1343,7 @@ fn send_pending_lightning_events(
             event.lightning_type,
             ((intensity_raw >> 8) & 0xFF) as u8,
             (intensity_raw        & 0xFF) as u8,
+            event.position,
             0xCC,
         ];
 

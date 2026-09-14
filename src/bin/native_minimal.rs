@@ -497,17 +497,29 @@ impl MinimalNativeApp {
         let renderer = match &mut self.renderer { Some(r) => r, None => return };
         let now = std::time::Instant::now();
 
-        if !self.lightning_polling_enabled || now < self.next_poll_time { return; }
-
+        // The 2s cooldown reset below used to live AFTER the polling_enabled
+        // guard — but sending a flash sets lightning_polling_enabled = false,
+        // and nothing else ever set it back to true, so that guard returned
+        // early forever afterward and the reset code could never run. Net
+        // effect: exactly one lightning event was ever communicated to the
+        // ESP32 for the entire lifetime of the process, no matter how many
+        // bolts fired later. Check the cooldown unconditionally, first.
         if self.lightning_communicated {
             if self.current_time - self.lightning_start_time >= 2.0 {
                 self.lightning_polling_enabled = true;
                 self.lightning_communicated    = false;
-                self.current_flash_id          = 0;
+                // current_flash_id is deliberately NOT reset to 0 here: the GPU's
+                // bolt.flash_id only ever increases, so zeroing it would make the
+                // very next poll re-detect the *same* already-sent bolt as "new"
+                // (its id is still > 0) and resend it every 2s forever instead of
+                // waiting for a genuinely new bolt with a higher id.
                 self.next_poll_time            = now;
+            } else {
+                return;
             }
-            return;
         }
+
+        if !self.lightning_polling_enabled || now < self.next_poll_time { return; }
 
         if now.duration_since(self.last_lightning_poll).as_millis() < 100 { return; }
         self.last_lightning_poll = now;
@@ -526,7 +538,19 @@ impl MinimalNativeApp {
                         console_log!("⚡ Super-lightning: regels gesnapt");
                     }
 
-                    self.communicate_lightning_to_esp32(bolt.flash_id, bolt.is_super(), bolt.start_time);
+                    // Rough "where did this happen" location for the neopixel
+                    // ring, so its flash lines up with the on-screen bolt
+                    // instead of landing at a random spot on the ring — see
+                    // read_lightning_origin_uv() for what this reads.
+                    let position_byte = match pollster::block_on(renderer.read_lightning_origin_uv()) {
+                        Ok((u, v)) => {
+                            let angle = (v - 0.5).atan2(u - 0.5); // -PI..PI
+                            (((angle + std::f32::consts::PI) / (2.0 * std::f32::consts::PI)) * 255.0) as u8
+                        }
+                        Err(_) => 0,
+                    };
+
+                    self.communicate_lightning_to_esp32(bolt.flash_id, bolt.is_super(), bolt.start_time, position_byte);
                     self.lightning_communicated    = true;
                     self.lightning_polling_enabled = false;
                 }
@@ -545,11 +569,12 @@ impl MinimalNativeApp {
         }
     }
 
-    fn communicate_lightning_to_esp32(&self, flash_id: u32, is_super: bool, start_time: f32) {
+    fn communicate_lightning_to_esp32(&self, flash_id: u32, is_super: bool, start_time: f32, position_byte: u8) {
         if let Some(esp32) = &self.esp32_manager {
             esp32.send_lightning_event(
                 flash_id, if is_super { 1 } else { 0 }, start_time,
                 if is_super { 1.0 } else { 0.7 },
+                position_byte,
             );
         }
     }

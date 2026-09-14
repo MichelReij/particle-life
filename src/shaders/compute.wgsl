@@ -640,9 +640,9 @@ fn bell_random(seed: u32, n: u32) -> f32 {
 // (must stay in sync with those — see particle_system::NUM_TYPES = 11). HTV keeps
 // spawning only types 0-7 exactly as before; WLP spawns types 0-4 (shared baseline)
 // plus its exclusive 8-10, never 5-7. Weights need not sum to 1.0 — normalized below.
-const HTV_TYPE_WEIGHTS = array<f32, 11>(0.22, 0.15, 0.11, 0.08, 0.18, 0.08, 0.15, 0.10, 0.0, 0.0, 0.0);
-const WLP_TYPE_WEIGHTS = array<f32, 11>(0.22, 0.15, 0.11, 0.08, 0.18, 0.0, 0.0, 0.0, 0.08, 0.15, 0.10);
-const TYPE_SIZE_MULTIPLIERS = array<f32, 11>(1.4, 2.2, 0.4, 0.7, 1.0, 1.8, 0.6, 1.2, 2.6, 0.5, 1.5);
+const HTV_TYPE_WEIGHTS = array<f32, 11>(0.22, 0.15, 0.11, 0.08, 0.18, 0.08, 0.15, 0.10, 0.03, 0.02, 0.01);
+const WLP_TYPE_WEIGHTS = array<f32, 11>(0.12, 0.19, 0.15, 0.18, 0.08, 0.02, 0.01, 0.05, 0.08, 0.15, 0.10);
+const TYPE_SIZE_MULTIPLIERS = array<f32, 11>(1.4, 1.9, 0.5, 0.8, 1.0, 1.8, 0.7, 1.2, 1.7, 0.6, 1.5);
 
 // Weighted pick of a particle type index, mirroring the cumulative-threshold
 // approach in particle_system.rs's ParticleSystem::new().

@@ -52,15 +52,15 @@ const PARTICLE_TYPE_WEIGHTS: [f32; NUM_TYPES] = [
 
 const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; NUM_TYPES] = [
     1.4, // Type 0: Blue
-    2.2, // Type 1: Yellow
-    0.4, // Type 2: Red
-    0.7, // Type 3: Purple
+    1.9, // Type 1: Yellow
+    0.5, // Type 2: Red
+    0.8, // Type 3: Purple
     1.0, // Type 4: Green
     1.8, // Type 5: Olive
-    0.6, // Type 6: Cyan
+    0.7, // Type 6: Cyan
     1.2, // Type 7: Blue-green
-    2.6, // Type 8: WLP-only — large "photosynthetic bloom"
-    0.5, // Type 9: WLP-only — tiny "microbial"
+    1.7, // Type 8: WLP-only — large "photosynthetic bloom"
+    0.6, // Type 9: WLP-only — tiny "microbial"
     1.5, // Type 10: WLP-only — medium
 ];
 
@@ -68,17 +68,17 @@ const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; NUM_TYPES] = [
 // Types 0-7 are HTV's palette; 8-10 are WLP-exclusive tones, contrasting with
 // the HTV palette above them.
 const DEFAULT_COLORS: [[f32; 3]; NUM_TYPES] = [
-    [0.4602, 0.6745, 0.5824], // #75ac95 - Blue
-    [0.9295, 0.8680, 0.6701], // #edddab - Yellow
-    [0.8097, 0.4168, 0.5260], // #ce6a86 - Red
-    [0.6729, 0.4512, 0.6373], // #ac73a3 - Purple
-    [0.3557, 0.6904, 0.4759], // #5bb079 - Green
-    [0.5786, 0.6402, 0.4325], // #94a36e - Olive green
-    [0.4899, 0.5695, 0.6537], // #7d91a7 - Orange
-    [0.7424, 0.6727, 0.8127], // #bdaccf - WLP: lavender
-    [1.0000, 0.7363, 0.7390], // #ffbcbc - WLP: pink
-    [0.8845, 0.5614, 0.8610], // #e28fdc - WLP: orchid
-    [0.6577, 0.8178, 0.9299], // #a8d1ed - WLP: sky blue
+    [0.4435, 0.6471, 0.5528], // #71a58d - Blue
+    [0.8435, 0.7671, 0.4956], // #d7c47e - Yellow
+    [0.7540, 0.2949, 0.4556], // #c04b74 - Red
+    [0.6598, 0.3962, 0.6094], // #a8659b - Purple
+    [0.3153, 0.6550, 0.4474], // #50a772 - Green
+    [0.5254, 0.5925, 0.4079], // #869768 - Olive green
+    [0.4112, 0.5815, 0.7227], // #6994b8 - Orange
+    [0.6332, 0.5649, 0.6777], // #a190ad - WLP: lavender
+    [0.5224, 0.6671, 0.7465], // #85aabe - WLP: sky blue
+    [0.6478, 0.6650, 0.1350], // #a5aa22 - WLP: olive-yellow
+    [0.5414, 0.4696, 0.6847], // #8a78af - WLP: violet
 ];
 
 #[derive(Debug)]
