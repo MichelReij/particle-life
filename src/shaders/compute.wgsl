@@ -585,8 +585,14 @@ fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: v
         // Reduced from 20.0 to 10.0
     }
 
-    // Apply electrical activity scaling and generation effects (reduced multiplier)
-    let repulsion_strength = base_strength * sim_params.inter_type_attraction_scale * (1.0 + f32(generation) * 0.1);
+    // Scale by lightning_intensity (always positive, 0.5-2.0, rises monotonically
+    // with electrical activity) rather than inter_type_attraction_scale — that's a
+    // bell-curve-derived value that goes negative or near-zero across most of the
+    // activity range (same root cause as the earlier lightning_compute.wgsl
+    // frequency bug), which was turning this repulsion into a near-zero or even
+    // attractive force and left a few particles lingering near active segments
+    // instead of being pushed away.
+    let repulsion_strength = base_strength * sim_params.lightning_intensity * (1.0 + f32(generation) * 0.1);
     let repulsion_force_uv = repulsion_direction * distance_factor * repulsion_strength;
 
     // Convert force back to world coordinates
