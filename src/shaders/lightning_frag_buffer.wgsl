@@ -173,7 +173,13 @@ fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thic
         // Combine core and edge with different intensities
         let segmentIntensity = max(coreIntensity, edgeIntensity * 0.4) * alpha;
 
-        return vec4<f32>(color, segmentIntensity);
+        // White-hot core fading to the violet halo colour toward the edge —
+        // real lightning reads as a bright white thread with a coloured
+        // glow around it, not a flat single-colour line.
+        let coreColor = vec3<f32>(1.0, 1.0, 1.0);
+        let blendedColor = mix(color, coreColor, coreIntensity);
+
+        return vec4<f32>(blendedColor, segmentIntensity);
     }
 
     return vec4<f32>(0.0, 0.0, 0.0, 0.0);
@@ -200,7 +206,15 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
 
-    var finalColor = vec3<f32>(1.0, 1.0, 1.0);
+    // Electric violet rather than flat white: WLP's background (the only
+    // hypothesis lightning appears in) is now quite pale after this
+    // session's colour tuning, so a plain white bolt alpha-blended onto an
+    // already near-white background had almost no visible contrast. This
+    // vivid blue-violet reads clearly against both the pale WLP background
+    // and darker scenes, and matches the neopixel ring's own lightning-flash
+    // colour (see NEO_FLASH_L/C/H in platformio's NeoPixelDriver.h) for a
+    // consistent "electric" look between the simulation and the installation.
+    var finalColor = vec3<f32>(0.541, 0.169, 0.886);
     var finalAlpha = 0.0;
 
     // Draw all segments from the buffer - segments are now in UV coordinates
@@ -212,8 +226,7 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             continue;
         }
 
-        // Simple white lightning - much cheaper than conditional color logic
-        let segmentColor = vec3<f32>(1.0, 1.0, 1.0);
+        let segmentColor = vec3<f32>(0.541, 0.169, 0.886);
         let segmentResult = drawSegment(uv, segment.start_pos, segment.end_pos, segment.alpha, segment.thickness, segmentColor);
 
         // Accumulate lightning contributions
@@ -223,6 +236,13 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
     // Apply lightning intensity
     finalAlpha *= sim_params.lightning_intensity;
+
+    // Overall opacity boost: away from a segment's exact 1px centerline,
+    // drawSegment()'s edge falloff only contributes 0.4x intensity, and
+    // segment.alpha itself is 0.7-1.0 at best — multiplied together most of
+    // a bolt's visible area sits around ~0.3-0.5 effective opacity, which
+    // reads as quite washed-out against WLP's now much paler background.
+    finalAlpha = min(finalAlpha * 2.2, 1.0);
 
     if (finalAlpha <= 0.0) {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);

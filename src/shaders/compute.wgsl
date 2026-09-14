@@ -409,6 +409,61 @@ fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32, p_idx: u32) -
 
 // === Lightning Electromagnetic Force Functions ===
 
+// UV-space radius around a segment's centerline counted as "inside the bolt's
+// discharge core" — see the call site in main() for why these particles are
+// teleported rather than pushed by a force.
+const LIGHTNING_ZAP_RADIUS_UV: f32 = 0.008;
+
+// Is this particle sitting inside the actual discharge path of the active
+// lightning bolt right now? Mirrors calculateLightningElectromagneticForce's
+// segment iteration/timing but only measures distance — no force, no NaN risk
+// at distance 0.
+fn isInsideLightningCore(particle_pos: vec2<f32>, time: f32) -> bool {
+    if (sim_params.lightning_frequency <= 0.0 || lightning_bolt.num_segments == 0u) {
+        return false;
+    }
+
+    let bolt = lightning_bolt;
+    let bolt_age = time - bolt.start_time;
+    let flash_duration = sim_params.lightning_duration;
+    if (bolt_age < 0.0 || bolt_age > flash_duration) {
+        return false;
+    }
+
+    let particle_uv = vec2<f32>(particle_pos.x / sim_params.virtual_world_width, 1.0 - (particle_pos.y / sim_params.virtual_world_height));
+
+    for (var seg_idx = 0u; seg_idx < bolt.num_segments; seg_idx++) {
+        let segment = lightning_segments[seg_idx];
+        if (segment.is_visible == 0u) {
+            continue;
+        }
+
+        let segment_age = time - segment.appear_time;
+        let segment_duration = flash_duration * 0.8;
+        if (segment_age < 0.0 || segment_age > segment_duration) {
+            continue;
+        }
+
+        let segment_vec = segment.end_pos - segment.start_pos;
+        let segment_length = length(segment_vec);
+        if (segment_length < 0.001) {
+            continue;
+        }
+
+        let segment_dir = segment_vec / segment_length;
+        let to_particle = particle_uv - segment.start_pos;
+        let projection = clamp(dot(to_particle, segment_dir), 0.0, segment_length);
+        let closest_point = segment.start_pos + segment_dir * projection;
+        let distance_uv = length(particle_uv - closest_point);
+
+        if (distance_uv < LIGHTNING_ZAP_RADIUS_UV) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Calculate electromagnetic force from lightning on a particle (buffer-based)
 fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, particle_vel: vec2<f32>, time: f32, particle_type: u32) -> vec2<f32> {
     // Early exit if lightning is disabled or no active segments
@@ -668,6 +723,38 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (particle_p.is_active != 1u) {
         // Force it to 1 if it's not 0 or 1 (corrupted data)
         particle_p.is_active = 1u;
+    }
+
+    // Particles sitting almost exactly on a lightning segment's centerline are
+    // inside the bolt's actual discharge core. calculateSegmentElectromagneticForce
+    // below is a smooth repulsion FIELD whose direction is undefined (and whose
+    // strength effectively vanishes) right at distance 0 — so those particles were
+    // visibly untouched while particles a short distance away got flung outward,
+    // as if the bolt had a "safe" hole through its own middle. Real lightning
+    // obliterates whatever sits in its actual discharge path; mirroring that,
+    // teleport these particles straight to the respawn edge instead of trying to
+    // accelerate them out through a singular force field.
+    if (isInsideLightningCore(particle_p.pos, sim_params.time)) {
+        particle_p.vel = vec2<f32>(0.0, 0.0);
+        particle_p.spawn_time = sim_params.time;
+
+        let type_seed = hash(global_id.x * 61u + u32(sim_params.time * 1000.0) + particle_p.ptype * 43u);
+        particle_p.ptype = weighted_type_pick(type_seed, sim_params.is_wlp > 0.5);
+        let size_jitter = random_range(hash(type_seed + 1u), -0.4, 0.4);
+        let new_size = sim_params.particle_render_size * TYPE_SIZE_MULTIPLIERS[particle_p.ptype] * (1.0 + size_jitter);
+        particle_p.target_size = new_size;
+        particle_p.size = new_size;
+
+        if (sim_params.drift_x_per_second > EPSILON) {
+            particle_p.pos.x = 0.0;
+        } else {
+            particle_p.pos.x = sim_params.virtual_world_width - 1.0;
+        }
+        let bell_seed = hash(global_id.x * 103u + u32(sim_params.time * 1000.0) + particle_p.ptype * 59u);
+        particle_p.pos.y = bell_random(bell_seed, 2u) * sim_params.virtual_world_height;
+
+        particles_out[p_idx] = particle_p;
+        return;
     }
 
     var total_force = vec2<f32>(0.0, 0.0);

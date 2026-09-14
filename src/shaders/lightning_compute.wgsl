@@ -170,7 +170,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    let electricalActivity = sim_params.inter_type_attraction_scale;
+    // NOTE: this used to read sim_params.inter_type_attraction_scale, a
+    // derived bell-curve quantity (~-1.0 to +0.5, WLP-optimum-centred) that
+    // is NOT the same thing as electrical activity despite the variable name
+    // here — it went negative (disabling lightning entirely, see the check
+    // below) across most of the electrical-activity slider's range,
+    // including at max activity, and compressed the interval math below
+    // toward its slowest setting even in the best case. lightning_frequency
+    // is already the correct raw normalized (0-1) electrical activity value
+    // for WLP (and already 0 for HTV, so this stays WLP-only).
+    let electricalActivity = sim_params.lightning_frequency;
     if (electricalActivity <= 0.0) {
         lightning_bolt.num_segments = 0u;
         return;
@@ -182,15 +191,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // *** SUPER LIGHTNING MODE ***
     // When super lightning is active, create much more intense storms
 
-    // Calculate normalized activity first (needed in both modes)
-    let normalized_activity = clamp(electricalActivity / 3.0, 0.0, 1.0);
+    // Calculate normalized activity first (needed in both modes).
+    // electricalActivity (lightning_frequency) is already normalized 0-1 —
+    // no further division needed (this used to divide by 3.0 again, which
+    // silently compressed everything down to the 0-0.33 range).
+    let normalized_activity = clamp(electricalActivity, 0.0, 1.0);
 
     // Normal lightning behavior - super lightning is just normal lightning with more branches
     let super_lightning_multiplier = 1.0;
 
-    // Calculate interval based on electrical activity with much more variation
-    // electricalActivity typically ranges from 0.0 to ~3.0 based on UI slider
-    // Map to intervals: 15s (min activity ~0.0) to 2s (max activity ~3.0)
+    // Calculate interval based on electrical activity with much more variation.
+    // electricalActivity is normalized 0-1 (see the fix above) — 16s interval
+    // at zero activity down to 1s at max activity.
     let base_interval = 16.0 - (normalized_activity * 15.0);
 
     // Initialize next lightning time if not set (first time or after reset)

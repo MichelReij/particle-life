@@ -11,13 +11,13 @@
         "background_native": {
             "l_htv": 0.92,
             "c_htv": 0.09,
-            "l_wlp": 0.92,
+            "l_wlp": 0.85,
             "c_wlp": 0.09
         },
         "background_wasm": {
             "l_htv": 0.97,
             "c_htv": 0.05,
-            "l_wlp": 0.97,
+            "l_wlp": 0.85,
             "c_wlp": 0.05
         }
     },

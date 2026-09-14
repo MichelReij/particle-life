@@ -93,5 +93,22 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
 
     // night_alpha already encodes the fade-in/out envelope — use it to
     // scale the band so darkness matches the simulation's own timing.
-    return vec4<f32>(0.0, 0.0, 0.0, night * sim_params.night_alpha);
+    var alpha = night * sim_params.night_alpha;
+
+    // Ordered (Bayer) dither: an 8-bit framebuffer only has 256 alpha steps,
+    // and this overlay's smoothstep gradients are wide and slow-moving —
+    // without dithering the quantization shows up as visible banded rings.
+    // Adding a tiny per-pixel offset before quantization breaks the bands
+    // into fine-grained noise the eye perceives as smooth.
+    let bayer = array<f32, 16>(
+        0.0 / 16.0, 8.0 / 16.0, 2.0 / 16.0, 10.0 / 16.0,
+        12.0 / 16.0, 4.0 / 16.0, 14.0 / 16.0, 6.0 / 16.0,
+        3.0 / 16.0, 11.0 / 16.0, 1.0 / 16.0, 9.0 / 16.0,
+        15.0 / 16.0, 7.0 / 16.0, 13.0 / 16.0, 5.0 / 16.0
+    );
+    let px_coord = vec2<u32>(frag_coord.xy) % vec2<u32>(4u, 4u);
+    let dither = (bayer[px_coord.y * 4u + px_coord.x] - 0.5) / 255.0;
+    alpha = clamp(alpha + dither, 0.0, 1.0);
+
+    return vec4<f32>(0.0, 0.0, 0.0, alpha);
 }
