@@ -178,6 +178,8 @@ pub struct WebGpuRenderer {
     interaction_rules_buffer: wgpu::Buffer,
     lightning_segments_buffer: wgpu::Buffer,
     lightning_bolt_buffer: wgpu::Buffer,
+    position_reroll_buffer: wgpu::Buffer,
+    next_position_reroll_generation: u32,
     particle_colors_buffer: wgpu::Buffer,
     quad_vertex_buffer: wgpu::Buffer,
 
@@ -430,6 +432,25 @@ impl WebGpuRenderer {
             mapped_at_creation: false,
         });
 
+        // Layout matches compute.wgsl's PositionReroll struct exactly:
+        //   [0] pending_generation: u32  — CPU-owned, bumped on every transition
+        //   [1] trigger_time: f32        — CPU-owned, sim time the pulse fired
+        //   [2] consumed_generation: u32 — GPU-owned, set once the whole reroll
+        //                                  window has elapsed
+        //   [3] _padding: f32
+        // CPU writes only bytes 0-7 (pending_generation + trigger_time) via
+        // trigger_position_reroll — never touches consumed_generation, so the
+        // GPU-side value can't get clobbered by a later CPU write.
+        // Drives the "vanish and reappear at a random new position, with a
+        // freshly rerolled type/size" wave — each particle stages a
+        // shrink-then-grow (see compute.wgsl's POSITION_REROLL_WINDOW) at its
+        // own staggered moment.
+        let position_reroll_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Position Reroll Buffer"),
+            contents: bytemuck::cast_slice(&[0u32, 0u32, 0u32, 0u32]),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        });
+
         // GPU uniform-grid bucket sort (zie spatial_grid_build.wgsl + compute.wgsl
         // binding 6-8). grid_cell_count/grid_fill_cursor zijn atomic<u32> in WGSL —
         // qua GPU-geheugen gewoon plain u32, dus geen aparte usage-flags nodig.
@@ -546,6 +567,9 @@ impl WebGpuRenderer {
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
                 wgpu::BindGroupLayoutEntry { binding: 8, visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None }, count: None },
+                // Hypothesis-transition "vanish and reappear elsewhere" pulse (see position_reroll_buffer).
+                wgpu::BindGroupLayoutEntry { binding: 10, visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: false }, has_dynamic_offset: false, min_binding_size: None }, count: None },
             ],
         });
 
@@ -631,6 +655,7 @@ impl WebGpuRenderer {
                     wgpu::BindGroupEntry { binding: 6, resource: grid_cell_start_buffer.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 7, resource: grid_cell_count_buffer.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 8, resource: grid_particle_indices_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 10, resource: position_reroll_buffer.as_entire_binding() },
                 ],
             }),
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -645,6 +670,7 @@ impl WebGpuRenderer {
                     wgpu::BindGroupEntry { binding: 6, resource: grid_cell_start_buffer.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 7, resource: grid_cell_count_buffer.as_entire_binding() },
                     wgpu::BindGroupEntry { binding: 8, resource: grid_particle_indices_buffer.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 10, resource: position_reroll_buffer.as_entire_binding() },
                 ],
             }),
         ];
@@ -989,6 +1015,8 @@ impl WebGpuRenderer {
             interaction_rules_buffer,
             lightning_segments_buffer,
             lightning_bolt_buffer,
+            position_reroll_buffer,
+            next_position_reroll_generation: 1,
             particle_colors_buffer,
             quad_vertex_buffer,
             lightning_detector: LightningDetector::new(),
@@ -1320,6 +1348,24 @@ impl WebGpuRenderer {
         drop(data);
         staging.unmap();
         Ok((uv[0], uv[1]))
+    }
+
+    /// Bumps the position-reroll generation counter and pushes it (+ the
+    /// current sim time) to the GPU — every particle will vanish and
+    /// reappear at a random new position, with a freshly rerolled type/size
+    /// (from the currently-active hypothesis's weight table), at its own
+    /// randomly staggered moment within the next POSITION_REROLL_WINDOW
+    /// seconds (see compute.wgsl), rather than all at once. Call this right
+    /// when a hypothesis transition is detected (HTV<->WLP).
+    pub fn trigger_position_reroll(&mut self, current_time: f32) {
+        self.next_position_reroll_generation = self.next_position_reroll_generation.wrapping_add(1);
+        if self.next_position_reroll_generation == 0 {
+            self.next_position_reroll_generation = 1;
+        }
+        let mut bytes = [0u8; 8];
+        bytes[0..4].copy_from_slice(&self.next_position_reroll_generation.to_le_bytes());
+        bytes[4..8].copy_from_slice(&current_time.to_le_bytes());
+        self.queue.write_buffer(&self.position_reroll_buffer, 0, &bytes);
     }
 
     pub fn poll_lightning_events(&mut self) -> Vec<LightningEvent> { self.lightning_detector.poll_events() }

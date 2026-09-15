@@ -482,6 +482,16 @@ impl ParticleLifeEngine {
             // native/ESP32-driven hook.
             self.rule_evolution.reshuffle_biased(&[8, 9, 10], interaction_rules::WLP_EXTRA_ATTRACTION, &mut self.rng);
         }
+        if self.simulation_params.is_wlp != was_wlp {
+            // Every hypothesis transition (either direction): every particle
+            // vanishes and reappears at a random new position, staggered
+            // over a few seconds, with a freshly rerolled type/size matching
+            // the new hypothesis — instead of waiting for the usual gradual
+            // edge-respawn turnover.
+            if let Some(ref mut renderer) = self.renderer {
+                renderer.trigger_position_reroll(self.simulation_params.time);
+            }
+        }
     }
 
     #[wasm_bindgen]
@@ -836,8 +846,13 @@ impl ParticleLifeEngine {
     #[wasm_bindgen] pub fn get_flat_force(&self) -> bool { self.simulation_params.flat_force }
 
     #[wasm_bindgen] pub fn set_drift_x_per_second(&mut self, v: f32) { self.simulation_params.drift_x_per_second = v; }
-    #[wasm_bindgen] pub fn set_friction(&mut self, v: f32) { self.simulation_params.friction = v.max(0.01).min(1.0); }
-    #[wasm_bindgen] pub fn set_force_scale(&mut self, v: f32) { self.simulation_params.force_scale = v.max(100.0).min(500.0); }
+    // Clamps widened to match the more extreme friction/force_scale curves in
+    // simulation_params.rs (apply_temperature_*/apply_pressure_*) — were stuck
+    // at the old [0.01,1.0]/[100,500] ranges, which silently clipped manual
+    // "Technical parameters" slider drags back up before they reached the new
+    // lower ends (friction→0.001, force_scale→80).
+    #[wasm_bindgen] pub fn set_friction(&mut self, v: f32) { self.simulation_params.friction = v.max(0.001).min(1.0); }
+    #[wasm_bindgen] pub fn set_force_scale(&mut self, v: f32) { self.simulation_params.force_scale = v.max(80.0).min(400.0); }
     #[wasm_bindgen] pub fn set_r_smooth(&mut self, v: f32) { self.simulation_params.r_smooth = v.max(0.1).min(20.0); }
     #[wasm_bindgen] pub fn set_inter_type_attraction_scale(&mut self, v: f32) { self.simulation_params.inter_type_attraction_scale = v.max(-3.0).min(3.0); }
     #[wasm_bindgen] pub fn set_inter_type_radius_scale(&mut self, v: f32) { self.simulation_params.inter_type_radius_scale = v.max(0.1).min(2.0); }

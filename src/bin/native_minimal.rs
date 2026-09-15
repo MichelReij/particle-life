@@ -274,6 +274,16 @@ impl ApplicationHandler for MinimalNativeApp {
                                     // 8-type baseline.
                                     self.rule_evolution.reshuffle_biased(&[8, 9, 10], WLP_EXTRA_ATTRACTION, &mut self.rng);
                                 }
+                                if self.simulation_params.is_wlp != was_wlp {
+                                    // Every hypothesis transition (either direction): every
+                                    // particle vanishes and reappears at a random new position,
+                                    // staggered over a few seconds, with a freshly rerolled
+                                    // type/size matching the new hypothesis — instead of waiting
+                                    // for the usual gradual edge-respawn turnover.
+                                    if let Some(ref mut renderer) = self.renderer {
+                                        renderer.trigger_position_reroll(self.current_time);
+                                    }
+                                }
                                 let evolution_temp = if self.simulation_params.is_wlp {
                                     sd.to_temperature_wlp()
                                 } else {

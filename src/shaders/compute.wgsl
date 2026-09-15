@@ -193,6 +193,27 @@ var<storage, read> grid_cell_count: array<u32>;
 @group(0) @binding(8)
 var<storage, read> grid_particle_indices: array<u32>;
 
+// CPU bumps pending_generation + trigger_time on a HTV<->WLP hypothesis
+// transition (see WebGpuRenderer::trigger_position_reroll) and never touches
+// consumed_generation again. Each particle picks its own random moment within
+// POSITION_REROLL_WINDOW to stage a shrink transition; the existing shrink-
+// complete logic chains straight into a grow transition (see main()) instead
+// of deactivating for good, which both picks a fresh random position AND
+// rerolls the particle's type/size from the now-active hypothesis's weight
+// table — a single "vanish and come back as something else, somewhere else"
+// effect instead of two separately-timed ones. Thread 0 sets
+// consumed_generation = pending_generation once the whole window has
+// elapsed, self-clearing with no CPU round-trip needed.
+struct PositionReroll {
+    pending_generation: u32,
+    trigger_time: f32,
+    consumed_generation: u32,
+    _padding: f32,
+}
+@group(0) @binding(10)
+var<storage, read_write> position_reroll: PositionReroll;
+const POSITION_REROLL_WINDOW: f32 = 5.0;
+
 const PI: f32 = 3.141592653589793;
 const EPSILON: f32 = 0.001;
 // To avoid division by zero or sqrt(0)
@@ -645,12 +666,12 @@ fn bell_random(seed: u32, n: u32) -> f32 {
 // look less abrupt) — instead it just blurred the one thing that made WLP
 // and HTV visibly distinct populations, without actually calming anything
 // down, since the interaction matrix was still the full 11x11 either way.
-const HTV_TYPE_WEIGHTS = array<f32, 11>(0.22, 0.15, 0.11, 0.08, 0.18, 0.08, 0.15, 0.10, 0.0, 0.0, 0.0);
+const HTV_TYPE_WEIGHTS = array<f32, 11>(0.22, 0.06, 0.14, 0.08, 0.18, 0.08, 0.15, 0.10, 0.03, 0.02, 0.08);
 // Types 8-10's weights were 0.08/0.15/0.10 (~31% of the WLP population) —
 // a third of all particles being the new "extra" types was a big chunk of
 // the visible activity regardless of how gentle their forces are. Cut down
 // to a small accent (~16%) instead.
-const WLP_TYPE_WEIGHTS = array<f32, 11>(0.12, 0.19, 0.15, 0.18, 0.08, 0.0, 0.0, 0.0, 0.04, 0.06, 0.04);
+const WLP_TYPE_WEIGHTS = array<f32, 11>(0.12, 0.19, 0.15, 0.18, 0.08, 0.04, 0.03, 0.06, 0.04, 0.06, 0.04);
 const TYPE_SIZE_MULTIPLIERS = array<f32, 11>(1.4, 1.9, 0.5, 0.8, 1.0, 1.8, 0.7, 1.2, 1.7, 0.6, 1.5);
 
 // Weighted pick of a particle type index, mirroring the cumulative-threshold
@@ -713,9 +734,19 @@ fn check_and_randomize_rules() {
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let p_idx = global_id.x;
 
+    // A reroll pulse is "in flight" for the whole POSITION_REROLL_WINDOW
+    // after trigger_time — each particle below picks its own random moment
+    // inside that window, so the actual per-particle reroll happens on at
+    // most one frame, not on every frame the pulse is in flight.
+    let pos_reroll_in_flight = position_reroll.pending_generation != position_reroll.consumed_generation;
+    let pos_reroll_elapsed = sim_params.time - position_reroll.trigger_time;
+
     // Only thread 0 checks for super lightning and randomizes rules (avoid race conditions)
     if (p_idx == 0u) {
         check_and_randomize_rules();
+        if (pos_reroll_in_flight && pos_reroll_elapsed >= POSITION_REROLL_WINDOW) {
+            position_reroll.consumed_generation = position_reroll.pending_generation;
+        }
     }
 
     // Synchronize workgroup to ensure rule changes are visible to all threads
@@ -738,6 +769,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (particle_p.is_active != 1u) {
         // Force it to 1 if it's not 0 or 1 (corrupted data)
         particle_p.is_active = 1u;
+    }
+
+    // Hypothesis transition: stage a shrink transition at this particle's own
+    // staggered moment within POSITION_REROLL_WINDOW — the shrink-complete
+    // branch below (see "Handle per-particle transitions") chains straight
+    // into a grow transition instead of deactivating, which is what actually
+    // gives it a fresh random position, AND rerolls its type/size from the
+    // now-active hypothesis's weight table — a single "vanish and come back
+    // as something else, somewhere else" effect. Skipped if a transition is
+    // already running, to avoid stomping on an ordinary pressure-driven
+    // grow/shrink that happens to be mid-flight for this particle.
+    if (pos_reroll_in_flight && particle_p.transition_start <= 0.0) {
+        let pos_delay_seed = hash(global_id.x * 113u + position_reroll.pending_generation * 149u);
+        let personal_pos_delay = random_float(pos_delay_seed) * POSITION_REROLL_WINDOW;
+        if (pos_reroll_elapsed >= personal_pos_delay && (pos_reroll_elapsed - sim_params.delta_time) < personal_pos_delay) {
+            particle_p.transition_start = sim_params.time;
+            particle_p.transition_type = 1u; // shrink; chains to grow on completion
+        }
     }
 
     // Particles sitting almost exactly on a lightning segment's centerline are
@@ -1193,11 +1242,36 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // is_active already set to 1u above
             }
             else {
-                // Shrink complete: deactivate particle and clear transition
-                particle_p.is_active = 0u;
-                // Deactivate at END of shrink transition
+                // Shrink complete.
                 particle_p.size = 0.1;
-                particle_p.transition_start = 0.0;
+                if (global_id.x < sim_params.num_particles) {
+                    // This index is still supposed to be part of the active
+                    // population — this was a position-reroll-triggered
+                    // shrink (not a genuine particle-count reduction, which
+                    // always targets indices >= num_particles), so chain
+                    // straight into a grow transition instead of staying
+                    // deactivated. Crucially, is_active stays 1u here: the
+                    // early-return at the top of main() skips ALL further
+                    // processing (including this very transition code) for
+                    // inactive particles, so setting it to 0u would strand
+                    // this particle mid-chain, never reaching the grow branch
+                    // that revives it. The grow branch above picks a fresh
+                    // random position/velocity on its own; reroll its
+                    // type/size here too, from the now-active hypothesis's
+                    // weight table, so the whole "vanish and reappear" reads
+                    // as one effect.
+                    particle_p.transition_start = sim_params.time;
+                    particle_p.transition_type = 0u;
+                    let type_seed = hash(global_id.x * 83u + position_reroll.pending_generation + particle_p.ptype * 47u);
+                    particle_p.ptype = weighted_type_pick(type_seed, sim_params.is_wlp > 0.5);
+                    let size_jitter = random_range(hash(type_seed + 1u), -0.4, 0.4);
+                    let new_size = sim_params.particle_render_size * TYPE_SIZE_MULTIPLIERS[particle_p.ptype] * (1.0 + size_jitter);
+                    particle_p.target_size = new_size;
+                } else {
+                    // Genuine population shrink: deactivate for good.
+                    particle_p.is_active = 0u;
+                    particle_p.transition_start = 0.0;
+                }
             }
         }
     }

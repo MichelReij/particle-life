@@ -137,13 +137,16 @@ function temperatureToDrift(temp: number): number {
 }
 
 function temperatureToFriction(temp: number): number {
-    // Exponential mapping: temp [3, 160] → friction [0.98, 0.05]
-    // At temp = 3°C: friction = 0.98 (highest resistance, near total fixation)
-    // At temp = 160°C: friction = 0.05 (lowest resistance)
-    // Scale factor applied to maintain same effect: (40-3)/(160-3) = 37/157 ≈ 0.2357
+    // Legacy fallback, only used when the Rust engine's setTemperature
+    // callback isn't wired up (see updateDriftAndFrictionFromTemperature) —
+    // on the main page it always is, so this path shouldn't execute there.
+    // Also HTV-only (predates the WLP/HTV split) and doesn't apply the
+    // pressure modifier, so it can never exactly match simulation_params.rs's
+    // apply_temperature_htv. Numbers nudged toward the same [~1.0, ~0.001]
+    // extremes for rough consistency if this ever does run.
     const effectiveTemp = 3 + (temp - 3) * (37 / 157); // Map [3,160] to [3,40] equivalent
     const normalizedTemp = (effectiveTemp - 3) / 37; // Normalize to [0, 1]
-    return 0.98 * Math.exp(-3.0 * normalizedTemp); // Exponential decay from 0.98 to 0.05
+    return Math.exp(-6.9078 * normalizedTemp * normalizedTemp);
 }
 
 function oklchToRgb(L: number, C: number, H: number): { r: number; g: number; b: number } {
@@ -184,8 +187,10 @@ function pressureToRSmooth(pressure: number): number {
 }
 
 function pressureToForceScale(pressure: number): number {
-    // Linear mapping: pressure [0, 1000] → forceScale [100, 500]
-    return 100 + (pressure * 400) / 1000;
+    // Legacy fallback (see temperatureToFriction above) — HTV-only, only used
+    // when setPressure isn't wired up. Nudged to match apply_pressure_htv's
+    // current [80, 400] range (was the pre-tuning [100, 500]).
+    return 80 + (pressure * 320) / 1000;
 }
 
 // Electrical Activity mapping functions - NOW CONTROLS ATTRACTION SCALE
@@ -330,7 +335,9 @@ function updateDriftAndFrictionFromTemperature(temp: number): void {
     const frictionValueDisplay = document.getElementById("frictionValue");
     if (frictionSlider && frictionValueDisplay) {
         frictionSlider.value = newFriction.toString();
-        frictionValueDisplay.textContent = newFriction.toFixed(2);
+        // 3 decimals, not 2 — the new friction range goes down to ~0.001,
+        // which toFixed(2) would round away to "0.00".
+        frictionValueDisplay.textContent = newFriction.toFixed(3);
     }
 }
 

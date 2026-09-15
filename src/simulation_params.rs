@@ -444,20 +444,26 @@ impl SimulationParams {
         let drift = -((clamped_temp - 3.0) * 60.0) / 157.0;
         self.drift_x_per_second = drift;
 
-        // 2. Update friction: stays high until ~80°C, then drops sharply toward max.
-        // Uses normalized_temp² so the curve hangs high and only plunges near the top.
-        // Two-point fit (amplitude A + decay k solved together) so that, combined
-        // with the ×0.500 pressure modifier at 1000 bar:
-        //   105°C (life-zone reference) → final friction = 0.1
-        //   160°C (max, "oververhit")   → final friction = 0.02 — deliberately
-        //     chaotic at the extreme, unlike the calmer optimum.
-        // 3°C → ~0.65  |  80°C → ~0.33  |  105°C → ~0.20  |  120°C → ~0.14  |  160°C → ~0.04 (base, before pressure modifier)
-        let normalized_temp = (clamped_temp - 3.0) / 157.0;
-        let t = normalized_temp * normalized_temp;
-        let friction = 0.6479 * (-2.7849 * t).exp();
+        // 2. Update friction: friction is temperature-ONLY now (pressure no
+        // longer multiplies in — see apply_pressure_htv) so that HTV's and
+        // WLP's own optimum temperatures both land on exactly the same
+        // friction, regardless of depth/pH/UV/electrical activity. Piecewise
+        // exponential (squared normalized-temp on each side, so it hangs near
+        // the ceiling/floor before plunging) through three exact points:
+        //   3°C   (min)     → friction = 1.0   ("bevriezen": no dynamics at all)
+        //   105°C (optimum) → friction = 0.1   (life-compatible)
+        //   160°C (max)     → friction = 0.001 (true chaos)
+        // 3°C → 1.0  |  50°C → ~0.61  |  80°C → ~0.27  |  105°C → 0.1  |  120°C → ~0.071  |  140°C → ~0.015  |  160°C → 0.001
+        let optimum = 105.0;
+        let friction = if clamped_temp <= optimum {
+            let t = ((clamped_temp - 3.0) / (optimum - 3.0)).powi(2);
+            (-2.302585 * t).exp()
+        } else {
+            let t = ((clamped_temp - optimum) / (160.0 - optimum)).powi(2);
+            0.1 * (-4.605170 * t).exp()
+        };
         self.base_friction = friction;
-        // Apply pressure modifier so extreme depth also disrupts particle order
-        self.friction = friction * self.pressure_friction_modifier_htv();
+        self.friction = friction;
 
         // 3. Update background color using OkLCH: temp [3, 160] → hue [251° blauw → 30° rood]
         let (r, g, b) = Self::temperature_to_background_color(clamped_temp);
@@ -470,24 +476,34 @@ impl SimulationParams {
     // wlp.max=100, min inherited from the slider's own min=3 — was wrongly
     // hardcoded here as [10, 80], out of sync with the generated
     // life_params_gen::wlp::SLIDER1_MIN/MAX constants), optimum 50°C.
-    // Gekalibreerd (two-point fit, amplitude + decay solved together):
-    //   50°C (optimum) → friction = 0.1
-    //   100°C (max, "oververhit") → friction = 0.02 — bewust chaotischer aan
-    //     de hete kant, in tegenstelling tot het kalme optimum.
     fn apply_temperature_wlp(&mut self, temp: f32) {
         let min = crate::life_params_gen::wlp::SLIDER1_MIN;
         let max = crate::life_params_gen::wlp::SLIDER1_MAX;
         let clamped_temp = temp.max(min).min(max);
 
-        // Drift: bij 50°C → -(40 * 71.6) / 70 ≈ -40.9 px/s
-        let drift = -((clamped_temp - 10.0) * 71.6) / 70.0;
+        // Drift: was hardcoded against the stale old min (10.0, from before the
+        // SLIDER1_MIN fix below), so at the true min (3°C) drift came out to
+        // +7.16 — positive, i.e. reversed direction, which must never happen.
+        // Now zeroed against the real min: drift(min) = 0 exactly, always ≤ 0.
+        let drift = -((clamped_temp - min) * 71.6) / 70.0;
         self.drift_x_per_second = drift;
 
-        // Friction: lineair (geen kwadraat) zodat de curve vlakker is in de groene zone.
-        // Bij 3°C → ~0.45  |  10°C → ~0.36  |  40°C → ~0.14  |  50°C → ~0.10  |
-        // 60°C → ~0.07  |  80°C → ~0.04  |  100°C → ~0.02
-        let t = (clamped_temp - min) / (max - min);
-        let friction = 0.4540 * (-3.1223 * t).exp();
+        // Friction: temperature-only (see apply_temperature_htv — same
+        // reasoning: both hypotheses' optima must land on the same friction
+        // regardless of depth/pH/UV/electrical activity). Piecewise
+        // exponential through three exact points:
+        //   3°C  (min)     → friction = 1.0   ("bevriezen")
+        //   50°C (optimum) → friction = 0.1   (life-compatible)
+        //   100°C (max)    → friction = 0.001 (true chaos)
+        // 3°C → 1.0  |  10°C → ~0.95  |  30°C → ~0.47  |  50°C → 0.1  |  70°C → ~0.048  |  85°C → ~0.010  |  100°C → 0.001
+        let optimum = 50.0;
+        let friction = if clamped_temp <= optimum {
+            let t = ((clamped_temp - min) / (optimum - min)).powi(2);
+            (-2.302585 * t).exp()
+        } else {
+            let t = ((clamped_temp - optimum) / (max - optimum)).powi(2);
+            0.1 * (-4.605170 * t).exp()
+        };
         self.base_friction = friction;
         self.friction = friction; // WLP: geen drukmodifier
 
@@ -557,8 +573,9 @@ impl SimulationParams {
         let r_smooth = 20.0 * (-5.3 * normalized_pressure).exp();
         self.r_smooth = r_smooth;
 
-        // Pressure modifies friction — extreme depths drive friction toward chaos
-        self.friction = self.base_friction * self.pressure_friction_modifier_htv();
+        // Friction no longer depends on pressure (see apply_temperature_htv) —
+        // both hypotheses' optima must land on the same friction regardless
+        // of depth, so this axis only drives force_scale/r_smooth/cross-deps.
 
         self.recompute_cross_dependencies_htv();
     }
@@ -620,13 +637,6 @@ impl SimulationParams {
         self.lightning_duration = 0.3 + norm * 0.5;
 
         self.recompute_cross_dependencies_wlp();
-    }
-
-    // HTV: Pressure friction modifier — Gaussian centred at 350 bar (σ=150).
-    fn pressure_friction_modifier_htv(&self) -> f32 {
-        let pressure_quality =
-            (-(self.pressure_level - 350.0).powi(2) / (2.0 * 150.0_f32.powi(2))).exp();
-        0.5 + 0.5 * pressure_quality
     }
 
     // HTV cross-dependencies: pH + pressure + electrical drive Lenia and interaction radius.
