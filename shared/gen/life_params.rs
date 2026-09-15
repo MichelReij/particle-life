@@ -14,11 +14,11 @@ pub const H_RED:    f32 = 30.0;
 // merkbaar fletser dan een browser bij gelijke OkLCH-waarden (geen matched ICC-
 // profiel voor dat paneel — zie SimulationParams::apply_temperature_htv/wlp),
 // dus native gebruikt een hogere chroma om ditzelfde effect te bereiken.
-pub const BACKGROUND_L_HTV_NATIVE: f32 = 0.92;
+pub const BACKGROUND_L_HTV_NATIVE: f32 = 0.85;
 pub const BACKGROUND_C_HTV_NATIVE: f32 = 0.09;
 pub const BACKGROUND_L_WLP_NATIVE: f32 = 0.85;
 pub const BACKGROUND_C_WLP_NATIVE: f32 = 0.09;
-pub const BACKGROUND_L_HTV_WASM: f32 = 0.97;
+pub const BACKGROUND_L_HTV_WASM: f32 = 0.85;
 pub const BACKGROUND_C_HTV_WASM: f32 = 0.05;
 pub const BACKGROUND_L_WLP_WASM: f32 = 0.85;
 pub const BACKGROUND_C_WLP_WASM: f32 = 0.05;

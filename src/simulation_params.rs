@@ -122,7 +122,7 @@ impl SimulationParams {
             viewport_height: VIRTUAL_WORLD_HEIGHT,
             boundary_mode: 2, // Respawn mode: particles respawn on opposite axis when out of bounds (0=wrap, 1=hybrid, 2=respawn)
             particle_render_size: PARTICLE_SIZE, // Use centralized particle size configuration
-            force_scale: 400.0,
+            force_scale: 320.0, // 75% of the [80,400] pressure-derived range below, same relative position as before
             r_smooth: 10.0, // Increased from 5.0 to make repulsion forces more visible
             flat_force: false,
             drift_x_per_second: 0.0, // Start with no drift to isolate particle interactions
@@ -434,8 +434,11 @@ impl SimulationParams {
     }
 
     fn apply_temperature_htv(&mut self, temp: f32) {
-        // Clamp temperature to valid range (3°C to 160°C)
-        let clamped_temp = temp.max(3.0).min(160.0);
+        // Clamp temperature to valid range — sourced from life_params_gen::htv,
+        // single source of truth is shared/life_params.json (currently [3, 160]°C).
+        let clamped_temp = temp
+            .max(crate::life_params_gen::htv::SLIDER1_MIN)
+            .min(crate::life_params_gen::htv::SLIDER1_MAX);
 
         // 1. Update drift speed: temp [3, 160] → drift [0, -60]
         let drift = -((clamped_temp - 3.0) * 60.0) / 157.0;
@@ -443,11 +446,15 @@ impl SimulationParams {
 
         // 2. Update friction: stays high until ~80°C, then drops sharply toward max.
         // Uses normalized_temp² so the curve hangs high and only plunges near the top.
-        // 80°C → ~0.52  |  120°C → ~0.14  |  160°C → ~0.010
-        // At 160°C + extreme pressure (modifier 0.5) → 0.005 (very chaotic)
+        // Two-point fit (amplitude A + decay k solved together) so that, combined
+        // with the ×0.500 pressure modifier at 1000 bar:
+        //   105°C (life-zone reference) → final friction = 0.1
+        //   160°C (max, "oververhit")   → final friction = 0.02 — deliberately
+        //     chaotic at the extreme, unlike the calmer optimum.
+        // 3°C → ~0.65  |  80°C → ~0.33  |  105°C → ~0.20  |  120°C → ~0.14  |  160°C → ~0.04 (base, before pressure modifier)
         let normalized_temp = (clamped_temp - 3.0) / 157.0;
         let t = normalized_temp * normalized_temp;
-        let friction = 0.98 * (-4.6 * t).exp();
+        let friction = 0.6479 * (-2.7849 * t).exp();
         self.base_friction = friction;
         // Apply pressure modifier so extreme depth also disrupts particle order
         self.friction = friction * self.pressure_friction_modifier_htv();
@@ -459,19 +466,28 @@ impl SimulationParams {
         self.background_color_b = b;
     }
 
-    // WLP: temp [10, 80°C], optimum 50°C (warme getijdenpoelen)
-    // Gekalibreerd: bij 50°C → friction=0.058 (= HTV bij 1000 bar + 105°C).
+    // WLP: temp [3, 100°C] (single source of truth: shared/life_params.json's
+    // wlp.max=100, min inherited from the slider's own min=3 — was wrongly
+    // hardcoded here as [10, 80], out of sync with the generated
+    // life_params_gen::wlp::SLIDER1_MIN/MAX constants), optimum 50°C.
+    // Gekalibreerd (two-point fit, amplitude + decay solved together):
+    //   50°C (optimum) → friction = 0.1
+    //   100°C (max, "oververhit") → friction = 0.02 — bewust chaotischer aan
+    //     de hete kant, in tegenstelling tot het kalme optimum.
     fn apply_temperature_wlp(&mut self, temp: f32) {
-        let clamped_temp = temp.max(10.0).min(80.0);
+        let min = crate::life_params_gen::wlp::SLIDER1_MIN;
+        let max = crate::life_params_gen::wlp::SLIDER1_MAX;
+        let clamped_temp = temp.max(min).min(max);
 
         // Drift: bij 50°C → -(40 * 71.6) / 70 ≈ -40.9 px/s
         let drift = -((clamped_temp - 10.0) * 71.6) / 70.0;
         self.drift_x_per_second = drift;
 
         // Friction: lineair (geen kwadraat) zodat de curve vlakker is in de groene zone.
-        // Bij 10°C → ~0.98  |  40°C → ~0.118  |  50°C → ~0.058  |  60°C → ~0.029  |  80°C → ~0.007
-        let t = (clamped_temp - 10.0) / 70.0;
-        let friction = 0.98 * (-4.95 * t).exp();
+        // Bij 3°C → ~0.45  |  10°C → ~0.36  |  40°C → ~0.14  |  50°C → ~0.10  |
+        // 60°C → ~0.07  |  80°C → ~0.04  |  100°C → ~0.02
+        let t = (clamped_temp - min) / (max - min);
+        let friction = 0.4540 * (-3.1223 * t).exp();
         self.base_friction = friction;
         self.friction = friction; // WLP: geen drukmodifier
 
@@ -530,8 +546,10 @@ impl SimulationParams {
     }
 
     fn apply_pressure_htv(&mut self, clamped_pressure: f32) {
-        // force scale: pressure [0, 1000] → force_scale [100, 500]
-        let force_scale = 100.0 + (clamped_pressure * 400.0) / 1000.0;
+        // force scale: pressure [0, 1000] → force_scale [80, 400]
+        // Optimum (1000 bar) target raised to 400; far end kept at the same
+        // 20% ratio as before (80 = 0.2 × 400, matching the old 60/300 = 0.2).
+        let force_scale = 80.0 + (clamped_pressure * 320.0) / 1000.0;
         self.force_scale = force_scale;
 
         // rSmooth: exponential [0, 1000] → [20, 0.1]
@@ -546,13 +564,13 @@ impl SimulationParams {
     }
 
     // WLP: pressure [0, WLP_DEPTH_THRESHOLD m), optimum = 0 (oppervlak)
-    // Bij pressure=0: force_scale=500, r_smooth=0.10 (= HTV bij 1000 bar, de levenszone).
+    // Bij pressure=0: force_scale=400, r_smooth=0.10 (= HTV bij 1000 bar, de levenszone).
     // Dieper → degradeert; bij WLP_DEPTH_THRESHOLD overschakelen naar HTV-domein.
     fn apply_pressure_wlp(&mut self, clamped_pressure: f32) {
         let normalized = (clamped_pressure / crate::life_params_gen::WLP_DEPTH_THRESHOLD).min(1.0);
 
-        // force_scale: 500 aan het oppervlak → 100 bij drempeldiepte
-        self.force_scale = 500.0 - normalized * 400.0;
+        // force_scale: 400 aan het oppervlak → 80 bij drempeldiepte
+        self.force_scale = 400.0 - normalized * 320.0;
 
         // r_smooth: 0.10 aan het oppervlak → exponentieel stijgend (spiegel van HTV)
         self.r_smooth = 0.10 * (5.3 * normalized).exp();
