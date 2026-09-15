@@ -154,8 +154,10 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let line_color_rgb = vec3<f32>(1.0, 1.0, 1.0);
     let line_alpha: f32 = 0.40;
 
-    // Anti-aliasing falloff in world coordinates
-    let falloff = (0.5 / zoom_level) * world_per_css_px / 2; // 0.5 screen pixels in world units, scaled by zoom and world-to-screen ratio
+    // Anti-aliasing falloff in world coordinates. A wider falloff than the
+    // bare minimum needed for AA reads as a soft, slightly hazy line instead
+    // of a hard, unrealistically crisp edge.
+    let falloff = (3.0 / zoom_level) * world_per_css_px / 2; // 3 screen pixels in world units, scaled by zoom and world-to-screen ratio
 
     // Calculate line intensities using smoothstep for anti-aliasing
     let vertical_intensity = 1.0 - smoothstep(world_line_thickness * 0.5 - falloff, world_line_thickness * 0.5 + falloff, dist_to_vertical_line);
