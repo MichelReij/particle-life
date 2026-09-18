@@ -69,7 +69,7 @@ const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; NUM_TYPES] = [
 // the HTV palette above them.
 const DEFAULT_COLORS: [[f32; 3]; NUM_TYPES] = [
     [0.4435, 0.6471, 0.5528], // #71a58d - Blue
-    [0.8435, 0.7671, 0.4956], // #d7c47e - Yellow
+    [0.8570, 0.7567, 0.5449], // #dbc18b - Yellow
     [0.7540, 0.2949, 0.4556], // #c04b74 - Red
     [0.6598, 0.3962, 0.6094], // #a8659b - Purple
     [0.3153, 0.6550, 0.4474], // #50a772 - Green

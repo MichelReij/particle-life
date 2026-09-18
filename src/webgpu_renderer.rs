@@ -31,8 +31,15 @@ pub struct LightningBolt {
     pub next_lightning_time: f32,
     pub is_super_lightning: u32,
     pub needs_rules_reset: u32,
-    pub _padding1: u32,
-    pub _padding2: u32,
+    pub preview_ready: u32,
+    pub preview_num_segments: u32,
+    pub preview_center_x: f32,
+    pub preview_center_y: f32,
+    pub preview_radius: f32,
+    pub preview_is_super: u32,
+    pub bolt_center_x: f32,
+    pub bolt_center_y: f32,
+    pub bolt_radius: f32,
 }
 
 impl LightningBolt {
@@ -427,7 +434,7 @@ impl WebGpuRenderer {
 
         let lightning_bolt_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lightning Bolt Buffer"),
-            size: 32,
+            size: 60, // matches LightningBolt (15 x 4-byte fields)
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
@@ -1320,13 +1327,18 @@ impl WebGpuRenderer {
         Ok(bolt)
     }
 
-    /// Reads segment 0's start_pos (the bolt's origin, in virtual-world UV
-    /// coordinates 0.0-1.0) back from the GPU — a rough "where did this bolt
-    /// happen" location to relay to the ESP32/neopixel ring, so the ring's
-    /// flash roughly lines up with the on-screen bolt instead of being fully
-    /// random. Segment 0's start_pos is the first 8 bytes (vec2<f32>) of the
-    /// LightningSegment struct (48-byte stride).
+    /// Reads the just-fired bolt's bolt_center_x/y (in virtual-world UV
+    /// coordinates 0.0-1.0) back from the GPU — the centre of the bounding
+    /// circle around every one of its segments (trunk + all branches, see
+    /// lightning_compute.wgsl), relayed to the ESP32/neopixel ring so its
+    /// flash lines up with the on-screen bolt's real extent. Previously read
+    /// segment 0's start_pos (just the trunk's origin point) instead — the
+    /// centroid is the more representative "where did this bolt happen"
+    /// location once a bolt can branch well away from its own start. Those
+    /// two f32 fields sit at byte offset 48 in the LightningBolt struct (see
+    /// its field list in lightning_compute.wgsl / this file).
     pub async fn read_lightning_origin_uv(&self) -> Result<(f32, f32), RendererError> {
+        let offset = 48u64; // bolt_center_x/y offset within LightningBolt
         let size = 8u64; // vec2<f32>
         let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lightning Origin Staging"), size,
@@ -1334,7 +1346,7 @@ impl WebGpuRenderer {
             mapped_at_creation: false,
         });
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lightning Origin Copy") });
-        encoder.copy_buffer_to_buffer(&self.lightning_segments_buffer, 0, &staging, 0, size);
+        encoder.copy_buffer_to_buffer(&self.lightning_bolt_buffer, offset, &staging, 0, size);
         self.queue.submit(std::iter::once(encoder.finish()));
 
         let slice = staging.slice(..);

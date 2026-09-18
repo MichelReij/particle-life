@@ -117,6 +117,9 @@ serialport = "4.4"
 rodio = { version = "0.19", default-features = false, features = ["symphonia-mp3", "symphonia-wav"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
+[dev-dependencies]
+naga = { version = "25.0.1", features = ["wgsl-in"] }
+
 # Native binary target - only built for non-WASM targets
 [[bin]]
 name = "native_minimal"

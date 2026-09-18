@@ -108,10 +108,19 @@ struct LightningBolt {
     // 1 if this is a super lightning, 0 if normal
     needs_rules_reset: u32,
     // 1 if interaction rules should be reset, 0 if not
-    _padding1: u32,
-    // Padding for 16-byte alignment
-    _padding2: u32,
-    // Additional padding
+    preview_ready: u32,
+    // 1 once the NEXT bolt's full geometry has been pre-generated — see
+    // lightning_compute.wgsl. Its segments live at lightning_segments[40..80].
+    preview_num_segments: u32,
+    preview_center_x: f32,
+    // Centre of the bounding circle around the pre-generated preview bolt.
+    preview_center_y: f32,
+    preview_radius: f32,
+    preview_is_super: u32,
+    bolt_center_x: f32,
+    // Centre of the bounding circle around the last-fired (live) bolt.
+    bolt_center_y: f32,
+    bolt_radius: f32,
 }
 
 @group(0) @binding(0)
@@ -155,17 +164,37 @@ fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thic
     let toPoint = uv - start_viewport;
     let projLength = dot(toPoint, normalizedDir);
 
-    if (projLength >= 0.0 && projLength <= segmentLength) {
-        let closestPoint = start_viewport + normalizedDir * projLength;
-        let distToSegment = length(uv - closestPoint);
+    // Computed unconditionally (clamped rather than gated behind the bounds
+    // check below): WGSL requires derivative builtins like fwidth() to run
+    // in uniform control flow, so it can't be called from inside a branch
+    // that diverges per-pixel — doing so silently fails shader-module
+    // creation in a real browser (even though naga's own validator allows
+    // it), which reads as the whole canvas going black.
+    let closestPointUnclamped = start_viewport + normalizedDir * clamp(projLength, 0.0, segmentLength);
+    let distToSegment = length(uv - closestPointUnclamped);
+    let distDeriv = fwidth(distToSegment);
 
+    if (projLength >= 0.0 && projLength <= segmentLength) {
         // Use scaled thickness for proper zoom behavior
         let halfThickness = scaled_thickness * 0.5;
-        let antiAliasWidth = scaled_thickness * 0.3;
-        // 30% of thickness for smooth falloff
+        // 30% of thickness for smooth falloff by default — only nudged wider
+        // (never more than 45%) when a pixel's on-screen footprint would
+        // otherwise be thinner than the falloff itself, which is what
+        // actually aliases into jaggies. Clamped on both ends: a raw
+        // derivative spikes right at a segment's endpoints (the clamped
+        // closest-point calculation above has a crease in its gradient
+        // there, not its value), and left unclamped that briefly ballooned
+        // the glow far past the segment's real thickness.
+        let antiAliasWidth = clamp(distDeriv, scaled_thickness * 0.3, scaled_thickness * 0.6);
 
-        // Core intensity (full brightness within half thickness)
-        let coreIntensity = 1.0 - smoothstep(0.0, halfThickness, distToSegment);
+        // Core intensity: solid white out to whiteCoreFraction of the
+        // half-thickness, then ramps down to the violet colour by the edge —
+        // widened per feedback (was a plain 0-to-halfThickness gradient with
+        // no flat white plateau at all, so the violet halo dominated most of
+        // each segment's visible width; this instead makes more of the
+        // segment read as white without touching alpha/opacity at all).
+        let whiteCoreFraction = 0.5;
+        let coreIntensity = 1.0 - smoothstep(halfThickness * whiteCoreFraction, halfThickness, distToSegment);
 
         // Soft edge falloff for anti-aliasing
         let edgeIntensity = 1.0 - smoothstep(halfThickness, halfThickness + antiAliasWidth, distToSegment);
@@ -186,7 +215,7 @@ fn drawSegment(uv: vec2<f32>, start: vec2<f32>, end: vec2<f32>, alpha: f32, thic
 }
 
 @fragment
-fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+fn main(@builtin(position) frag_coord: vec4<f32>, @location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     // Convert UV coordinates (0-1) to world coordinates using viewport (like grid shader)
     // UV coordinates are just fullscreen texture coordinates, not world coordinates!
     
@@ -201,20 +230,112 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     // Convert world coordinates back to virtual world UV coordinates (0-1)
     let virtual_uv = vec2<f32>(world_x / sim_params.virtual_world_width, world_y / sim_params.virtual_world_height);
 
-    // Early exit if lightning is disabled or no segments
-    if (sim_params.lightning_frequency <= 0.0 || lightning_bolt.num_segments == 0u) {
+    // Lightning fully disabled (HTV, or frequency slider at 0) — nothing to draw.
+    if (sim_params.lightning_frequency <= 0.0) {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
 
+    // --- Thundercloud darkening ------------------------------------------
+    // A soft, localised dark patch gathers over the exact spot the next bolt
+    // will strike (predicted ahead of time in lightning_compute.wgsl and
+    // reused verbatim as that bolt's real start_pos), builds up in the
+    // seconds before the strike, and only lifts again once the flash itself
+    // has fully played out and faded — so the flash never appears out of a
+    // flat, evenly-lit scene, and the sky never brightens back up mid-flash.
+
+    // Build-up phase: counts down to the strike. Matches PRE_GEN_LEAD in
+    // lightning_compute.wgsl, so the preview (real geometry) is ready for
+    // the entire build-up window, not just part of it.
+    let time_to_next = lightning_bolt.next_lightning_time - sim_params.time;
+    let lead_time = 3.0; // seconds of build-up before a strike
+    var build_alpha = 0.0;
+    if (lightning_bolt.next_lightning_time > 0.0 && time_to_next >= 0.0 && time_to_next <= lead_time) {
+        // Quadratic ease: slow gathering at first, deepening rapidly right
+        // before the strike — reads as mounting tension, not a linear dimmer.
+        let build_progress = 1.0 - (time_to_next / lead_time);
+        build_alpha = build_progress * build_progress;
+    }
+
+    // Hold-through-flash + fade-out phase: counts up from the last bolt's
+    // start_time, spanning its own visible lifetime plus a settle period.
+    let time_since_start = sim_params.time - lightning_bolt.start_time;
+    let hold_duration = 2.2; // covers a bolt's own fade-out (see lightning_compute.wgsl)
+    let fade_duration = 1.5; // gradual return to normal afterwards
+    var decay_alpha = 0.0;
+    if (lightning_bolt.start_time > 0.0 && time_since_start >= 0.0 && time_since_start <= hold_duration + fade_duration) {
+        if (time_since_start <= hold_duration) {
+            decay_alpha = 1.0;
+        } else {
+            decay_alpha = 1.0 - (time_since_start - hold_duration) / fade_duration;
+        }
+    }
+
+    // Whichever phase currently dominates also picks the cloud's centre and
+    // radius, both from a real bounding circle around actual segments rather
+    // than a guessed point: while building up, from the pre-generated
+    // preview bolt (lightning_compute.wgsl generates its full geometry, in a
+    // separate segment range, up to lead_time seconds early); once the bolt
+    // has fired, from bolt_center_x/y and bolt_radius (copied from that same
+    // preview at promotion time) — which keep their value through the whole
+    // hold+fade window since they're only overwritten when the NEXT bolt is
+    // promoted, exactly when start_time (and so time_since_start) also moves on.
+    var storm_center = vec2<f32>(0.5, 0.5);
+    var storm_radius = 0.16; // rough guess, only used in the rare case neither is ready yet
+    if (decay_alpha > build_alpha) {
+        storm_center = vec2<f32>(lightning_bolt.bolt_center_x, lightning_bolt.bolt_center_y);
+        storm_radius = max(lightning_bolt.bolt_radius, 0.05);
+    } else if (lightning_bolt.preview_ready == 1u) {
+        storm_center = vec2<f32>(lightning_bolt.preview_center_x, lightning_bolt.preview_center_y);
+        storm_radius = max(lightning_bolt.preview_radius, 0.05);
+    }
+    storm_radius *= 1.21; // ~10% larger again, per feedback (was 1.1, now 1.1x1.1)
+
+    let storm_progress = max(build_alpha, decay_alpha);
+    var dark_alpha = 0.0;
+    if (storm_progress > 0.0) {
+        // Fully dark within the core, soft fringe out to a bit beyond the
+        // bolt's own extent — localised over the strike, not a broad
+        // centre-of-screen vignette.
+        let center_dist = length(virtual_uv - storm_center);
+        let vignette = smoothstep(storm_radius + 0.10, storm_radius * 0.25, center_dist);
+        dark_alpha = storm_progress * vignette * 0.5; // up to ~50% darkening at peak
+
+        // Ordered (Bayer) dither: this is a wide, slow-moving alpha gradient
+        // over an 8-bit framebuffer, the exact situation night_frag.wgsl's
+        // own dithering comment warns about — without it the gradient
+        // quantizes into visible banded rings. Same 8x8 pattern/amplitude as
+        // that file, for consistency.
+        let bayer = array<f32, 64>(
+            0.0 / 64.0, 32.0 / 64.0,  8.0 / 64.0, 40.0 / 64.0,  2.0 / 64.0, 34.0 / 64.0, 10.0 / 64.0, 42.0 / 64.0,
+            48.0 / 64.0, 16.0 / 64.0, 56.0 / 64.0, 24.0 / 64.0, 50.0 / 64.0, 18.0 / 64.0, 58.0 / 64.0, 26.0 / 64.0,
+            12.0 / 64.0, 44.0 / 64.0,  4.0 / 64.0, 36.0 / 64.0, 14.0 / 64.0, 46.0 / 64.0,  6.0 / 64.0, 38.0 / 64.0,
+            60.0 / 64.0, 28.0 / 64.0, 52.0 / 64.0, 20.0 / 64.0, 62.0 / 64.0, 30.0 / 64.0, 54.0 / 64.0, 22.0 / 64.0,
+            3.0 / 64.0, 35.0 / 64.0, 11.0 / 64.0, 43.0 / 64.0,  1.0 / 64.0, 33.0 / 64.0,  9.0 / 64.0, 41.0 / 64.0,
+            51.0 / 64.0, 19.0 / 64.0, 59.0 / 64.0, 27.0 / 64.0, 49.0 / 64.0, 17.0 / 64.0, 57.0 / 64.0, 25.0 / 64.0,
+            15.0 / 64.0, 47.0 / 64.0,  7.0 / 64.0, 39.0 / 64.0, 13.0 / 64.0, 45.0 / 64.0,  5.0 / 64.0, 37.0 / 64.0,
+            63.0 / 64.0, 31.0 / 64.0, 55.0 / 64.0, 23.0 / 64.0, 61.0 / 64.0, 29.0 / 64.0, 53.0 / 64.0, 21.0 / 64.0
+        );
+        let px_coord = vec2<u32>(frag_coord.xy) % vec2<u32>(8u, 8u);
+        let dither = (bayer[px_coord.y * 8u + px_coord.x] - 0.5) * (2.0 / 255.0);
+        dark_alpha = clamp(dark_alpha + dither, 0.0, 1.0);
+    }
+
+    // --- Bolt itself -------------------------------------------------------
     // Electric violet rather than flat white: WLP's background (the only
     // hypothesis lightning appears in) is now quite pale after this
     // session's colour tuning, so a plain white bolt alpha-blended onto an
     // already near-white background had almost no visible contrast. This
     // vivid blue-violet reads clearly against both the pale WLP background
-    // and darker scenes, and matches the neopixel ring's own lightning-flash
-    // colour (see NEO_FLASH_L/C/H in platformio's NeoPixelDriver.h) for a
-    // consistent "electric" look between the simulation and the installation.
-    var finalColor = vec3<f32>(0.541, 0.169, 0.886);
+    // and darker scenes, and started out matching the neopixel ring's own
+    // lightning-flash colour (see NEO_FLASH_L/C/H in platformio's
+    // NeoPixelDriver.h) for a consistent "electric" look between the
+    // simulation and the installation. R halved per feedback — leaned too
+    // magenta/pink once the bolt became much more visible; less R reads more
+    // purely blue-violet. The ring's own colour is untouched. (Also tried:
+    // raising lightness toward white instead of touching alpha — worked, but
+    // set back to this baseline to compare against tuning the alpha boost
+    // below instead.)
+    var finalColor = vec3<f32>(0.271, 0.169, 0.886);
     var finalAlpha = 0.0;
 
     // Draw all segments from the buffer - segments are now in UV coordinates
@@ -226,7 +347,7 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
             continue;
         }
 
-        let segmentColor = vec3<f32>(0.541, 0.169, 0.886);
+        let segmentColor = vec3<f32>(0.271, 0.169, 0.886);
         let segmentResult = drawSegment(uv, segment.start_pos, segment.end_pos, segment.alpha, segment.thickness, segmentColor);
 
         // Accumulate lightning contributions
@@ -244,9 +365,17 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     // reads as quite washed-out against WLP's now much paler background.
     finalAlpha = min(finalAlpha * 2.2, 1.0);
 
-    if (finalAlpha <= 0.0) {
+    // --- Composite storm darkening (below) with the bolt (on top) ---------
+    // Both are drawn in a single pass over whatever is already on screen, so
+    // they're combined analytically here rather than as two separate
+    // over-blends: this pipeline uses straight (non-premultiplied) alpha
+    // blending (see alpha_blend in webgpu_renderer.rs), and the storm layer
+    // is pure black, so it only ever contributes alpha, never colour.
+    let combined_alpha = finalAlpha + dark_alpha * (1.0 - finalAlpha);
+    if (combined_alpha <= 0.001) {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }
+    let combined_color = finalColor * (finalAlpha / combined_alpha);
 
-    return vec4<f32>(finalColor, finalAlpha);
+    return vec4<f32>(combined_color, combined_alpha);
 }
