@@ -81,6 +81,16 @@ pub struct SimulationParams {
     // specifically at night, showing up as particles trembling/shaking.
     pub smoothed_temperature: f32,
 
+    // Smoothed pressure for ESP32 input (EMA filter against ADC noise).
+    // -1.0 = not yet initialised (first call snaps straight to the raw
+    // reading). Pressure drives pressure_to_particle_count(), which rounds
+    // to the nearest multiple of 64 — right at a rounding boundary, even
+    // small raw ADC jitter flips the target count back and forth on
+    // consecutive ticks, so set_particle_count() fires grow then immediately
+    // shrink (or vice versa) on the same freshly-spawned particles, i.e.
+    // particles that just appeared want to vanish and reappear again.
+    pub smoothed_pressure: f32,
+
     // EMA-smoothed background hue (degrees). -1 = not yet initialised (first
     // call snaps straight to the target). Matches the physical RGB-ball's
     // ~20s smoothing time constant (see BACKGROUND_HUE_TAU_SECONDS below) so
@@ -175,6 +185,7 @@ impl SimulationParams {
             current_zoom_level: 1.0,
             smoothed_zoom: 1.0,
             smoothed_temperature: -1.0,
+            smoothed_pressure: -1.0,
             background_hue: -1.0,
 
             // Environmental control levels (start at non-optimal to encourage exploration)
@@ -567,8 +578,25 @@ impl SimulationParams {
         let clamped_pressure = pressure.max(0.0).min(1000.0);
         self.pressure_level = clamped_pressure;
 
+        // Schmitt-trigger hysteresis around the WLP/HTV boundary: even after
+        // EMA-smoothing, pressure can sit and dwell almost exactly at
+        // WLP_DEPTH_THRESHOLD, and plain "< threshold" flips is_wlp back and
+        // forth on every tiny wobble. Each flip fires a full-population
+        // position-reroll wave (see trigger_position_reroll call sites) — so
+        // chatter here meant particles that had just reappeared from one
+        // wave got caught by the next wave's reroll almost immediately,
+        // vanishing and reappearing again. Using the CURRENT is_wlp as the
+        // dead-zone anchor means a real crossing still switches immediately,
+        // but noise near the line can't cause a switch back until it clears
+        // the zone by a real margin.
+        const WLP_HYSTERESIS_MARGIN: f32 = 5.0;
+        let threshold = crate::life_params_gen::WLP_DEPTH_THRESHOLD;
         let was_wlp = self.is_wlp;
-        self.is_wlp = clamped_pressure < crate::life_params_gen::WLP_DEPTH_THRESHOLD;
+        self.is_wlp = if was_wlp {
+            clamped_pressure < threshold + WLP_HYSTERESIS_MARGIN
+        } else {
+            clamped_pressure < threshold - WLP_HYSTERESIS_MARGIN
+        };
 
         if self.is_wlp {
             self.apply_pressure_wlp(clamped_pressure);
@@ -872,9 +900,17 @@ impl SimulationParams {
 
         self.apply_zoom(zoom_level, Some(new_center_x), Some(new_center_y));
 
-        // Apply pressure first so is_wlp is correct before temperature/pH routing
-        let pressure = sensor_data.to_pressure();
-        self.apply_pressure(pressure);
+        // Apply pressure first so is_wlp is correct before temperature/pH routing.
+        // EMA-smoothed against ADC noise — see smoothed_pressure's own doc comment
+        // for why this specifically matters for particle-count stability.
+        let raw_pressure = sensor_data.to_pressure();
+        const PRESSURE_ALPHA: f32 = 0.05;
+        if self.smoothed_pressure < 0.0 {
+            self.smoothed_pressure = raw_pressure;
+        } else {
+            self.smoothed_pressure += PRESSURE_ALPHA * (raw_pressure - self.smoothed_pressure);
+        }
+        self.apply_pressure(self.smoothed_pressure);
 
         // Apply temperature — slider range differs per hypothesis (HTV: 3-160°C, WLP: 3-100°C).
         // EMA-smoothed against ADC noise, same approach as zoom above: alpha

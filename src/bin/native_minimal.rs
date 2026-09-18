@@ -295,8 +295,11 @@ impl ApplicationHandler for MinimalNativeApp {
                                 }
                                 // Diepte/druk stuurt ook het particle-aantal (4800-6400),
                                 // net als de web-UI via set_particle_count_from_pressure.
+                                // pressure_level is the EMA-smoothed value set by apply_pressure
+                                // above — not the raw ADC reading (sd.to_pressure()), whose jitter
+                                // would flip the nearest-64 target back and forth every tick.
                                 let target_count = self.simulation_params.pressure_to_particle_count(
-                                    sd.to_pressure(),
+                                    self.simulation_params.pressure_level,
                                     self.particle_system.get_max_particles(),
                                     self.particle_system.get_min_particles(),
                                 );
@@ -353,6 +356,13 @@ impl ApplicationHandler for MinimalNativeApp {
                     if !self.simulation_params.transition_is_grow {
                         self.particle_system.set_active_count(target_count);
                         self.simulation_params.set_num_particles(target_count);
+                        // GPU already self-deactivated each particle as it individually
+                        // finished (compute.wgsl's shrink-complete branch); this keeps the
+                        // CPU-side bookkeeping in the GPU buffer consistent too, so a later
+                        // grow into this same range never finds a stale is_active byte.
+                        if let Some(renderer) = &mut self.renderer {
+                            renderer.update_particle_active_states(&self.particle_system);
+                        }
                     }
                     self.simulation_params.stop_particle_transition();
                 }
@@ -486,8 +496,20 @@ impl MinimalNativeApp {
                     // start arrives.
                     particle.transition_start = self.current_time + self.rng.gen_range(0.0..POPULATION_TRANSITION_STAGGER_SECONDS);
                     particle.transition_type = 0;
-                    particle.is_active = false;
+                    // NOT false: the GPU is the sole authority over is_active — it sets
+                    // it to 1u itself once this particle's own grow-progress code runs
+                    // (compute.wgsl), and fades it in via the size ramp, not via this
+                    // flag. But this same index may have been genuinely deactivated by
+                    // the GPU in a PREVIOUS shrink (is_active still 0 in the GPU buffer),
+                    // and the early-return at the top of main() skips a particle with
+                    // is_active==0 before it ever reaches that code — so it could never
+                    // revive itself. Setting it true here and pushing it below (see
+                    // update_particle_active_states) is what unblocks it.
+                    particle.is_active = true;
                 }
+            }
+            if let Some(renderer) = &mut self.renderer {
+                renderer.update_particle_active_states(&self.particle_system);
             }
         } else {
             // Bij een EMA-gesmoothde, geleidelijk dalende druk komt hier elke tick een
@@ -518,7 +540,7 @@ impl MinimalNativeApp {
         }
 
         if let Some(renderer) = &mut self.renderer {
-            renderer.update_particle_transitions(&self.particle_system);
+            renderer.update_particle_transitions(&mut self.particle_system);
         }
     }
 

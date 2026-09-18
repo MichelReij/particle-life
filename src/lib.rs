@@ -429,12 +429,13 @@ impl ParticleLifeEngine {
                 self.simulation_params.set_num_particles(count);
                 self.initialize_particles_for_grow_transition(current_count, count);
                 if let Some(ref mut renderer) = self.renderer {
-                    renderer.update_particle_transitions(&self.particle_system);
+                    renderer.update_particle_transitions(&mut self.particle_system);
+                    renderer.update_particle_active_states(&self.particle_system);
                 }
             } else {
                 self.initialize_particles_for_shrink_transition(count, current_count);
                 if let Some(ref mut renderer) = self.renderer {
-                    renderer.update_particle_transitions(&self.particle_system);
+                    renderer.update_particle_transitions(&mut self.particle_system);
                 }
             }
         } else {
@@ -467,7 +468,16 @@ impl ParticleLifeEngine {
                 // just sits dormant until its own delayed start arrives.
                 particle.transition_start = self.current_time + self.rng.gen_range(0.0..POPULATION_TRANSITION_STAGGER_SECONDS);
                 particle.transition_type = 0;
-                particle.is_active = false;
+                // NOT false: the GPU is the sole authority over is_active — it sets it
+                // to 1u itself once this particle's own grow-progress code runs
+                // (compute.wgsl), fading it in via the size ramp, not via this flag. But
+                // this same index may have been genuinely deactivated by the GPU in a
+                // PREVIOUS shrink (is_active still 0 in the GPU buffer), and the early-
+                // return at the top of main() skips a particle with is_active==0 before
+                // it ever reaches that code — so it could never revive itself. Setting
+                // it true here and pushing it via update_particle_active_states (see
+                // set_particle_count) is what unblocks it.
+                particle.is_active = true;
             }
         }
     }
@@ -766,6 +776,13 @@ impl ParticleLifeEngine {
             if !self.simulation_params.transition_is_grow {
                 self.particle_system.set_active_count(target_count);
                 self.simulation_params.set_num_particles(target_count);
+                // GPU already self-deactivated each particle as it individually
+                // finished (compute.wgsl's shrink-complete branch); this keeps the
+                // CPU-side bookkeeping in the GPU buffer consistent too, so a later
+                // grow into this same range never finds a stale is_active byte.
+                if let Some(ref mut renderer) = self.renderer {
+                    renderer.update_particle_active_states(&self.particle_system);
+                }
             }
             self.simulation_params.stop_particle_transition();
         }

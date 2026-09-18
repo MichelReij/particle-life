@@ -216,8 +216,11 @@ var<storage, read_write> position_reroll: PositionReroll;
 // taking ~2-3s (2x transition_duration), a 5s window meant roughly 40% of
 // the whole population was simultaneously mid-transition at any moment —
 // read as a mass, coordinated flicker rather than a gradual, organic
-// turnover. 25s spreads that down to a much smaller, staggered fraction.
-const POSITION_REROLL_WINDOW: f32 = 25.0;
+// turnover. Reduced from 25.0 back down to 10.0: still ~4x looser than the
+// original 5s, but a shorter window also means a real repeated hypothesis
+// flip completes (and unblocks the next one — see the matching cooldown in
+// WebGpuRenderer::trigger_position_reroll) sooner.
+const POSITION_REROLL_WINDOW: f32 = 10.0;
 
 const PI: f32 = 3.141592653589793;
 const EPSILON: f32 = 0.001;
@@ -1244,14 +1247,18 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 // instantly pop to a fixed 3px dot the moment grow started,
                 // instead of smoothly fading in from essentially nothing —
                 // exactly the "schokkerig" (jerky) reappearance reported.
+                // Size eases in-out; opacity (vert.wgsl) keeps its own curve and
+                // is deliberately NOT driven by this eased value.
                 let min_visible_size = 0.01;
-                particle_p.size = min_visible_size + (particle_p.target_size - min_visible_size) * progress;
+                let size_t = smoothstep(0.0, 1.0, progress);
+                particle_p.size = min_visible_size + (particle_p.target_size - min_visible_size) * size_t;
             }
             else {
                 // Shrink transition: stay active but interpolate size down
                 // Don't deactivate until transition completes
                 let min_visible_size = 0.01;
-                particle_p.size = particle_p.target_size * (1.0 - progress) + min_visible_size * progress;
+                let size_t = smoothstep(0.0, 1.0, progress);
+                particle_p.size = particle_p.target_size * (1.0 - size_t) + min_visible_size * size_t;
             }
         }
         else {

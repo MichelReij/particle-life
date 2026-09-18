@@ -187,6 +187,7 @@ pub struct WebGpuRenderer {
     lightning_bolt_buffer: wgpu::Buffer,
     position_reroll_buffer: wgpu::Buffer,
     next_position_reroll_generation: u32,
+    last_position_reroll_trigger_time: f32,
     particle_colors_buffer: wgpu::Buffer,
     quad_vertex_buffer: wgpu::Buffer,
 
@@ -1021,6 +1022,7 @@ impl WebGpuRenderer {
             lightning_bolt_buffer,
             position_reroll_buffer,
             next_position_reroll_generation: 1,
+            last_position_reroll_trigger_time: f32::NEG_INFINITY,
             particle_colors_buffer,
             quad_vertex_buffer,
             lightning_detector: LightningDetector::new(),
@@ -1284,13 +1286,23 @@ impl WebGpuRenderer {
         }
     }
 
-    pub fn update_particle_transitions(&mut self, particle_system: &ParticleSystem) {
+    /// Uploads freshly staged transitions and then hands ownership to the GPU
+    /// by zeroing the CPU copy. The GPU is the only party that ever completes a
+    /// transition (and clears its own transition_start), so the CPU side
+    /// otherwise keeps stale "still transitioning" entries forever. Before
+    /// this cleared them, every call re-uploaded ALL of those stale entries:
+    /// a long-finished shrink landing on a still-active index hits the
+    /// shader's "shrink complete → chain into grow" branch and respawns the
+    /// particle again, and a stale entry landing on a particle mid-way
+    /// through a hypothesis reroll snaps that animation to progress=1.
+    pub fn update_particle_transitions(&mut self, particle_system: &mut ParticleSystem) {
         for i in 0..particle_system.get_max_particles() as usize {
-            if let Some(p) = particle_system.get_particle(i) {
+            if let Some(p) = particle_system.get_particle_mut(i) {
                 if p.transition_start > 0.0 {
                     let base = i * 48;
                     self.queue.write_buffer(&self.particle_buffers[self.current_buffer_index], (base + 28) as u64, &p.transition_start.to_le_bytes());
                     self.queue.write_buffer(&self.particle_buffers[self.current_buffer_index], (base + 32) as u64, &p.transition_type.to_le_bytes());
+                    p.transition_start = 0.0;
                 }
             }
         }
@@ -1331,7 +1343,22 @@ impl WebGpuRenderer {
     /// randomly staggered moment within the next POSITION_REROLL_WINDOW
     /// seconds (see compute.wgsl), rather than all at once. Call this right
     /// when a hypothesis transition is detected (HTV<->WLP).
+    ///
+    /// Hard-gated by a cooldown matching POSITION_REROLL_WINDOW: a wave
+    /// takes that long to finish reaching every particle (each one picks
+    /// its own random moment inside the window), so calling this again
+    /// before the previous wave has fully played out would re-trigger
+    /// particles that had only just reappeared — a second, unwanted
+    /// vanish-and-reappear on top of the first. One call per particle per
+    /// real hypothesis change is the intended behaviour; this is what
+    /// enforces it even if the caller (e.g. is_wlp chattering right at its
+    /// threshold) fires more often than that.
     pub fn trigger_position_reroll(&mut self, current_time: f32) {
+        const POSITION_REROLL_COOLDOWN_SECONDS: f32 = 10.0; // must match compute.wgsl's POSITION_REROLL_WINDOW
+        if current_time - self.last_position_reroll_trigger_time < POSITION_REROLL_COOLDOWN_SECONDS {
+            return;
+        }
+        self.last_position_reroll_trigger_time = current_time;
         self.next_position_reroll_generation = self.next_position_reroll_generation.wrapping_add(1);
         if self.next_position_reroll_generation == 0 {
             self.next_position_reroll_generation = 1;
