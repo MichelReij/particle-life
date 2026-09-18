@@ -540,9 +540,16 @@ fn calculateLightningElectromagneticForce(particle_pos: vec2<f32>, particle_vel:
 // Calculate electromagnetic force from a single lightning segment
 fn calculateSegmentElectromagneticForce(particle_pos: vec2<f32>, particle_vel: vec2<f32>, segment_start: vec2<f32>, segment_end: vec2<f32>, generation: u32, particle_type: u32, time: f32, segment_age: f32) -> vec2<f32> {
     // SIMPLIFIED REPULSION TEST: Work directly in UV coordinates
-    // Convert particle position from world coordinates to UV coordinates
-    // NOTE: Flip Y coordinate to match lightning rendering coordinate system
-    let particle_uv = vec2<f32>(particle_pos.x / sim_params.virtual_world_width, 1.0 - (particle_pos.y / sim_params.virtual_world_height));
+    // Convert particle position from world coordinates to UV coordinates.
+    // No Y flip: segment.start_pos/end_pos are plain world_pos/world_dimension
+    // fractions (see lightning_compute.wgsl's bolt generation and how
+    // lightning_frag_buffer.wgsl converts them back — neither ever flips Y),
+    // so particle_uv must use the exact same plain conversion to land in the
+    // same space. The flip that used to be here compared a Y-mirrored
+    // particle position against un-mirrored segment coordinates — a bolt
+    // affected particles on the opposite (mirrored) side of the world from
+    // where it was actually visible.
+    let particle_uv = vec2<f32>(particle_pos.x / sim_params.virtual_world_width, particle_pos.y / sim_params.virtual_world_height);
 
     // Lightning segments are already in UV coordinates (0.0-1.0)
     // Find closest point on segment to particle (in UV space)

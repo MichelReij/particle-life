@@ -552,9 +552,19 @@ impl MinimalNativeApp {
                     // ring, so its flash lines up with the on-screen bolt
                     // instead of landing at a random spot on the ring — see
                     // read_lightning_origin_uv() for what this reads.
+                    //
+                    // v (world Y, north-south) is negated here: the ring's
+                    // NEO_RING_ANGLE_OFFSET_DEG/NEO_RING_DIRECTION_REVERSED
+                    // calibration (NeoPixelDriver.h) was tuned empirically by
+                    // eye against the on-screen bolt — at a time when the
+                    // on-screen render itself had a north-south mirror bug
+                    // (fixed in lightning_vert.wgsl). That calibration only
+                    // encodes the ring's physical mounting (a real, unrelated
+                    // property), so the fix belongs here at the angle's
+                    // source rather than in those constants.
                     let position_byte = match pollster::block_on(renderer.read_lightning_origin_uv()) {
                         Ok((u, v)) => {
-                            let angle = (v - 0.5).atan2(u - 0.5); // -PI..PI
+                            let angle = (0.5 - v).atan2(u - 0.5); // -PI..PI
                             (((angle + std::f32::consts::PI) / (2.0 * std::f32::consts::PI)) * 255.0) as u8
                         }
                         Err(_) => 0,
