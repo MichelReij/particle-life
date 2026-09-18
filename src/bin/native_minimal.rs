@@ -594,8 +594,19 @@ impl MinimalNativeApp {
                     );
                 }
 
-                if bolt.next_lightning_time > self.current_time {
-                    let wait = bolt.next_lightning_time - self.current_time - 0.1;
+                // Sleep until shortly before the PREVIEW becomes ready
+                // (next_lightning_time - PRE_GEN_LEAD), not until shortly
+                // before the strike itself — the preview-based ESP32 send
+                // above only ever fires while polling is actually happening,
+                // so sleeping all the way up to the strike meant the first
+                // poll after waking usually landed just ~100ms before the
+                // strike, sending time_2_lightning as ~100ms instead of the
+                // intended ~3s lead. PRE_GEN_LEAD must match
+                // lightning_compute.wgsl's own constant of the same name.
+                const PRE_GEN_LEAD_SECONDS: f32 = 3.0;
+                let preview_due_at = bolt.next_lightning_time - PRE_GEN_LEAD_SECONDS;
+                if preview_due_at > self.current_time {
+                    let wait = preview_due_at - self.current_time - 0.1;
                     if wait > 0.5 {
                         self.next_poll_time = now + std::time::Duration::from_secs_f32(wait);
                     }
