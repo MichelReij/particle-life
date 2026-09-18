@@ -549,9 +549,25 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
 
-    // Check if lightning is enabled
+    // Check if lightning is enabled. While disabled (HTV, or the slider at
+    // 0 in WLP), sim_params.time keeps advancing but this whole shader
+    // returns early every frame — so next_lightning_time/preview_ready were
+    // being left completely frozen at whatever they were the instant
+    // lightning turned off. Real time could then advance well past that
+    // stale next_lightning_time before lightning is re-enabled, so the very
+    // first frame back would see time already past (or just about to
+    // reach) a strike that was actually scheduled ages ago — either firing
+    // an oddly-timed bolt straight away, or (more visibly) the pre-flash
+    // "thundercloud" darkening in lightning_frag_buffer.wgsl briefly
+    // appearing with no bolt following it, since that darkening keys off
+    // the same stale next_lightning_time. Resetting both here forces a
+    // completely fresh schedule (same as the very first bolt ever, via the
+    // next_lightning_time <= 0.0 branch below) the moment lightning turns
+    // back on.
     if (sim_params.lightning_frequency <= 0.0) {
         lightning_bolt.num_segments = 0u;
+        lightning_bolt.next_lightning_time = 0.0;
+        lightning_bolt.preview_ready = 0u;
         return;
     }
 
@@ -567,6 +583,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let electricalActivity = sim_params.lightning_frequency;
     if (electricalActivity <= 0.0) {
         lightning_bolt.num_segments = 0u;
+        lightning_bolt.next_lightning_time = 0.0;
+        lightning_bolt.preview_ready = 0u;
         return;
     }
 
