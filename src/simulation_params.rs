@@ -71,6 +71,16 @@ pub struct SimulationParams {
     // Smoothed zoom level for ESP32 input (EMA filter against ADC noise)
     pub smoothed_zoom: f32,
 
+    // Smoothed temperature for ESP32 input (EMA filter against ADC noise).
+    // -1.0 = not yet initialised (first call snaps straight to the raw
+    // reading instead of easing in from a default that may be far off).
+    // Temperature drives base_friction directly and un-smoothed every tick
+    // (apply_temperature), and friction itself gets multiplied up to 2x
+    // during full WLP night (see update_night_alpha) — so any raw sensor
+    // noise here, however small normally, becomes twice as visible
+    // specifically at night, showing up as particles trembling/shaking.
+    pub smoothed_temperature: f32,
+
     // EMA-smoothed background hue (degrees). -1 = not yet initialised (first
     // call snaps straight to the target). Matches the physical RGB-ball's
     // ~20s smoothing time constant (see BACKGROUND_HUE_TAU_SECONDS below) so
@@ -164,6 +174,7 @@ impl SimulationParams {
             // Default zoom level
             current_zoom_level: 1.0,
             smoothed_zoom: 1.0,
+            smoothed_temperature: -1.0,
             background_hue: -1.0,
 
             // Environmental control levels (start at non-optimal to encourage exploration)
@@ -209,11 +220,33 @@ impl SimulationParams {
     }
 
     // Check if transition is complete
+    //
+    // Must wait transition_duration PLUS the full staggering window here:
+    // set_particle_count() (lib.rs / native_minimal.rs) gives each particle
+    // in a shrink batch its own transition_start up to
+    // POPULATION_TRANSITION_STAGGER_SECONDS *after* transition_start_time
+    // (see its own comment for why), so the last-staggered particle doesn't
+    // even BEGIN its fade-out until close to that whole window has elapsed,
+    // and needs a further transition_duration after that to finish fading.
+    // Without this margin, the caller snaps num_particles down to
+    // transition_end_count as soon as the (unstaggered) transition_duration
+    // alone has passed — GPU-side, any particle with p_idx >= num_particles
+    // is skipped entirely, including its fade rendering — so every
+    // still-mid-fade particle beyond that count just vanishes outright
+    // instead of finishing its shrink animation. Reported as large groups of
+    // particles disappearing instantly, with no shrink/opacity change,
+    // roughly once per second (however often a population-count change
+    // actually lands during a pressure sweep).
     pub fn is_transition_complete(&self, current_time: f32) -> bool {
         if !self.transition_active {
             return true;
         }
-        (current_time - self.transition_start_time) >= self.transition_duration
+        let required = if self.transition_is_grow {
+            self.transition_duration
+        } else {
+            self.transition_duration + crate::POPULATION_TRANSITION_STAGGER_SECONDS
+        };
+        (current_time - self.transition_start_time) >= required
     }
 
     pub fn update_parameter(&mut self, name: &str, value: f32) -> bool {
@@ -843,13 +876,23 @@ impl SimulationParams {
         let pressure = sensor_data.to_pressure();
         self.apply_pressure(pressure);
 
-        // Apply temperature — slider range differs per hypothesis (HTV: 3-160°C, WLP: 3-100°C)
-        let temperature = if self.is_wlp {
+        // Apply temperature — slider range differs per hypothesis (HTV: 3-160°C, WLP: 3-100°C).
+        // EMA-smoothed against ADC noise, same approach as zoom above: alpha
+        // = 0.05 → time constant ≈ 16 frames (~0.27s @ 60fps), smooth but
+        // still responsive to a deliberate dial turn. See smoothed_temperature's
+        // own doc comment for why this specifically matters at night.
+        let raw_temperature = if self.is_wlp {
             sensor_data.to_temperature_wlp()
         } else {
             sensor_data.to_temperature_celsius()
         };
-        self.apply_temperature(temperature);
+        const TEMPERATURE_ALPHA: f32 = 0.05;
+        if self.smoothed_temperature < 0.0 {
+            self.smoothed_temperature = raw_temperature; // first call: snap straight to target
+        } else {
+            self.smoothed_temperature += TEMPERATURE_ALPHA * (raw_temperature - self.smoothed_temperature);
+        }
+        self.apply_temperature(self.smoothed_temperature);
 
         // Override the instant background colour apply_temperature() just set
         // with the liaison ESP32's own pre-smoothed hue (see apply_display_hue's
