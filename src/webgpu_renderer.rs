@@ -425,9 +425,6 @@ impl WebGpuRenderer {
         let lightning_segments_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Lightning Segments Buffer"),
             size: (max_lightning_segments * 48) as u64,
-            // COPY_SRC added so read_lightning_origin_uv() can copy segment 0's
-            // start_pos back to the CPU (for relaying the bolt's rough location
-            // to the ESP32/neopixel ring).
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
@@ -1325,41 +1322,6 @@ impl WebGpuRenderer {
         drop(data);
         staging.unmap();
         Ok(bolt)
-    }
-
-    /// Reads the just-fired bolt's bolt_center_x/y (in virtual-world UV
-    /// coordinates 0.0-1.0) back from the GPU — the centre of the bounding
-    /// circle around every one of its segments (trunk + all branches, see
-    /// lightning_compute.wgsl), relayed to the ESP32/neopixel ring so its
-    /// flash lines up with the on-screen bolt's real extent. Previously read
-    /// segment 0's start_pos (just the trunk's origin point) instead — the
-    /// centroid is the more representative "where did this bolt happen"
-    /// location once a bolt can branch well away from its own start. Those
-    /// two f32 fields sit at byte offset 48 in the LightningBolt struct (see
-    /// its field list in lightning_compute.wgsl / this file).
-    pub async fn read_lightning_origin_uv(&self) -> Result<(f32, f32), RendererError> {
-        let offset = 48u64; // bolt_center_x/y offset within LightningBolt
-        let size = 8u64; // vec2<f32>
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Lightning Origin Staging"), size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lightning Origin Copy") });
-        encoder.copy_buffer_to_buffer(&self.lightning_bolt_buffer, offset, &staging, 0, size);
-        self.queue.submit(std::iter::once(encoder.finish()));
-
-        let slice = staging.slice(..);
-        let (tx, rx) = futures::channel::oneshot::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { tx.send(r).ok(); });
-        self.device.poll(wgpu::MaintainBase::Wait).map_err(|e| renderer_error("Poll failed", e))?;
-        rx.await.map_err(|_| renderer_error("Channel closed", ""))?.map_err(|e| renderer_error("Map failed", e))?;
-
-        let data = slice.get_mapped_range();
-        let uv: [f32; 2] = *bytemuck::from_bytes(&data[..8]);
-        drop(data);
-        staging.unmap();
-        Ok((uv[0], uv[1]))
     }
 
     /// Bumps the position-reroll generation counter and pushes it (+ the

@@ -62,12 +62,14 @@ struct MinimalNativeApp {
     desired_particle_count: u32,
     fps_samples: Vec<f32>,
     fps_sample_index: usize,
-    lightning_polling_enabled: bool,
     last_lightning_poll: std::time::Instant,
     current_flash_id: u32,
-    lightning_start_time: f32,
-    lightning_communicated: bool,
     next_poll_time: std::time::Instant,
+    // Dedup for the preview-based ESP32 send: next_lightning_time changes
+    // exactly once per bolt cycle (reassigned only at promotion, see
+    // lightning_compute.wgsl), so remembering the last value we already
+    // sent for is enough — no cooldown/throttle needed.
+    last_sent_preview_next_time: f32,
     last_night_alpha_sent: f32,
     last_night_alpha_update: std::time::Instant,
 }
@@ -114,12 +116,10 @@ impl Default for MinimalNativeApp {
             desired_particle_count: initial_particle_count,
             fps_samples: vec![60.0; FPS_SAMPLE_COUNT],
             fps_sample_index: 0,
-            lightning_polling_enabled: true,
             last_lightning_poll: std::time::Instant::now(),
             current_flash_id: 0,
-            lightning_start_time: 0.0,
-            lightning_communicated: false,
             next_poll_time: std::time::Instant::now(),
+            last_sent_preview_next_time: 0.0,
             last_night_alpha_sent: -1.0,
             last_night_alpha_update: std::time::Instant::now(),
         }
@@ -507,72 +507,91 @@ impl MinimalNativeApp {
         let renderer = match &mut self.renderer { Some(r) => r, None => return };
         let now = std::time::Instant::now();
 
-        // The 2s cooldown reset below used to live AFTER the polling_enabled
-        // guard — but sending a flash sets lightning_polling_enabled = false,
-        // and nothing else ever set it back to true, so that guard returned
-        // early forever afterward and the reset code could never run. Net
-        // effect: exactly one lightning event was ever communicated to the
-        // ESP32 for the entire lifetime of the process, no matter how many
-        // bolts fired later. Check the cooldown unconditionally, first.
-        if self.lightning_communicated {
-            if self.current_time - self.lightning_start_time >= 2.0 {
-                self.lightning_polling_enabled = true;
-                self.lightning_communicated    = false;
-                // current_flash_id is deliberately NOT reset to 0 here: the GPU's
-                // bolt.flash_id only ever increases, so zeroing it would make the
-                // very next poll re-detect the *same* already-sent bolt as "new"
-                // (its id is still > 0) and resend it every 2s forever instead of
-                // waiting for a genuinely new bolt with a higher id.
-                self.next_poll_time            = now;
-            } else {
-                return;
-            }
-        }
-
-        if !self.lightning_polling_enabled || now < self.next_poll_time { return; }
-
+        if now < self.next_poll_time { return; }
         if now.duration_since(self.last_lightning_poll).as_millis() < 100 { return; }
         self.last_lightning_poll = now;
 
         match pollster::block_on(renderer.read_lightning_bolt_data()) {
             Ok(bolt) => {
+                // Actual-fire detection: drives the interaction-rules "snap"
+                // on super lightning. Kept separate from (and later than)
+                // the preview-based ESP32 signal below, so this dramatic
+                // mechanic still lands at the moment the bolt is actually
+                // visible, not 3s early.
                 if bolt.flash_id > self.current_flash_id
                     && bolt.start_time > 0.0
                     && bolt.start_time <= self.current_time + 10.0
                 {
-                    self.current_flash_id     = bolt.flash_id;
-                    self.lightning_start_time = bolt.start_time;
-
+                    self.current_flash_id = bolt.flash_id;
                     if bolt.is_super() {
                         self.rule_evolution.snap_to_new(&mut self.rng);
                         console_log!("⚡ Super-lightning: regels gesnapt");
                     }
+                }
 
-                    // Rough "where did this happen" location for the neopixel
-                    // ring, so its flash lines up with the on-screen bolt
-                    // instead of landing at a random spot on the ring — see
-                    // read_lightning_origin_uv() for what this reads.
-                    //
-                    // v (world Y, north-south) is negated here: the ring's
-                    // NEO_RING_ANGLE_OFFSET_DEG/NEO_RING_DIRECTION_REVERSED
-                    // calibration (NeoPixelDriver.h) was tuned empirically by
-                    // eye against the on-screen bolt — at a time when the
-                    // on-screen render itself had a north-south mirror bug
-                    // (fixed in lightning_vert.wgsl). That calibration only
-                    // encodes the ring's physical mounting (a real, unrelated
-                    // property), so the fix belongs here at the angle's
-                    // source rather than in those constants.
-                    let position_byte = match pollster::block_on(renderer.read_lightning_origin_uv()) {
-                        Ok((u, v)) => {
-                            let angle = (0.5 - v).atan2(u - 0.5); // -PI..PI
-                            (((angle + std::f32::consts::PI) / (2.0 * std::f32::consts::PI)) * 255.0) as u8
-                        }
-                        Err(_) => 0,
-                    };
+                // Preview-based ESP32 signal: sent once, at the START of the
+                // whole lightning sequence (the "thundercloud" preview
+                // becoming ready — see PRE_GEN_LEAD in
+                // lightning_compute.wgsl), not at the moment the bolt
+                // actually fires. Dedup on next_lightning_time, which only
+                // changes once per bolt cycle (reassigned at promotion).
+                if bolt.preview_ready != 0
+                    && bolt.next_lightning_time != self.last_sent_preview_next_time
+                    && bolt.next_lightning_time > self.current_time
+                {
+                    self.last_sent_preview_next_time = bolt.next_lightning_time;
 
-                    self.communicate_lightning_to_esp32(bolt.flash_id, bolt.is_super(), bolt.start_time, position_byte);
-                    self.lightning_communicated    = true;
-                    self.lightning_polling_enabled = false;
+                    let time_2_lightning_ms = ((bolt.next_lightning_time - self.current_time) * 1000.0)
+                        .round()
+                        .clamp(0.0, u16::MAX as f32) as u16;
+
+                    // Mirrors lightning_frag_buffer.wgsl's hold_duration
+                    // (2.2s) + fade_duration (1.5s) — the on-screen
+                    // darkening's own post-flash hold+fade window. No shared
+                    // constant between shader and host today, so kept in
+                    // sync manually — update both places together.
+                    const POST_FLASH_HOLD_MS: u32 = 2200;
+                    const POST_FLASH_FADE_MS: u32 = 1500;
+                    let sequence_duration_ms = (time_2_lightning_ms as u32 + POST_FLASH_HOLD_MS + POST_FLASH_FADE_MS)
+                        .min(u16::MAX as u32) as u16;
+
+                    let lightning_duration_ms = (self.simulation_params.lightning_duration * 1000.0)
+                        .round()
+                        .clamp(0.0, u16::MAX as f32) as u16;
+
+                    // Canonical angle: plain atan2 over world (u, v),
+                    // standard math convention (0° = due east, increasing
+                    // counter-clockwise), no compensation for any particular
+                    // consumer's physical mounting baked in. Each consumer
+                    // of LightningData (the neopixel ring today, maybe
+                    // others later) calibrates this against its own
+                    // physical reality on its own side (see
+                    // NEO_RING_ANGLE_OFFSET_DEG / NEO_RING_DIRECTION_REVERSED
+                    // in platformio's NeoPixelDriver.h) — this function must
+                    // never encode one specific consumer's mounting quirks.
+                    let angle = (bolt.preview_center_y - 0.5).atan2(bolt.preview_center_x - 0.5);
+                    let position_byte = (((angle + std::f32::consts::PI) / (2.0 * std::f32::consts::PI)) * 255.0) as u8;
+
+                    // Radius of the bounding circle around the upcoming
+                    // bolt's full geometry (the same value that sizes the
+                    // on-screen thundercloud), already 0-1 world units —
+                    // used directly as intensity so a physically bigger
+                    // bolt reads as more intense. Super bolts naturally
+                    // land higher here on their own (extra branch
+                    // generations + a 2.5x segment-length boost in
+                    // lightning_compute.wgsl), no separate normal/super
+                    // split needed.
+                    let intensity = bolt.preview_radius.clamp(0.0, 1.0);
+
+                    self.communicate_lightning_to_esp32(
+                        bolt.flash_id + 1, // id this bolt gets when it fires — see lightning_compute.wgsl's promotion
+                        bolt.preview_is_super != 0,
+                        intensity,
+                        position_byte,
+                        time_2_lightning_ms,
+                        lightning_duration_ms,
+                        sequence_duration_ms,
+                    );
                 }
 
                 if bolt.next_lightning_time > self.current_time {
@@ -589,12 +608,21 @@ impl MinimalNativeApp {
         }
     }
 
-    fn communicate_lightning_to_esp32(&self, flash_id: u32, is_super: bool, start_time: f32, position_byte: u8) {
+    fn communicate_lightning_to_esp32(
+        &self,
+        flash_id: u32,
+        is_super: bool,
+        intensity: f32,
+        position_byte: u8,
+        time_2_lightning_ms: u16,
+        lightning_duration_ms: u16,
+        sequence_duration_ms: u16,
+    ) {
         if let Some(esp32) = &self.esp32_manager {
             esp32.send_lightning_event(
-                flash_id, if is_super { 1 } else { 0 }, start_time,
-                if is_super { 1.0 } else { 0.7 },
-                position_byte,
+                flash_id, if is_super { 1 } else { 0 }, self.current_time,
+                intensity, position_byte,
+                time_2_lightning_ms, lightning_duration_ms, sequence_duration_ms,
             );
         }
     }

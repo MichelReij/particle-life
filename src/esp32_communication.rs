@@ -27,10 +27,30 @@ pub struct ESP32LightningEvent {
     // its own flash roughly where the bolt appeared on screen instead of at a
     // fully random spot — not meant to be precise, just roughly correlated.
     pub position: u8,
+    // This event is now sent at the START of the whole lightning sequence
+    // (the moment the "thundercloud" preview becomes ready), not at the
+    // moment the bolt actually fires — so consumers get a lead-in window to
+    // build up their own pre-flash effect (e.g. darkening ring pixels)
+    // before the strike itself lands. Three durations, all measured in ms
+    // from the moment this packet is sent:
+    pub time_2_lightning_ms: u16, // until the strike itself begins
+    pub lightning_duration_ms: u16, // how long the strike/flash itself lasts
+    pub sequence_duration_ms: u16, // until the WHOLE sequence (incl. the
+                                     // thundercloud's fade back to normal
+                                     // after the strike) is over
 }
 
 impl ESP32LightningEvent {
-    pub fn new(flash_id: u32, lightning_type: u8, start_time: f32, intensity: f32, position: u8) -> Self {
+    pub fn new(
+        flash_id: u32,
+        lightning_type: u8,
+        start_time: f32,
+        intensity: f32,
+        position: u8,
+        time_2_lightning_ms: u16,
+        lightning_duration_ms: u16,
+        sequence_duration_ms: u16,
+    ) -> Self {
         Self {
             flash_id,
             lightning_type,
@@ -41,6 +61,9 @@ impl ESP32LightningEvent {
                 .unwrap_or_default()
                 .as_millis() as u64,
             position,
+            time_2_lightning_ms,
+            lightning_duration_ms,
+            sequence_duration_ms,
         }
     }
 
@@ -198,14 +221,25 @@ impl ESP32Manager {
         start_time: f32,
         intensity: f32,
         position: u8,
+        time_2_lightning_ms: u16,
+        lightning_duration_ms: u16,
+        sequence_duration_ms: u16,
     ) {
-        let lightning_event =
-            ESP32LightningEvent::new(flash_id, lightning_type, start_time, intensity, position);
+        let lightning_event = ESP32LightningEvent::new(
+            flash_id,
+            lightning_type,
+            start_time,
+            intensity,
+            position,
+            time_2_lightning_ms,
+            lightning_duration_ms,
+            sequence_duration_ms,
+        );
 
         if let Ok(mut state) = self.shared_state.lock() {
             state.pending_lightning_events.push(lightning_event);
             println!(
-                "⚡ ESP32: Queued lightning event (Flash ID: {}, Type: {}, Intensity: {:.2}, Position: {})",
+                "⚡ ESP32: Queued lightning event (Flash ID: {}, Type: {}, Intensity: {:.2}, Position: {}, T-{}ms, dur {}ms, seq {}ms)",
                 flash_id,
                 if lightning_type == 1 {
                     "Super"
@@ -213,7 +247,10 @@ impl ESP32Manager {
                     "Normal"
                 },
                 intensity,
-                position
+                position,
+                time_2_lightning_ms,
+                lightning_duration_ms,
+                sequence_duration_ms
             );
         }
     }
@@ -1330,11 +1367,12 @@ fn send_pending_lightning_events(
         }
     };
 
-    // Send each lightning event as binary LightningPacket (10 bytes):
-    // [0xBB] [flash_id u32 BE] [lightning_type u8] [intensity u16 BE] [position u8] [0xCC]
+    // Send each lightning event as binary LightningPacket (16 bytes):
+    // [0xBB] [flash_id u32 BE] [lightning_type u8] [intensity u16 BE] [position u8]
+    // [time_2_lightning u16 BE] [lightning_duration u16 BE] [sequence_duration u16 BE] [0xCC]
     for event in events_to_send {
         let intensity_raw = (event.intensity * 4096.0).clamp(0.0, 4096.0) as u16;
-        let packet: [u8; 10] = [
+        let packet: [u8; 16] = [
             0xBB,
             ((event.flash_id >> 24) & 0xFF) as u8,
             ((event.flash_id >> 16) & 0xFF) as u8,
@@ -1344,6 +1382,12 @@ fn send_pending_lightning_events(
             ((intensity_raw >> 8) & 0xFF) as u8,
             (intensity_raw        & 0xFF) as u8,
             event.position,
+            ((event.time_2_lightning_ms >> 8) & 0xFF) as u8,
+            (event.time_2_lightning_ms        & 0xFF) as u8,
+            ((event.lightning_duration_ms >> 8) & 0xFF) as u8,
+            (event.lightning_duration_ms        & 0xFF) as u8,
+            ((event.sequence_duration_ms >> 8) & 0xFF) as u8,
+            (event.sequence_duration_ms        & 0xFF) as u8,
             0xCC,
         ];
 
