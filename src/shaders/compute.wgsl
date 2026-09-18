@@ -212,7 +212,12 @@ struct PositionReroll {
 }
 @group(0) @binding(10)
 var<storage, read_write> position_reroll: PositionReroll;
-const POSITION_REROLL_WINDOW: f32 = 5.0;
+// Widened from 5.0: with up to 6400 particles and each shrink+grow cycle
+// taking ~2-3s (2x transition_duration), a 5s window meant roughly 40% of
+// the whole population was simultaneously mid-transition at any moment —
+// read as a mass, coordinated flicker rather than a gradual, organic
+// turnover. 25s spreads that down to a much smaller, staggered fraction.
+const POSITION_REROLL_WINDOW: f32 = 25.0;
 
 const PI: f32 = 3.141592653589793;
 const EPSILON: f32 = 0.001;
@@ -451,7 +456,10 @@ fn isInsideLightningCore(particle_pos: vec2<f32>, time: f32) -> bool {
         return false;
     }
 
-    let particle_uv = vec2<f32>(particle_pos.x / sim_params.virtual_world_width, 1.0 - (particle_pos.y / sim_params.virtual_world_height));
+    // No Y flip: segment.start_pos/end_pos are plain world_pos/world_dimension
+    // fractions (see calculateSegmentElectromagneticForce's own fix for the
+    // identical bug), so particle_uv must use the same plain conversion.
+    let particle_uv = vec2<f32>(particle_pos.x / sim_params.virtual_world_width, particle_pos.y / sim_params.virtual_world_height);
 
     for (var seg_idx = 0u; seg_idx < bolt.num_segments; seg_idx++) {
         let segment = lightning_segments[seg_idx];

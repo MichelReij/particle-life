@@ -470,7 +470,21 @@ impl MinimalNativeApp {
                     ];
                     particle.velocity = [self.rng.gen_range(-2.0..2.0), self.rng.gen_range(-2.0..2.0)];
                     particle.size = 0.1;
-                    particle.transition_start = self.current_time;
+                    // Staggered, not identical: every particle in this batch
+                    // used to get the exact same transition_start, so a
+                    // population-count change (e.g. pressure crossing one of
+                    // the nearest-64 rounding steps in
+                    // pressure_to_particle_count, which happens routinely
+                    // while sweeping through the WLP<->HTV threshold) popped
+                    // in perfectly synchronised — read as a large,
+                    // coordinated flash of many particles at once. A
+                    // transition_start in the near future is safe: the
+                    // per-particle progress calc in compute.wgsl clamps
+                    // negative elapsed time to progress=0, which already
+                    // renders as effectively invisible (min_visible_size), so
+                    // the particle just sits dormant until its own delayed
+                    // start arrives.
+                    particle.transition_start = self.current_time + self.rng.gen_range(0.0..POPULATION_TRANSITION_STAGGER_SECONDS);
                     particle.transition_type = 0;
                     particle.is_active = false;
                 }
@@ -492,7 +506,12 @@ impl MinimalNativeApp {
 
             for i in count..mark_end {
                 if let Some(particle) = self.particle_system.get_particle_mut(i as usize) {
-                    particle.transition_start = self.current_time;
+                    // Staggered — see the grow branch's comment above for why.
+                    // A still-in-the-future transition_start renders as
+                    // progress=0, i.e. still fully at target_size, so the
+                    // particle simply stays normal-looking until its own
+                    // delayed fade-out begins.
+                    particle.transition_start = self.current_time + self.rng.gen_range(0.0..POPULATION_TRANSITION_STAGGER_SECONDS);
                     particle.transition_type = 1;
                 }
             }
