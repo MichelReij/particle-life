@@ -187,8 +187,34 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
         return out;
     }
 
-    // Get particle color
-    let particle_color = getColorForType(particle_attrs.particle_type, sim_params.num_types);
+    // Get particle color. Alpha fades non-linearly over the transition's own
+    // timing, rather than tracking the (roughly linear) size ramp directly —
+    // without an opacity change at all here, a vanish/reappear transition was
+    // pure geometry shrinkage, so the particle stayed fully opaque all the
+    // way down to a hard cull below 1px (see above), then popped from "fully
+    // opaque 1px dot" to "gone" (and the reverse on reappear) instead of
+    // smoothly fading through transparency.
+    //
+    // Eased per feedback: disappearing (shrink) fades slowly at first and
+    // accelerates toward the end (ease-in on the fade-OUT amount, t²);
+    // appearing (grow) is the exact mirror — fades in quickly at first and
+    // eases off as it nears full opacity (ease-out, 1-(1-t)²). For a
+    // particle with no active transition this is a no-op (alpha stays 1).
+    var particle_color = getColorForType(particle_attrs.particle_type, sim_params.num_types);
+    var alpha_fade = 1.0;
+    if (particle_attrs.transition_start > 0.0) {
+        let elapsed = sim_params.time - particle_attrs.transition_start;
+        let t = clamp(elapsed / sim_params.transition_duration, 0.0, 1.0);
+        if (particle_attrs.transition_type == 1u) {
+            // Shrink: ease-in fade-out.
+            alpha_fade = 1.0 - t * t;
+        } else {
+            // Grow: ease-out fade-in.
+            let inv = 1.0 - t;
+            alpha_fade = 1.0 - inv * inv;
+        }
+    }
+    particle_color.a *= alpha_fade;
 
     // Use per-particle size directly - no scaling needed since we render directly to canvas
     let particle_radius_pixels = particle_attrs.particle_size;

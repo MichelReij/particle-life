@@ -1222,14 +1222,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
 
                 particle_p.is_active = 1u;
-                // Activate at start of grow transition
-                let min_visible_size = 3.0;
+                // Activate at start of grow transition. min_visible_size
+                // matches the shrink branch's own endpoint (0.1, not the
+                // old hard-coded 3.0) so vanish and reappear are symmetric:
+                // without this a particle finishing its shrink at 0.1 would
+                // instantly pop to a fixed 3px dot the moment grow started,
+                // instead of smoothly fading in from essentially nothing —
+                // exactly the "schokkerig" (jerky) reappearance reported.
+                let min_visible_size = 0.01;
                 particle_p.size = min_visible_size + (particle_p.target_size - min_visible_size) * progress;
             }
             else {
                 // Shrink transition: stay active but interpolate size down
                 // Don't deactivate until transition completes
-                let min_visible_size = 0.1;
+                let min_visible_size = 0.01;
                 particle_p.size = particle_p.target_size * (1.0 - progress) + min_visible_size * progress;
             }
         }
