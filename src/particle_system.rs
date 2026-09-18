@@ -153,7 +153,7 @@ impl ParticleSystem {
             active_count: params.num_particles,
             num_types,
             base_particle_size: params.particle_render_size,
-            particle_opacity: 0.9,
+            particle_opacity: 0.8,
             type_colors: DEFAULT_COLORS,
             spatial_grid,
         }
