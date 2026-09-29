@@ -1101,8 +1101,18 @@ class EmbedApp {
         let tabHidden = false;
         let scrolledOut = false;
 
+        // Bij autopauze stopt de rAF-loop volledig (geen lege frames die de
+        // CPU/GPU wakker houden); bij hervatten wordt hij opnieuw gestart.
         const updateAutopause = () => {
+            const wasPaused = this.autopaused;
             this.autopaused = tabHidden || windowHidden || scrolledOut;
+            if (this.autopaused && !wasPaused && this.animationId !== null) {
+                cancelAnimationFrame(this.animationId);
+                this.animationId = null;
+            } else if (!this.autopaused && wasPaused && this.animationId === null) {
+                this.lastTime = performance.now();
+                this.animationId = requestAnimationFrame(animate);
+            }
         };
 
         const onVisibility = () => {
@@ -1135,9 +1145,13 @@ class EmbedApp {
             const dt = Math.min((now - this.lastTime) / 1000, 0.05);
             this.lastTime = now;
 
+            if (this.autopaused) {
+                this.animationId = null;
+                return;
+            }
+
             if (
                 !this.isPaused &&
-                !this.autopaused &&
                 this.engine &&
                 !this.engineBusy
             ) {

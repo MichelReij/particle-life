@@ -497,6 +497,37 @@ class App {
             this.animationId = requestAnimationFrame(animate);
         };
 
+        // Onzichtbare tab of inactief venster: rAF-loop en audio volledig
+        // stilleggen om batterij te sparen; bij terugkeer hervatten.
+        // (Alleen WASM — de native versie gebruikt deze pagina niet.)
+        let windowBlurred = false;
+        const updateAutopause = () => {
+            if (document.hidden || windowBlurred) {
+                if (this.animationId !== null) {
+                    cancelAnimationFrame(this.animationId);
+                    this.animationId = null;
+                }
+                if (this.isAudioOn) this.engine?.set_audio_paused(true);
+            } else {
+                if (this.isAudioOn) this.engine?.set_audio_paused(false);
+                if (this.animationId === null) {
+                    this.lastTime = performance.now();
+                    this.fpsLastTime = this.lastTime;
+                    this.fpsFrameCount = 0;
+                    this.animationId = requestAnimationFrame(animate);
+                }
+            }
+        };
+        document.addEventListener("visibilitychange", updateAutopause);
+        window.addEventListener("blur", () => {
+            windowBlurred = true;
+            updateAutopause();
+        });
+        window.addEventListener("focus", () => {
+            windowBlurred = false;
+            updateAutopause();
+        });
+
         this.animationId = requestAnimationFrame(animate);
         console.log("✅ Rust simulation animation loop started");
     }
