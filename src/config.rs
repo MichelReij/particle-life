@@ -187,22 +187,25 @@ mod tests {
 
     #[test]
     fn test_default_config() {
+        // Vergelijk met de centrale constanten, niet met losse getallen: die worden
+        // regelmatig bijgesteld (deeltjesgrootte, aantallen) en de test moet
+        // controleren dat WorldConfig ze overneemt, niet dat ze nooit veranderen.
         let config = WorldConfig::default();
-        assert_eq!(config.virtual_world_width, 3240.0);
-        assert_eq!(config.virtual_world_height, 3240.0);
-        assert_eq!(config.canvas_width, 1080.0);
-        assert_eq!(config.canvas_height, 1080.0);
-        assert_eq!(config.particle_size, 20.0);
-        assert_eq!(config.default_num_particles, 4800);
-        assert_eq!(config.max_particles, 4800);
-        assert_eq!(config.min_particles, 1200);
+        assert_eq!(config.virtual_world_width, VIRTUAL_WORLD_WIDTH);
+        assert_eq!(config.virtual_world_height, VIRTUAL_WORLD_HEIGHT);
+        assert_eq!(config.canvas_width, CANVAS_WIDTH);
+        assert_eq!(config.canvas_height, CANVAS_HEIGHT);
+        assert_eq!(config.particle_size, PARTICLE_SIZE);
+        assert_eq!(config.default_num_particles, DEFAULT_NUM_PARTICLES);
+        assert_eq!(config.max_particles, MAX_PARTICLES);
+        assert_eq!(config.min_particles, MIN_PARTICLES);
 
         let (center_x, center_y) = config.center();
-        assert_eq!(center_x, 1620.0);
-        assert_eq!(center_y, 1620.0);
+        assert_eq!(center_x, VIRTUAL_WORLD_CENTER_X);
+        assert_eq!(center_y, VIRTUAL_WORLD_CENTER_Y);
 
         let scale = config.scale_factor();
-        assert!((scale - 0.333333).abs() < 0.001);
+        assert!((scale - WORLD_TO_CANVAS_SCALE).abs() < 1e-6);
     }
 
     #[test]
@@ -211,9 +214,10 @@ mod tests {
         assert_eq!(config.virtual_world_width, 3000.0);
         assert_eq!(config.canvas_width, 1000.0);
         assert_eq!(config.particle_size, 15.0);
-        assert_eq!(config.default_num_particles, 4800); // Should use default values
-        assert_eq!(config.max_particles, 4800);
-        assert_eq!(config.min_particles, 1200);
+        // Aantallen komen uit de centrale constanten
+        assert_eq!(config.default_num_particles, DEFAULT_NUM_PARTICLES);
+        assert_eq!(config.max_particles, MAX_PARTICLES);
+        assert_eq!(config.min_particles, MIN_PARTICLES);
 
         let (center_x, center_y) = config.center();
         assert_eq!(center_x, 1500.0);
