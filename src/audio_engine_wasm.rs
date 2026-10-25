@@ -46,6 +46,9 @@ pub struct WasmAudioEngine {
     paused:      bool,
     /// Laatst verstuurde drone-parameters; None = nog niets verstuurd
     last_sent: Cell<Option<DroneParams>>,
+    /// Mengpaneel-gains die nog naar de worklet moeten (de node bestaat pas
+    /// asynchroon, dus wordt bij de eerstvolgende update() verstuurd)
+    pending_mix: RefCell<Option<Vec<f32>>>,
 }
 
 impl WasmAudioEngine {
@@ -120,12 +123,14 @@ impl WasmAudioEngine {
             stream_dest,
             paused: true,
             last_sent: Cell::new(None),
+            pending_mix: RefCell::new(None),
         })
     }
 
     /// Stuurt de drone-parameters naar de AudioWorklet, alleen bij merkbare
     /// verandering (update() wordt elke frame aangeroepen).
     pub fn update(&self, new_state: SonificationState) {
+        self.flush_mix();
         let p = new_state.drone;
         if let Some(last) = self.last_sent.get() {
             let changed = p.to_array().iter().zip(last.to_array()).any(|(a, b)| (a - b).abs() >= 0.002);
@@ -140,6 +145,23 @@ impl WasmAudioEngine {
                     self.last_sent.set(Some(p));
                 }
             }
+        }
+    }
+
+    /// Mengpaneel: lineaire gain per kanaal (volgorde: dsp::mix).
+    pub fn set_mix(&self, gains: &[f32]) {
+        *self.pending_mix.borrow_mut() = Some(gains.to_vec());
+        self.flush_mix();
+    }
+
+    fn flush_mix(&self) {
+        let Some(gains) = self.pending_mix.borrow().clone() else { return };
+        let Some(node) = self.node.borrow().clone() else { return };
+        let Ok(port) = node.port() else { return };
+        let msg = js_sys::Object::new();
+        let arr = js_sys::Float32Array::from(&gains[..]);
+        if js_sys::Reflect::set(&msg, &JsValue::from_str("mix"), &arr).is_ok() && port.post_message(&msg).is_ok() {
+            *self.pending_mix.borrow_mut() = None;
         }
     }
 

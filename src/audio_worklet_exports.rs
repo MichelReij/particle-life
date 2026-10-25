@@ -29,6 +29,16 @@ pub fn worklet_synth_update(params: &[f32]) {
     });
 }
 
+/// Mengpaneel: lineaire gain per kanaal (volgorde: dsp::mix)
+#[wasm_bindgen]
+pub fn worklet_synth_set_mix(gains: &[f32]) {
+    SYNTH.with(|s| {
+        if let Some(synth) = s.borrow_mut().as_mut() {
+            synth.set_mix(gains);
+        }
+    });
+}
+
 #[wasm_bindgen]
 pub fn worklet_synth_render(left: &mut [f32], right: &mut [f32]) {
     SYNTH.with(|s| {

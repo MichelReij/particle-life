@@ -405,6 +405,10 @@ impl SimulationParams {
     }
 
     // === CENTRAL CONVERSION FUNCTIONS ===
+    /// night_alpha tijdens de volle nacht (#000c). Publiek zodat de sonificatie
+    /// "hoe nacht is het" als 0..1 kan uitdrukken.
+    pub const NIGHT_MAX_ALPHA: f32 = 0.8;
+
     // Day/night cycle for WLP. Call once per frame with current sim time.
     // Cycle: 80s day → 10s fade-in → 20s night → 10s fade-out → repeat (120s total)
     pub fn update_night_alpha(&mut self) {
@@ -417,7 +421,7 @@ impl SimulationParams {
         const NIGHT: f32    = 20.0;  // 14 / 0.7
         const FADE_OUT: f32 = 10.0;  // 7 / 0.7
         const CYCLE: f32    = DAY + FADE_IN + NIGHT + FADE_OUT; // 120s
-        const MAX_ALPHA: f32 = 0.8; // #000c
+        const MAX_ALPHA: f32 = SimulationParams::NIGHT_MAX_ALPHA;
 
         let t = (self.time - self.wlp_start_time) % CYCLE;
         self.night_alpha = if t < DAY {
@@ -619,6 +623,12 @@ impl SimulationParams {
             self.background_color_r = r;
             self.background_color_g = g;
             self.background_color_b = b;
+
+            // Bliksem hoort bij de hypothese: de HTV-variant zet lightning_frequency
+            // op 0, de WLP-variant leidt hem af van de elektrische activiteit. Zonder
+            // deze herberekening bleef de WLP-waarde staan tot de volgende
+            // slider-beweging (web) — en bleef het in de diepzee dus onweren.
+            self.apply_electrical_activity(self.electrical_activity_level);
         }
     }
 

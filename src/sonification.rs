@@ -319,6 +319,7 @@ fn drone_params(
     let mut p = DroneParams {
         temperature: temperature_norm(params),
         surface:     if params.is_wlp { 1.0 } else { 0.0 },
+        night:       (params.night_alpha / SimulationParams::NIGHT_MAX_ALPHA).clamp(0.0, 1.0),
         ..DroneParams::default()
     };
     let Some(stats) = gpu_stats else { return p };
@@ -357,4 +358,100 @@ pub fn temperature_norm(params: &SimulationParams) -> f32 {
         (crate::life_params_gen::htv::SLIDER1_MIN, crate::life_params_gen::htv::SLIDER1_MAX)
     };
     ((params.temperature_level - min) / (max - min)).clamp(0.0, 1.0)
+}
+
+// ─── Onweer ──────────────────────────────────────────────────────────────────
+
+/// Seconden donderwolk-opbouw vóór een inslag. Moet gelijk blijven aan lead_time
+/// in lightning_frag_buffer.wgsl en PRE_GEN_LEAD in lightning_compute.wgsl.
+const STORM_LEAD: f32 = 3.0;
+/// Bliksemradius (UV-eenheden) die als "maximaal dichtbij" klinkt. Een bliksem
+/// bestaat uit segmenten van 0.02–0.03 UV (lightning_compute.wgsl); de omtrek van
+/// een hele bliksem ligt daardoor meestal ruim onder de 0.2.
+const STORM_FULL_RADIUS: f32 = 0.15;
+
+/// Volgt de bliksemplanning van de GPU via de simulatieklok, zodat het onweer
+/// precies samenvalt met wat op het scherm gebeurt — zonder op een GPU-readback
+/// te wachten. De LightningBolt wordt maar af en toe teruggelezen (WASM 1×/s,
+/// native rond de preview), maar next_lightning_time ligt vast zodra de vorige
+/// inslag gevallen is (lightning_compute.wgsl), dus de CPU weet ruim op tijd
+/// wanneer de verduistering begint en wanneer de flits komt.
+#[derive(Debug, Clone, Default)]
+pub struct StormTracker {
+    /// Geplande tijd (simulatieklok) van de volgende inslag; 0 = onbekend
+    next_time: f32,
+    /// next_time waarvoor de inslag al geklonken heeft
+    fired_for: f32,
+    strikes:   u32,
+    /// Grootte, positie en super-vlag van de komende inslag, uit de preview
+    preview:   Option<(f32, f32, bool)>,
+    /// Zelfde, van de laatste inslag
+    last:      (f32, f32, bool),
+}
+
+impl StormTracker {
+    /// Elke frame aanroepen ná compute_sonification. `bolt` is de laatst
+    /// teruggelezen LightningBolt (mag oud zijn).
+    pub fn update(&mut self, bolt: Option<&crate::LightningBolt>, params: &SimulationParams, drone: &mut DroneParams) {
+        let now = params.time;
+
+        // Bliksem uit (diepzee, of elektrische activiteit op 0): de shader wist
+        // dan ook zijn planning — wij doen hetzelfde
+        if params.lightning_frequency <= 0.0 {
+            self.next_time = 0.0;
+            self.preview = None;
+        } else if let Some(b) = bolt {
+            // Nieuwe planning overnemen — maar niet de oude die nog in een
+            // verouderde readback staat terwijl die inslag al geweest is
+            if b.next_lightning_time > 0.0 && b.next_lightning_time > self.fired_for
+                && b.next_lightning_time != self.next_time
+            {
+                self.next_time = b.next_lightning_time;
+                self.preview = None;
+            }
+            if b.preview_ready != 0 && b.next_lightning_time == self.next_time {
+                self.preview = Some((
+                    (b.preview_radius / STORM_FULL_RADIUS).clamp(0.0, 1.0),
+                    (b.preview_center_x * 2.0 - 1.0).clamp(-1.0, 1.0),
+                    b.preview_is_super != 0,
+                ));
+            }
+        }
+
+        // Opbouw: zelfde kwadratische curve als de verduistering op scherm
+        let time_to_next = self.next_time - now;
+        drone.storm = if self.next_time > 0.0 && (0.0..=STORM_LEAD).contains(&time_to_next) {
+            let x = 1.0 - time_to_next / STORM_LEAD;
+            x * x
+        } else {
+            0.0
+        };
+
+        // Inslag: de simulatieklok passeert de geplande tijd
+        if self.next_time > 0.0 && now >= self.next_time && self.fired_for != self.next_time {
+            self.fired_for = self.next_time;
+            // Ver achter (tab was verborgen e.d.)? Dan niet alsnog laten knallen
+            if now - self.next_time < 1.0 {
+                self.strikes += 1;
+                self.last = self.preview.unwrap_or((0.6, 0.0, false));
+                crate::console_log!(
+                    "⚡ Onweer: inslag {} — sterkte {:.2}{}, pan {:+.2}{}",
+                    self.strikes,
+                    self.last.0,
+                    if self.preview.is_none() { " (geen preview)" } else { "" },
+                    self.last.1,
+                    if self.last.2 { ", super" } else { "" },
+                );
+            }
+        }
+
+        let (power, pan, is_super) = self.last;
+        drone.strike_id    = self.strikes as f32;
+        drone.strike_age   = if self.strikes > 0 { (now - self.fired_for).clamp(0.0, 10.0) } else { 10.0 };
+        drone.strike_power = power;
+        drone.strike_pan   = pan;
+        drone.strike_super = if is_super { 1.0 } else { 0.0 };
+        drone.lightning    = if params.lightning_frequency > 0.0 { 1.0 } else { 0.0 };
+        drone.strike_eta   = if self.next_time > 0.0 && time_to_next > 0.0 { time_to_next.min(10.0) } else { 10.0 };
+    }
 }

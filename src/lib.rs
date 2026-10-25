@@ -116,6 +116,9 @@ pub struct ParticleLifeEngine {
     // Continuous rule evolution (shared logic, lives in interaction_rules.rs)
     rule_evolution: RuleEvolution,
     last_seen_flash_id: u32,
+    storm_tracker: sonification::StormTracker,
+    /// Mengpaneel-gains; bewaard zodat ze ook gelden voor een later aangemaakte engine
+    audio_mix: Option<Vec<f32>>,
     // Sonificatie
     audio_engine: Option<audio_engine_wasm::WasmAudioEngine>,
     sonification_state: sonification::SonificationState,
@@ -172,6 +175,8 @@ impl ParticleLifeEngine {
             renderer: None,
             rule_evolution,
             last_seen_flash_id: 0,
+            storm_tracker: sonification::StormTracker::default(),
+            audio_mix: None,
             audio_engine: None, // Lazy: aangemaakt bij eerste set_audio_paused(false)
             sonification_state: sonification::SonificationState::default(),
             stats_reader: None,
@@ -357,6 +362,8 @@ impl ParticleLifeEngine {
             gpu_global_ref,
             &self.sonification_state,
         );
+        let bolt = self.renderer.as_ref().and_then(|r| r.get_cached_lightning_bolt());
+        self.storm_tracker.update(bolt.as_ref(), &self.simulation_params, &mut self.sonification_state.drone);
         if let Some(ref engine) = self.audio_engine {
             engine.update(self.sonification_state.clone());
         }
@@ -369,7 +376,12 @@ impl ParticleLifeEngine {
         if !paused && self.audio_engine.is_none() {
             // Lazy init: aanmaken bij eerste klik (user-gesture context vereist)
             match audio_engine_wasm::WasmAudioEngine::new() {
-                Ok(engine) => { self.audio_engine = Some(engine); }
+                Ok(engine) => {
+                    if let Some(ref mix) = self.audio_mix {
+                        engine.set_mix(mix);
+                    }
+                    self.audio_engine = Some(engine);
+                }
                 Err(e) => { crate::console_log!("⚠️ Audio engine fout: {:?}", e); return; }
             }
         }
@@ -382,6 +394,17 @@ impl ParticleLifeEngine {
     pub fn set_audio_volume(&self, v: f32) {
         if let Some(ref engine) = self.audio_engine {
             engine.set_master_volume(v);
+        }
+    }
+
+    /// Mengpaneel: lineaire gain per kanaal (volgorde: dsp::mix — cellos, theremin,
+    /// brainwaves, droplets, stream, surf, thunder, lightning, sonar, reverb,
+    /// master), optioneel gevolgd door de bliksem-sample-and-hold in samples.
+    #[wasm_bindgen]
+    pub fn set_audio_mix(&mut self, gains: &[f32]) {
+        self.audio_mix = Some(gains.to_vec());
+        if let Some(ref engine) = self.audio_engine {
+            engine.set_mix(gains);
         }
     }
 

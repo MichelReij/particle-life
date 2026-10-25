@@ -70,6 +70,9 @@ struct MinimalNativeApp {
     // lightning_compute.wgsl), so remembering the last value we already
     // sent for is enough — no cooldown/throttle needed.
     last_sent_preview_next_time: f32,
+    /// Laatst teruggelezen bliksemstatus — voor het onweer in de drone
+    last_lightning_bolt: Option<LightningBolt>,
+    storm_tracker: particle_life_wasm::sonification::StormTracker,
     last_night_alpha_sent: f32,
     last_night_alpha_update: std::time::Instant,
 }
@@ -120,6 +123,8 @@ impl Default for MinimalNativeApp {
             current_flash_id: 0,
             next_poll_time: std::time::Instant::now(),
             last_sent_preview_next_time: 0.0,
+            last_lightning_bolt: None,
+            storm_tracker: Default::default(),
             last_night_alpha_sent: -1.0,
             last_night_alpha_update: std::time::Instant::now(),
         }
@@ -340,6 +345,11 @@ impl ApplicationHandler for MinimalNativeApp {
                     gpu_type_ref,
                     gpu_global_ref,
                     &self.sonification_state,
+                );
+                self.storm_tracker.update(
+                    self.last_lightning_bolt.as_ref(),
+                    &self.simulation_params,
+                    &mut self.sonification_state.drone,
                 );
                 if let Some(e) = &self.audio_engine {
                     e.set_drone_params(&self.sonification_state.drone);
@@ -562,6 +572,8 @@ impl MinimalNativeApp {
 
         match pollster::block_on(renderer.read_lightning_bolt_data()) {
             Ok(bolt) => {
+                self.last_lightning_bolt = Some(bolt);
+
                 // Actual-fire detection: drives the interaction-rules "snap"
                 // on super lightning. Kept separate from (and later than)
                 // the preview-based ESP32 signal below, so this dramatic

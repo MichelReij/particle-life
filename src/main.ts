@@ -13,6 +13,7 @@ import {
     setRecordingMode,
 } from "./ui";
 import { SimulationParams } from "./particle-life-types";
+import { initAudioMixer } from "./audio-mixer";
 import {
     CANVAS_WIDTH,
     CANVAS_HEIGHT,
@@ -40,6 +41,9 @@ class App {
     // &mut self borrow for the GPU readback; all other &mut self calls must be
     // deferred until it completes.
     private engineBusy = false;
+    // Mengpaneel-gains die nog naar de engine moeten — pas versturen als de
+    // engine niet bezig is (zie engineBusy)
+    private pendingMix: Float32Array | null = null;
 
     async init() {
         console.log("🔧 App.init() called");
@@ -391,6 +395,7 @@ class App {
         console.log("🎯 Initializing UI with default parameters...");
         initializeUI(defaultSimParams, defaultZoomLevel);
         initColorPanel();
+        initAudioMixer((gains) => (this.pendingMix = gains));
 
         // Audio toggle button
         document
@@ -467,6 +472,11 @@ class App {
 
                 // Check lightning status (once per second to avoid spam)
                 this.checkLightningStatus();
+            }
+
+            if (this.pendingMix && this.engine && !this.engineBusy) {
+                this.engine.set_audio_mix(this.pendingMix);
+                this.pendingMix = null;
             }
 
             if (!this.isPaused && this.engine && !this.engineBusy) {

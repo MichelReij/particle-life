@@ -5,12 +5,20 @@
 // Rendert de ambient drone offline naar een 16-bit stereo WAV, met een lineaire
 // temperatuur-sweep zodat het hele tempobereik hoorbaar is.
 //
-//   cargo run --release --example render_drone -- <uit.wav> [seconden] [temp_start] [temp_eind] [chaos] [beweging] [rust] [branding]
+//   cargo run --release --example render_drone -- <uit.wav> [seconden] [temp_start] [temp_eind] [chaos] [beweging] [rust] [branding] [onweer_interval] [mix] [nacht]
 //
 // Temperaturen zijn genormaliseerd: 0 = koudst, 1 = heetst. Chaos, beweging en rust
 // [0, 1] simuleren de clusterstatistieken die de simulatie boven 3× zoom levert;
 // ze zwellen in de tweede helft van de render lineair aan van 0 naar de opgegeven waarde.
 // Branding 1 = getijdenpoel-hypothese (WLP), vanaf het begin.
+// Onweer-interval > 0: elke zoveel seconden een inslag met 3 s donderwolk vooraf;
+// grootte wisselt, elke vierde is een superbliksem.
+// Mix: komma-gescheiden lineaire gains in de volgorde van dsp::mix (cellos,
+// theremin, brainwaves, droplets, stream, surf, thunder, lightning, sonar, reverb,
+// master, en optioneel de bliksem-sample-and-hold), bijv. "1,0,0,0,0,0,0,0,0,1,1"
+// om alleen de cello's (met galm) te horen.
+// Nacht 1: dag-nachtcyclus van de getijdenpoel (80 s dag, 10 s schemering, 20 s
+// nacht, 10 s ochtend), zoals SimulationParams::update_night_alpha.
 
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -25,9 +33,15 @@ fn main() -> std::io::Result<()> {
     let t_end   = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(1.0f32);
     let arg = |i: usize| args.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0f32);
     let (chaos, motion, calm, surface) = (arg(5), arg(6), arg(7), arg(8));
+    let storm_interval = arg(9);
+    let night_cycle = arg(11) > 0.0;
 
     let frames = (seconds * SAMPLE_RATE as f32) as u32;
     let mut synth = DroneSynth::new(SAMPLE_RATE as f32);
+    if let Some(mix) = args.get(10) {
+        let gains: Vec<f32> = mix.split(',').filter_map(|g| g.trim().parse().ok()).collect();
+        synth.set_mix(&gains);
+    }
 
     let mut out = BufWriter::new(File::create(path)?);
     let data_len = frames * 4;
@@ -56,7 +70,8 @@ fn main() -> std::io::Result<()> {
                 motion:      motion * cluster,
                 calm:        calm * cluster,
                 surface,
-                ..DroneParams::default()
+                night: if night_cycle { night(i as f32 / SAMPLE_RATE as f32) } else { 0.0 },
+                ..storm_params(i as f32 / SAMPLE_RATE as f32, storm_interval)
             });
         }
         let (l, r) = synth.render();
@@ -75,4 +90,31 @@ fn main() -> std::io::Result<()> {
         seconds / started.elapsed().as_secs_f32(),
     );
     Ok(())
+}
+
+/// Nacht [0, 1] volgens de cyclus van SimulationParams::update_night_alpha.
+fn night(t: f32) -> f32 {
+    let t = t % 120.0;
+    if t < 80.0 { 0.0 } else if t < 90.0 { (t - 80.0) / 10.0 } else if t < 110.0 { 1.0 } else { 1.0 - (t - 110.0) / 10.0 }
+}
+
+/// Onweer zoals StormTracker het zou aanleveren: inslag n op n × interval.
+fn storm_params(t: f32, interval: f32) -> DroneParams {
+    if interval <= 0.0 {
+        return DroneParams::default();
+    }
+    let n = (t / interval).floor();
+    let to_next = (n + 1.0) * interval - t;
+    let build = if to_next <= 3.0 { (1.0 - to_next / 3.0).powi(2) } else { 0.0 };
+    DroneParams {
+        storm:        build,
+        strike_id:    n,
+        strike_age:   if n > 0.0 { (t - n * interval).min(10.0) } else { 10.0 },
+        strike_power: [0.9, 0.4, 0.65, 1.0][n as usize % 4],
+        strike_pan:   [-0.5, 0.6, 0.0, 0.2][n as usize % 4],
+        strike_super: if n as usize % 4 == 3 { 1.0 } else { 0.0 },
+        strike_eta:   to_next.min(10.0),
+        lightning:    1.0,
+        ..DroneParams::default()
+    }
 }

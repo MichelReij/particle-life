@@ -29,6 +29,12 @@
 //
 // In de getijdenpoel-hypothese (WLP) komt er branding bij: golven die aanzwellen,
 // breken en terugtrekken, met een periode die losjes het tempo volgt.
+//
+// Onweer volgt de bliksem in de simulatie: een laag gegrom dat aanzwelt met de
+// donderwolk-verduistering, een knal op het moment van de flits en daarna een
+// donderrol. Grotere bliksem = dichterbij; superbliksem krijgt een diepe dreun.
+//
+// In de diepzee (HTV) klinkt af en toe een losse sonar-ping met een kleine echo.
 
 use fundsp::prelude32::*;
 
@@ -118,20 +124,49 @@ pub struct DroneParams {
     pub pan_lead: f32,
     /// Hypothese: 0 = diepzee (HTV), 1 = getijdenpoel (WLP) → branding
     pub surface: f32,
+    /// Opbouw van de donderwolk [0, 1] — zelfde curve als de verduistering op scherm
+    pub storm: f32,
+    /// Teller van inslagen; een nieuwe waarde = nieuwe inslag
+    pub strike_id: f32,
+    /// Seconden sinds de laatste inslag (afgekapt op 10) — voorkomt dat een oude
+    /// inslag alsnog klinkt als de synth later start
+    pub strike_age: f32,
+    /// Grootte van de bliksem [0, 1] → luider, helderder, dichterbij
+    pub strike_power: f32,
+    /// Horizontale positie van de inslag [-1, 1]
+    pub strike_pan: f32,
+    /// 1 = superbliksem → langere rol en een diepe dreun
+    pub strike_super: f32,
+    /// Seconden tot de volgende geplande inslag (10 = onbekend of ver weg) —
+    /// laat de donder soms al vóór de flits beginnen te rollen
+    pub strike_eta: f32,
+    /// 1 = er kan bliksem zijn (getijdenpoel, elektrische activiteit > 0); bij 0
+    /// zwijgt het onweer direct, ook als er nog donder aan het rollen was
+    pub lightning: f32,
+    /// Nacht [0, 1] (getijdenpoel): 1 = volle nacht → theremin zwijgt
+    pub night: f32,
 }
 
 impl Default for DroneParams {
     fn default() -> Self {
-        Self { temperature: 0.5, chaos: 0.0, motion: 0.0, calm: 0.0, pan_center: 0.0, pan_lead: 0.0, surface: 0.0 }
+        Self {
+            temperature: 0.5, chaos: 0.0, motion: 0.0, calm: 0.0, pan_center: 0.0, pan_lead: 0.0, surface: 0.0,
+            storm: 0.0, strike_id: 0.0, strike_age: 10.0, strike_power: 0.0, strike_pan: 0.0, strike_super: 0.0,
+            strike_eta: 10.0, lightning: 0.0, night: 0.0,
+        }
     }
 }
 
 impl DroneParams {
-    pub const LEN: usize = 7;
+    pub const LEN: usize = 16;
 
     /// Volgorde zoals verstuurd naar de AudioWorklet.
     pub fn to_array(&self) -> [f32; Self::LEN] {
-        [self.temperature, self.chaos, self.motion, self.calm, self.pan_center, self.pan_lead, self.surface]
+        [
+            self.temperature, self.chaos, self.motion, self.calm, self.pan_center, self.pan_lead, self.surface,
+            self.storm, self.strike_id, self.strike_age, self.strike_power, self.strike_pan, self.strike_super,
+            self.strike_eta, self.lightning, self.night,
+        ]
     }
 
     pub fn from_slice(v: &[f32]) -> Option<Self> {
@@ -144,6 +179,15 @@ impl DroneParams {
             pan_center:  v[4],
             pan_lead:    v[5],
             surface:     v[6],
+            storm:        v[7],
+            strike_id:    v[8],
+            strike_age:   v[9],
+            strike_power: v[10],
+            strike_pan:   v[11],
+            strike_super: v[12],
+            strike_eta:   v[13],
+            lightning:    v[14],
+            night:        v[15],
         })
     }
 
@@ -156,27 +200,86 @@ impl DroneParams {
             pan_center:  self.pan_center.clamp(-1.0, 1.0),
             pan_lead:    self.pan_lead.clamp(-1.0, 1.0),
             surface:     self.surface.clamp(0.0, 1.0),
+            storm:        self.storm.clamp(0.0, 1.0),
+            strike_id:    self.strike_id,
+            strike_age:   self.strike_age.clamp(0.0, 10.0),
+            strike_power: self.strike_power.clamp(0.0, 1.0),
+            strike_pan:   self.strike_pan.clamp(-1.0, 1.0),
+            strike_super: self.strike_super.clamp(0.0, 1.0),
+            strike_eta:   self.strike_eta.clamp(0.0, 10.0),
+            lightning:    self.lightning.clamp(0.0, 1.0),
+            night:        self.night.clamp(0.0, 1.0),
         }
     }
 }
 
-/// Thread-safe handle om de parameters van een draaiende DroneSynth te zetten.
+// ─── Mengpaneel ──────────────────────────────────────────────────────────────
+
+/// Kanalen van het mengpaneel, in de volgorde van set_mix().
+pub mod mix {
+    pub const CELLOS:     usize = 0;
+    pub const THEREMIN:   usize = 1;
+    pub const BRAINWAVES: usize = 2;
+    pub const DROPLETS:   usize = 3;
+    pub const STREAM:     usize = 4;
+    pub const SURF:       usize = 5;
+    pub const THUNDER:    usize = 6;
+    pub const LIGHTNING:  usize = 7;
+    pub const SONAR:      usize = 8;
+    pub const REVERB:     usize = 9;
+    pub const MASTER:     usize = 10;
+    /// Aantal gain-kanalen
+    pub const LEN:        usize = 11;
+    /// Geen gain maar een instelling, direct na de kanalen: sample-and-hold van de
+    /// bliksem in samples (1 = uit, max 16)
+    pub const LIGHTNING_HOLD: usize = 11;
+    pub const HOLD_MAX:   f32   = 16.0;
+}
+
+/// Thread-safe handle om de parameters en de mix van een draaiende DroneSynth te zetten.
 #[derive(Clone)]
-pub struct DroneHandle([Shared; DroneParams::LEN]);
+pub struct DroneHandle {
+    params: [Shared; DroneParams::LEN],
+    /// Lineaire gain per mengpaneel-kanaal (1 = ongewijzigd)
+    mix:    [Shared; mix::LEN],
+    /// Sample-and-hold van de bliksem (mix::LIGHTNING_HOLD)
+    hold:   Shared,
+}
 
 impl DroneHandle {
     fn new(p: &DroneParams) -> Self {
-        Self(p.to_array().map(shared))
+        Self {
+            params: p.to_array().map(shared),
+            mix:    [(); mix::LEN].map(|_| shared(1.0)),
+            hold:   shared(LIGHTNING_HOLD_DEFAULT as f32),
+        }
     }
 
     pub fn set(&self, p: &DroneParams) {
-        for (s, v) in self.0.iter().zip(p.clamped().to_array()) {
+        for (s, v) in self.params.iter().zip(p.clamped().to_array()) {
             s.set_value(v);
         }
     }
 
+    /// Gains per kanaal (zie `mix`), lineair, 0..4. Ontbrekende kanalen blijven staan.
+    /// Een eventueel extra element op mix::LIGHTNING_HOLD zet de bliksem-crunch.
+    pub fn set_mix(&self, gains: &[f32]) {
+        for (s, &g) in self.mix.iter().zip(gains) {
+            s.set_value(if g.is_finite() { g.clamp(0.0, 4.0) } else { 1.0 });
+        }
+        if let Some(&h) = gains.get(mix::LIGHTNING_HOLD) {
+            if h.is_finite() {
+                self.hold.set_value(h.round().clamp(1.0, mix::HOLD_MAX));
+            }
+        }
+    }
+
     fn get(&self) -> DroneParams {
-        DroneParams::from_slice(&self.0.each_ref().map(|s| s.value())).unwrap_or_default()
+        DroneParams::from_slice(&self.params.each_ref().map(|s| s.value())).unwrap_or_default()
+    }
+
+    fn get_mix(&self) -> [f32; mix::LEN] {
+        self.mix.each_ref().map(|s| s.value())
     }
 }
 
@@ -216,6 +319,8 @@ struct Cello {
     /// Willekeurige doelen [-1, 1] voor haperende boogdruk en toonhoogte
     flutter:    f32,
     drift:      f32,
+    /// Resterende adempauze (s) tussen twee streken; 0 = aan het strijken
+    rest:       f32,
 }
 
 impl Cello {
@@ -231,16 +336,18 @@ impl Cello {
         let pitch = (var(&freq) >> follow(0.3))
             * (1.0 + 0.003 * sine_hz(4.7) + 0.002 * (noise() >> lowpole_hz(6.0))
                 + (var(&wobble) >> follow(0.06)));
-        // Strijkruis: amplitude-ruis op de zaagtand geeft de korrel van hars op snaar
-        let bowed = (pitch >> saw()) * (1.0 + (var(&grit) >> follow(0.5)) * (noise() >> lowpole_hz(1500.0)));
-        // Kast: lucht-, hout- en boogresonantie. Net als bij een echte cello is de
-        // grondtoon zwak (highpass) en dragen de boventonen de klank.
+        // Strijkruis: amplitude-ruis op de zaagtand geeft de korrel van hars op snaar.
+        // soft_saw heeft minder scherpe boventonen dan een kale zaagtand.
+        let bowed = (pitch >> soft_saw()) * (1.0 + (var(&grit) >> follow(0.5)) * (noise() >> lowpole_hz(1500.0)));
+        // Kast: warme houtresonantie laag, de nasale "honk" rond 560 Hz juist iets
+        // teruggedrukt, en de grondtoon mag meeklinken — diep en rond in plaats van
+        // een zoemende drone in het middengebied.
         let body = bowed
-            >> lowpass_hz(2200.0, 0.6)
-            >> bell_hz(250.0, 1.2, 2.2)
-            >> bell_hz(560.0, 1.8, 1.6)
-            >> bell_hz(1500.0, 1.5, 1.3)
-            >> highpass_hz(110.0, 0.6);
+            >> lowpass_hz(1900.0, 0.6)
+            >> bell_hz(180.0, 1.0, 1.4)
+            >> bell_hz(560.0, 1.4, 0.7)
+            >> bell_hz(1500.0, 1.5, 1.2)
+            >> highpass_hz(55.0, 0.6);
         // Boogdruk stuurt zowel volume als saturatie — harder strijken = meer rasp
         let graph = body * (var(&bow) >> follow(0.05)) * (var(&drive) >> follow(0.5)) >> shape(Tanh(1.0));
 
@@ -259,6 +366,7 @@ impl Cello {
             chaos: 0.0,
             flutter: 0.0,
             drift: 0.0,
+            rest: 0.0,
         }
     }
 
@@ -277,12 +385,22 @@ impl Cello {
 
     fn control(&mut self, dt: f32, tempo: f32, rng: &mut Rng) {
         let chaos = self.chaos;
+        if self.rest > 0.0 {
+            self.rest -= dt;
+            self.bow.set_value(0.0);
+            return;
+        }
         self.stroke_pos += dt;
         if self.stroke_pos >= self.stroke_len {
             self.stroke_pos = 0.0;
             // Chaos: kortere en grilliger streken
             let jitter = rng.range(0.8 - 0.4 * chaos, 1.25);
             self.stroke_len = self.base_len * jitter * (1.0 - 0.5 * chaos) / tempo;
+            // Adempauze: regelmatig even niet strijken (minder bij chaos), zodat de
+            // cello's geen onafgebroken drone vormen
+            if rng.unit() < 0.45 * (1.0 - chaos) {
+                self.rest = self.stroke_len * rng.range(0.4, 1.2);
+            }
             // Grondtoon blijft vaker liggen dan dat hij beweegt — tenzij het chaotisch is
             let note = if rng.unit() < 0.45 * (1.0 - chaos) { self.notes[0] } else { rng.pick(self.notes) };
             self.freq.set_value(degree_hz(note));
@@ -412,42 +530,132 @@ impl Theremin {
 }
 
 // ─── 3. Brainwave-pad ────────────────────────────────────────────────────────
+//
+// Naar het voorbeeld van assets/audio/brainwaves.mp3: een diepe, ronde basdrone
+// (grondtoon 44–78 Hz) met zachte, donkere boventonen en twee veel zachtere
+// akkoordtonen erboven. Vrijwel niets boven ~1 kHz, geen hoorbaar "wobbelen":
+// links en rechts verschillen maar een fractie van een Hz (traag faseren, breed
+// stereobeeld). Het volume ademt traag en beperkt; het akkoord wisselt langzaam
+// binnen de pentatoniek en de stemmen glijden mee.
 
-const PAD_MIDI:    [f32; 3] = [48.0, 55.0, 58.0]; // C3, G3, Bb3
-const PAD_PERIODS: [f32; 3] = [17.0, 13.0, 21.0]; // ademperiode in s bij tempo 1
+/// Akkoorden (MIDI, laag → hoog), alle binnen C-mineur pentatonisch.
+/// Het eerste is "thuis" en komt vaak terug.
+const PAD_CHORDS: [[f32; 3]; 5] = [
+    [36.0, 43.0, 51.0], // C2  G2  Eb3
+    [31.0, 43.0, 46.0], // G1  G2  Bb2
+    [34.0, 41.0, 48.0], // Bb1 F2  C3
+    [39.0, 46.0, 55.0], // Eb2 Bb2 G3
+    [29.0, 36.0, 51.0], // F1  C2  Eb3
+];
+/// Relatieve sterkte per stem: de grondtoon draagt, de akkoordtonen kleuren
+/// (≈ −8 en −13 dB, zoals in het voorbeeld)
+const PAD_WEIGHTS: [f32; 3] = [1.0, 0.4, 0.22];
+const PAD_PERIODS:   [f32; 3] = [17.0, 13.0, 21.0]; // ademperiode in s bij tempo 1
+const PAD_BRIGHT:    [f32; 3] = [41.0, 33.0, 47.0]; // periode van de klankkleur in s
+/// Seconden per akkoord bij tempo 1 (bereik, willekeurig binnen)
+const PAD_CHORD_LEN: (f32, f32) = (25.0, 50.0);
 
 struct PadTone {
     net:     Box<dyn AudioUnit>,
     freq_l:  Shared,
     freq_r:  Shared,
+    /// Zacht filter (twee one-poles per kanaal); coëfficiënt op control-rate —
+    /// een funDSP-filter met variabele cutoff herberekent zich elk sample en was
+    /// te zwaar voor de worklet
+    lp_coef: f32,
+    lp:      [(f32, f32); 2],
+    sample_rate: f32,
     base:    f32,
     period:  f32,
     phase:   f32,
+    bright_period: f32,
+    bright_phase:  f32,
 }
 
 impl PadTone {
-    fn new(sample_rate: f32, seed: u64, midi: f32, period: f32, phase: f32) -> Self {
+    fn new(sample_rate: f32, seed: u64, midi: f32, period: f32, phase: f32, bright_period: f32) -> Self {
         let base   = midi_hz(midi);
         let freq_l = shared(base);
         let freq_r = shared(base);
-        let voice = |f: &Shared| var(f) >> follow(1.5) >> sine() >> shape(Tanh(1.2));
+        // Orgel-wavetable: grondtoon met octaaf-boventonen voor body, één opzoeking
+        // per sample (drie losse sinussen per stem was te zwaar voor de worklet).
+        // De stemmen glijden in een paar seconden naar een nieuw akkoord.
+        // Geen aparte chorus-tweelingtoon: links en rechts staan door de binaurale
+        // zweving al een paar Hz uit elkaar, wat zelf een breed, zwevend geluid geeft.
+        let voice = |f: &Shared| var(f) >> follow(2.5) >> organ();
         let graph = voice(&freq_l) | voice(&freq_r);
         Self {
             net: prepare(Box::new(graph), sample_rate, seed),
             freq_l,
             freq_r,
+            lp_coef: 0.1,
+            lp: [(0.0, 0.0); 2],
+            sample_rate,
             base,
             period,
             phase,
+            bright_period,
+            bright_phase: phase * 1.7,
         }
     }
 
     /// Retourneert de huidige amplitude van deze toon.
     fn control(&mut self, dt: f32, tempo: f32, beat_hz: f32) -> f32 {
         self.phase = (self.phase + dt * tempo / self.period * TAU) % TAU;
+        self.bright_phase = (self.bright_phase + dt / self.bright_period * TAU) % TAU;
         self.freq_l.set_value(self.base - beat_hz * 0.5);
         self.freq_r.set_value(self.base + beat_hz * 0.5);
-        0.55 + 0.45 * self.phase.sin()
+        // Donker: het filter volgt de toonhoogte (~3.5× de grondtoon, dus alleen de
+        // eerste paar boventonen) en ademt daar heel langzaam ±25% omheen
+        let cutoff = self.base * 3.5 * 1.25f32.powf(self.bright_phase.sin());
+        self.lp_coef = 1.0 - (-TAU * cutoff / self.sample_rate).exp();
+        // Volume ademt traag en beperkt (~8 dB), zoals in het voorbeeld
+        0.7 + 0.3 * self.phase.sin()
+    }
+
+    #[inline]
+    fn render(&mut self) -> (f32, f32) {
+        let (mut l, mut r) = self.net.get_stereo();
+        let k = self.lp_coef;
+        for stage in self.lp.iter_mut() {
+            stage.0 += (l - stage.0) * k;
+            stage.1 += (r - stage.1) * k;
+            (l, r) = *stage;
+        }
+        // Kanalen deels samenvoegen: breed maar niet uit elkaar vallend (L/R-correlatie
+        // ~0.7, zoals in het voorbeeld)
+        let (l, r) = (0.85 * l + 0.35 * r, 0.85 * r + 0.35 * l);
+        // Zachte verzadiging voor wat warmte
+        ((1.1 * l).tanh(), (1.1 * r).tanh())
+    }
+}
+
+/// Kiest wanneer en naar welk akkoord de pad gaat.
+struct PadChords {
+    current: usize,
+    timer:   f32,
+}
+
+impl PadChords {
+    /// Geeft Some(akkoord) als er gewisseld moet worden.
+    fn control(&mut self, dt: f32, tempo: f32, rng: &mut Rng) -> Option<[f32; 3]> {
+        self.timer -= dt;
+        if self.timer > 0.0 {
+            return None;
+        }
+        self.timer = rng.range(PAD_CHORD_LEN.0, PAD_CHORD_LEN.1) / tempo.powf(0.5);
+        // Vanuit een ander akkoord vaak terug naar huis; vanuit huis ergens heen
+        let next = if self.current != 0 && rng.unit() < 0.5 {
+            0
+        } else {
+            let mut n = 1 + rng.next_u32() as usize % (PAD_CHORDS.len() - 1);
+            if n == self.current {
+                n = 1 + n % (PAD_CHORDS.len() - 1);
+            }
+            n
+        };
+        self.current = next;
+        Some(PAD_CHORDS[next])
     }
 }
 
@@ -552,10 +760,614 @@ impl Surf {
     }
 }
 
+// ─── 6. Onweer (bliksem en donder, in sync met de simulatie) ─────────────────
+
+/// Maximaal aantal knallen per inslag: de hoofdslag plus naflitsen.
+const MAX_CRACKS: usize = 8;
+/// Maximaal aantal gelijktijdige donderrollen (vooraf, hoofdrol, echo's).
+const MAX_ROLLS: usize = 5;
+
+/// Overstuurde vervorming van knal en geknetter: drive en asymmetrie (bias),
+/// zoals een overbelaste microfoon bij een inslag dichtbij.
+const LIGHTNING_DRIVE: f32 = 12.0;
+const LIGHTNING_BIAS:  f32 = 0.4;
+/// Lo-fi kraak: het vervormde signaal wordt maar om de zoveel samples bijgewerkt
+/// (sample-and-hold), als een overbelaste opname. 1 = uit. Instelbaar via het
+/// mengpaneel (mix::LIGHTNING_HOLD); dit is de standaard.
+const LIGHTNING_HOLD_DEFAULT: u32 = 4;
+/// Mengniveau van knal + geknetter ten opzichte van de donder.
+const LIGHTNING_GAIN:  f32 = 2.2;
+/// Terugkaatsingen van de knal tegen het landschap: (vertraging in s, sterkte).
+/// Oneven echo's komen van de andere kant terug. De vertragingen worden per
+/// inslag met een factor 0.8–1.3 geschaald (ander "landschap").
+/// Op verzoek uitgezet (sterktes 0); eerder: 0.22, 0.14, 0.08.
+const LIGHTNING_ECHOES: [(f32, f32); 3] = [(0.12, 0.0), (0.26, 0.0), (0.45, 0.0)];
+/// Langste mogelijke echo-vertraging (0.45 s × 1.3) plus marge.
+const LIGHTNING_ECHO_MAX: f32 = 0.7;
+/// Galm-zending van de bliksem (de donder heeft 0.35).
+const LIGHTNING_REVERB_SEND: f32 = 0.5;
+
+/// Eén donderrol: begint op `at` (storm-klok), zwelt kort aan en sterft weg.
+#[derive(Clone, Copy, Default)]
+struct RollEvent {
+    at:     f32,
+    /// 0 = vrij slot
+    amp:    f32,
+    tau:    f32,
+    /// Helderheid van het begin [0, 1]
+    bright: f32,
+}
+
+struct Storm {
+    net:        Box<dyn AudioUnit>,
+    rumble_amp: Shared,
+    rumble_cut: Shared,
+    roll_amp:   Shared,
+    roll_cut:   Shared,
+    boom_amp:   Shared,
+    boom_freq:  Shared,
+    /// Laatst geziene strike_id; None tot de eerste parameters binnen zijn
+    last_id:    Option<f32>,
+    /// Lopende klok van de onweerslaag — donderrollen kunnen vóór de inslag
+    /// beginnen, dus die worden niet ten opzichte van de inslag getimed
+    clock:      f32,
+    /// Seconden sinds de inslag die nu klinkt
+    since:      f32,
+    power:      f32,
+    is_super:   bool,
+    pan:        f32,
+    /// Vertraging van de hoofdrol na de flits (ook het moment van de dreun)
+    delay:      f32,
+    /// (tijd na inslag, amplitude) per knal
+    cracks:     [(f32, f32); MAX_CRACKS],
+    rolls:      [RollEvent; MAX_ROLLS],
+    /// Vorige strike_eta, om een nieuwe aanloop te herkennen
+    last_eta:   f32,
+    /// Bij hoeveel seconden vóór de flits een vooraf-rol inzet (None = deze keer niet)
+    pre_roll:   Option<f32>,
+    /// Onregelmatig rommelen en haperend knetteren: willekeurige doelen, glijdend gevolgd
+    growl:      (f32, f32),
+    roll:       (f32, f32),
+    flicker:    (f32, f32),
+    /// Eigen RNG: onweer verandert zo niets aan het verloop van de andere lagen
+    rng:        Rng,
+    /// Knal + geknetter: ruiskorrels (per sample gegenereerd) door een stereo
+    /// filter met body, dan overstuurd (tanh), dan een DC-filter
+    crackle:     Box<dyn AudioUnit>,
+    dc_block:    Box<dyn AudioUnit>,
+    /// Knal-envelope: doel (control-rate) en per sample gevolgde waarde
+    crack_target: f32,
+    crack_env:    f32,
+    /// Totale duur van het geknetter van deze inslag (s) — daarna is het echt stil
+    crackle_len: f32,
+    /// Korrels per seconde bij de inslag — verschilt per bliksem
+    dust_peak:   f32,
+    /// Korrels per seconde en hun amplitude, bijgewerkt op control-rate
+    dust_rate:   f32,
+    dust_amp:    f32,
+    /// Envelope van de huidige ruiskorrel per kanaal, en hoe snel die uitsterft
+    grain:       (f32, f32),
+    grain_decay: f32,
+    /// Sample-and-hold van de vervormde bliksem: vastgehouden waarde en teller
+    held:        (f32, f32),
+    hold_count:  u32,
+    /// Huidige sample-and-hold-lengte (1 = uit)
+    hold:        u32,
+    /// Echo's van de knal: ringbuffer per kanaal, schrijfpositie, schaal van de
+    /// vertragingen (per inslag) en een lowpass die de echo's doffer maakt
+    echo_buf:    Vec<(f32, f32)>,
+    echo_pos:    usize,
+    echo_scale:  f32,
+    echo_lp:     (f32, f32),
+    echo_lp_coef: f32,
+    sample_dt:   f32,
+}
+
+impl Storm {
+    fn new(sample_rate: f32, seed: u64) -> Self {
+        let rumble_amp = shared(0.0);
+        let rumble_cut = shared(100.0);
+        let roll_amp   = shared(0.0);
+        let roll_cut   = shared(400.0);
+        let boom_amp   = shared(0.0);
+        let boom_freq  = shared(60.0);
+
+        // Per kanaal eigen ruis zodat het onweer breed klinkt:
+        //   rumble — ver gegrom van de aanzwellende donderwolk (bruine ruis, heel laag)
+        //   roll   — donderrollen, eerst helder, dan steeds donkerder
+        // (knal en geknetter zitten apart, zie render())
+        let channel = || {
+            let rumble = (brown() | (var(&rumble_cut) >> follow(0.3)) | dc(0.7)) >> lowpass();
+            let roll = (pink() | (var(&roll_cut) >> follow(0.05)) | dc(0.8)) >> lowpass();
+            rumble * 2.0 * (var(&rumble_amp) >> follow(0.08))
+                + roll * 20.0 * (var(&roll_amp) >> follow(0.03))
+        };
+        // Superbliksem: een diepe, wegzakkende dreun onder de rol
+        let boom = (var(&boom_freq) >> follow(0.05) >> sine()) * 0.6 * (var(&boom_amp) >> follow(0.01));
+        let graph = (channel() | channel()) + (boom >> split::<U2>());
+        // Body vanaf ~180 Hz, nadruk rond 2.5 kHz, de allerhoogste sis eraf
+        let crackle_filter = || highpass_hz(180.0, 0.6) >> bell_hz(2500.0, 0.7, 1.6) >> lowpass_hz(11000.0, 0.6);
+        let crackle = crackle_filter() | crackle_filter();
+        let dc_block = highpass_hz(40.0, 0.6) | highpass_hz(40.0, 0.6);
+
+        Self {
+            net: prepare(Box::new(graph), sample_rate, seed),
+            rumble_amp,
+            rumble_cut,
+            roll_amp,
+            roll_cut,
+            boom_amp,
+            boom_freq,
+            last_id: None,
+            clock: 0.0,
+            since: 100.0,
+            power: 0.0,
+            is_super: false,
+            pan: 0.0,
+            delay: 0.3,
+            cracks: [(0.0, 0.0); MAX_CRACKS],
+            rolls: [RollEvent::default(); MAX_ROLLS],
+            last_eta: 10.0,
+            pre_roll: None,
+            growl: (0.5, 0.5),
+            roll: (0.5, 0.5),
+            flicker: (1.0, 1.0),
+            rng: Rng(0x2545_F491 ^ seed as u32),
+            crackle: prepare(Box::new(crackle), sample_rate, seed + 1),
+            dc_block: prepare(Box::new(dc_block), sample_rate, seed + 2),
+            crack_target: 0.0,
+            crack_env: 0.0,
+            crackle_len: 0.5,
+            dust_peak: 4000.0,
+            dust_rate: 0.0,
+            dust_amp: 0.0,
+            grain: (0.0, 0.0),
+            grain_decay: 0.99,
+            held: (0.0, 0.0),
+            hold_count: 0,
+            hold: LIGHTNING_HOLD_DEFAULT,
+            echo_buf: vec![(0.0, 0.0); (LIGHTNING_ECHO_MAX * sample_rate) as usize + 1],
+            echo_pos: 0,
+            echo_scale: 1.0,
+            echo_lp: (0.0, 0.0),
+            echo_lp_coef: 1.0 - (-TAU * 2500.0 / sample_rate).exp(),
+            sample_dt: 1.0 / sample_rate,
+        }
+    }
+
+    /// Plant een donderrol; overschrijft zo nodig de zwakste lopende.
+    fn add_roll(&mut self, roll: RollEvent) {
+        let clock = self.clock;
+        let level = |r: &RollEvent| {
+            let u = clock - r.at;
+            if r.amp <= 0.0 { -1.0 } else if u < 0.0 { r.amp } else { r.amp * (-u / r.tau).exp() }
+        };
+        if let Some(slot) = self.rolls.iter_mut().min_by(|a, b| level(a).total_cmp(&level(b))) {
+            *slot = roll;
+        }
+    }
+
+    fn strike(&mut self, p: &DroneParams) {
+        // Begin waar de simulatie al is, zodat geluid en beeld gelijk blijven lopen
+        self.since    = p.strike_age;
+        self.power    = p.strike_power.max(0.5);
+        self.is_super = p.strike_super > 0.5;
+        // Volle stereopositie: een inslag helemaal links klinkt ook helemaal links
+        self.pan      = p.strike_pan;
+        let power     = self.power;
+        let strike_at = self.clock - p.strike_age;
+        let rng = &mut self.rng;
+        self.echo_scale = rng.range(0.8, 1.3);
+
+        // Geknetter: lengte en dichtheid per bliksem anders; groot en super knetteren
+        // wat langer, maar nooit langer dan ~1.5 s
+        let super_len = if self.is_super { 1.4 } else { 1.0 };
+        self.crackle_len = rng.range(0.3, 1.1) * (0.7 + 0.3 * power) * super_len;
+        self.dust_peak   = rng.range(2500.0, 6000.0);
+
+        // Hoofdknal plus naflitsen, verspreid over de hele knetterduur
+        self.cracks = [(0.0, 0.0); MAX_CRACKS];
+        self.cracks[0] = (0.0, rng.range(0.7, 1.0));
+        let extra = 1 + rng.next_u32() as usize % (MAX_CRACKS - 1);
+        let spread = 0.8 * self.crackle_len;
+        for c in self.cracks.iter_mut().skip(1).take(extra) {
+            *c = (rng.range(0.03, spread.max(0.04)), rng.range(0.2, 0.8));
+        }
+
+        // Hoofdrol: soms al tijdens het geknetter, soms pas wat later;
+        // verre (kleine) bliksem gemiddeld later
+        self.delay = rng.range(0.0, 0.25) + 0.45 * (1.0 - power) * rng.range(0.3, 1.3);
+        let main = RollEvent {
+            at:     strike_at + self.delay,
+            amp:    power * rng.range(0.7, 1.0),
+            tau:    rng.range(0.8, 2.0) * if self.is_super { 1.5 } else { 1.0 },
+            bright: power * rng.range(0.6, 1.0),
+        };
+        // 0–2 echo's: naslagen die later nog over het landschap rollen
+        let echoes = rng.next_u32() % 3;
+        let echo_list: Vec<RollEvent> = (0..echoes).map(|_| RollEvent {
+            at:     strike_at + rng.range(0.8, 3.5),
+            amp:    power * rng.range(0.25, 0.6),
+            tau:    rng.range(0.6, 1.6),
+            bright: power * rng.range(0.2, 0.5),
+        }).collect();
+        self.add_roll(main);
+        for e in echo_list {
+            self.add_roll(e);
+        }
+    }
+
+    fn control(&mut self, dt: f32, p: &DroneParams, build: f32) {
+        self.clock += dt;
+
+        // Nieuwe aanloop naar een inslag (eta springt omhoog, of wordt voor het eerst
+        // bekend)? Dan beslissen of de donder deze keer al vóór de flits gaat rollen.
+        let new_cycle = p.strike_eta > self.last_eta + 0.5
+            || (self.last_eta >= 9.99 && p.strike_eta < 9.99);
+        if new_cycle {
+            self.pre_roll = (self.rng.unit() < 0.45).then(|| self.rng.range(0.4, 2.2));
+        }
+        self.last_eta = p.strike_eta;
+        if let Some(lead) = self.pre_roll {
+            if p.strike_eta <= lead {
+                let roll = RollEvent {
+                    at:     self.clock,
+                    amp:    self.rng.range(0.35, 0.75),
+                    tau:    self.rng.range(0.6, 1.4),
+                    bright: self.rng.range(0.3, 0.7),
+                };
+                self.add_roll(roll);
+                self.pre_roll = None;
+            }
+        }
+
+        // Nieuwe inslag? Alleen als hij vers is — een id die al bestond bij het
+        // opstarten van de synth (of een gemiste oude) mag niet alsnog knallen.
+        if self.last_id != Some(p.strike_id) {
+            if self.last_id.is_some() && p.strike_age < 0.5 {
+                self.strike(p);
+            }
+            self.last_id = Some(p.strike_id);
+        }
+        self.since += dt;
+
+        // Onregelmatig rommelen (~7 en ~10 doelen/s) en haperend knetteren (~25/s)
+        if self.rng.unit() < dt * 7.0 {
+            self.growl.1 = self.rng.range(0.3, 1.0);
+        }
+        if self.rng.unit() < dt * 10.0 {
+            self.roll.1 = self.rng.range(0.35, 1.0);
+        }
+        if self.rng.unit() < dt * 25.0 {
+            self.flicker.1 = self.rng.range(0.15, 1.4);
+        }
+        let k = (dt / 0.08).min(1.0);
+        self.growl.0   += (self.growl.1   - self.growl.0)   * k;
+        self.roll.0    += (self.roll.1    - self.roll.0)    * k;
+        self.flicker.0 += (self.flicker.1 - self.flicker.0) * (dt / 0.015).min(1.0);
+
+        // Donderwolk: ver gegrom dat met de verduistering aanzwelt
+        self.rumble_amp.set_value(build * self.growl.0);
+        self.rumble_cut.set_value(90.0 + 160.0 * build);
+
+        // Knallen: een felle snap (8 ms) met wat body erachter (50 ms)
+        let t = self.since;
+        let crack: f32 = self.cracks.iter()
+            .filter(|(at, a)| *a > 0.0 && t >= *at)
+            .map(|(at, a)| a * (0.6 * (-(t - at) / 0.008).exp() + 0.4 * (-(t - at) / 0.05).exp()))
+            .sum();
+        self.crack_target = crack * self.power;
+
+        // Geknetter: dicht bij de inslag en kwadratisch uitdunnend tot precies
+        // crackle_len, met een nieuwe uitbarsting bij elke naflits en een haperend,
+        // onregelmatig verloop
+        let bursts: f32 = self.cracks.iter()
+            .filter(|(at, a)| *a > 0.0 && t >= *at)
+            .map(|(at, a)| a * (-(t - at) / 0.06).exp())
+            .sum();
+        let fade = (1.0 - t / self.crackle_len).clamp(0.0, 1.0);
+        let e = ((fade + bursts) * fade).min(1.5);
+        if e > 0.002 {
+            self.dust_rate = self.dust_peak * e * self.flicker.0;
+            self.dust_amp  = self.power * (0.3 + 0.7 * e.min(1.0));
+        } else {
+            self.dust_rate = 0.0;
+        }
+
+        // Donderrollen: som van alle lopende rollen; helderheid gewogen naar sterkte
+        let clock = self.clock;
+        let (mut amp, mut cut_weighted) = (0.0f32, 0.0f32);
+        for r in self.rolls.iter_mut().filter(|r| r.amp > 0.0) {
+            let u = clock - r.at;
+            if u > 10.0 * r.tau {
+                r.amp = 0.0;
+            } else if u > 0.0 {
+                let env = r.amp * (1.0 - (-u / 0.06).exp()) * (-u / r.tau).exp();
+                amp += env;
+                cut_weighted += env * (150.0 + 1600.0 * r.bright * (-u / 0.6).exp());
+            }
+        }
+        self.roll_amp.set_value(amp * self.roll.0);
+        self.roll_cut.set_value(if amp > 0.0 { cut_weighted / amp } else { 150.0 });
+
+        let u = t - self.delay;
+        if self.is_super && u > 0.0 && u < 12.0 {
+            self.boom_amp.set_value((1.0 - (-u / 0.02).exp()) * (-u / 0.9).exp());
+            self.boom_freq.set_value(38.0 + 32.0 * (-u / 0.5).exp());
+        } else {
+            self.boom_amp.set_value(0.0);
+        }
+    }
+
+    /// Bliksem uitgeschakeld: alle lopende en geplande donder en geknetter wissen.
+    fn silence(&mut self) {
+        self.since = 100.0;
+        self.cracks = [(0.0, 0.0); MAX_CRACKS];
+        self.rolls = [RollEvent::default(); MAX_ROLLS];
+        self.pre_roll = None;
+        self.is_super = false;
+        self.dust_rate = 0.0;
+        self.crack_target = 0.0;
+        self.crack_env = 0.0;
+        self.grain = (0.0, 0.0);
+    }
+
+    /// Klinkt er nu iets? Anders hoeft het net niet gerenderd te worden.
+    fn active(&self, build: f32) -> bool {
+        build > 0.001
+            || self.rolls.iter().any(|r| r.amp > 0.0)
+            || self.since < self.crackle_len + 2.0
+            || (self.is_super && self.since < self.delay + 10.0)
+    }
+
+    /// `thunder` en `lightning`: mengpaneel-gains voor donder (gegrom, rol, dreun)
+    /// en bliksem (knal en geknetter).
+    #[inline]
+    /// Geeft (donder, bliksem) apart terug: de bliksem krijgt meer galm.
+    fn render(&mut self, thunder: f32, lightning: f32) -> ((f32, f32), (f32, f32)) {
+        let (l, r) = self.net.get_stereo();
+        let thunder_out = (l * thunder, r * thunder);
+        let (cl, cr) = self.render_lightning();
+        let (el, er) = self.render_echoes(cl, cr);
+        let g = LIGHTNING_GAIN * lightning;
+        (thunder_out, ((cl + el) * g, (cr + er) * g))
+    }
+
+    /// Echo's van de knal tegen het landschap, afwisselend van links en rechts.
+    #[inline]
+    fn render_echoes(&mut self, l: f32, r: f32) -> (f32, f32) {
+        let len = self.echo_buf.len();
+        self.echo_buf[self.echo_pos] = (l, r);
+        let sr = 1.0 / self.sample_dt;
+        let (mut el, mut er) = (0.0f32, 0.0f32);
+        for (i, &(delay, gain)) in LIGHTNING_ECHOES.iter().enumerate() {
+            let back = Ord::min((delay * self.echo_scale * sr) as usize, len - 1);
+            let (bl, br) = self.echo_buf[(self.echo_pos + len - back) % len];
+            if i % 2 == 0 { el += bl * gain; er += br * gain; } else { el += br * gain; er += bl * gain; }
+        }
+        self.echo_pos = (self.echo_pos + 1) % len;
+        self.echo_lp.0 += (el - self.echo_lp.0) * self.echo_lp_coef;
+        self.echo_lp.1 += (er - self.echo_lp.1) * self.echo_lp_coef;
+        self.echo_lp
+    }
+
+    /// Knal + geknetter, overstuurd.
+    #[inline]
+    fn render_lightning(&mut self) -> (f32, f32) {
+        // Knal-envelope per sample volgen (~1 ms), zodat de snap niet trapsgewijs gaat
+        self.crack_env += (self.crack_target - self.crack_env) * 0.03;
+        let quiet = self.dust_rate <= 0.0 && self.crack_env < 1e-4
+            && self.grain.0 + self.grain.1 < 1e-4;
+        if quiet {
+            return (0.0, 0.0);
+        }
+
+        // Nieuwe ruiskorrel: willekeurige sterkte, stereopositie en lengte (2–10 ms)
+        if self.rng.unit() < self.dust_rate * self.sample_dt {
+            let a = self.rng.range(0.3, 1.0) * self.dust_amp;
+            let p = self.rng.unit();
+            self.grain.0 = self.grain.0.max(a * (1.0 - p).sqrt());
+            self.grain.1 = self.grain.1.max(a * p.sqrt());
+            let len = self.rng.range(0.002, 0.010);
+            self.grain_decay = (-self.sample_dt / len).exp();
+        }
+        let src_l = self.rng.range(-1.0, 1.0) * (self.grain.0 + self.crack_env);
+        let src_r = self.rng.range(-1.0, 1.0) * (self.grain.1 + self.crack_env);
+        self.grain.0 *= self.grain_decay;
+        self.grain.1 *= self.grain_decay;
+
+        // Zwaar overstuurd: harde tanh met asymmetrie voor rauwe, even boventonen,
+        // daarna sample-and-hold voor digitale kraak
+        let (fl, fr) = self.crackle.filter_stereo(src_l, src_r);
+        let bias_off = LIGHTNING_BIAS.tanh();
+        let drive = |x: f32| (LIGHTNING_DRIVE * x + LIGHTNING_BIAS).tanh() - bias_off;
+        if self.hold_count == 0 {
+            self.held = (drive(fl), drive(fr));
+        }
+        self.hold_count = (self.hold_count + 1) % Ord::max(self.hold, 1);
+        self.dc_block.filter_stereo(self.held.0, self.held.1)
+    }
+}
+
+// ─── 7. Sonar (alleen diepzee / HTV) ─────────────────────────────────────────
+//
+// Losse pings op onvoorspelbare momenten — geen vast ritme, dat zou een bedoeling
+// suggereren — elk met één kleine echo op een wisselende tijd erna.
+//
+// Opbouw naar een referentie-opname: een vrijwel zuivere toon die snel inzakt en
+// dan zacht nagalmt, met daaromheen een glinsterende wolk van licht verstemde
+// tonen, zoals galm in water. (De lage dreun uit die opname is bewust weggelaten.)
+
+/// Gelijktijdig klinkende pings en echo's.
+const MAX_PINGS: usize = 4;
+/// Pingtonen uit de toonladder: G3, Bb3, C4, Eb4, F4.
+const SONAR_NOTES: [f32; 5] = [196.00, 233.08, 261.63, 311.13, 349.23];
+/// Aantal verstemde tonen in de glinsterende naklank.
+const SHIMMER: usize = 5;
+
+/// Eén ping of echo.
+#[derive(Clone, Copy, Default)]
+struct Ping {
+    active:  bool,
+    /// Seconden tot deze ping/echo begint
+    delay:   f32,
+    t:       f32,
+    freq:    f32,
+    phase:   f32,
+    amp:     f32,
+    /// Lengte van de lange naklank (s)
+    tail:    f32,
+    /// Glinstering: frequentieverhouding en fase per verstemde toon
+    shimmer: [(f32, f32); SHIMMER],
+    /// One-pole lowpass (echo's doffer): coëfficiënt en toestand
+    lp_coef: f32,
+    lp:      f32,
+    gain_l:  f32,
+    gain_r:  f32,
+}
+
+struct Sonar {
+    pings:       [Ping; MAX_PINGS],
+    /// Index in SONAR_NOTES van de vorige ping
+    last_note:   usize,
+    /// Seconden tot de volgende ping
+    timer:       f32,
+    rng:         Rng,
+    sample_rate: f32,
+    sample_dt:   f32,
+}
+
+impl Sonar {
+    fn new(sample_rate: f32, seed: u64) -> Self {
+        Self {
+            pings: [Ping::default(); MAX_PINGS],
+            last_note: usize::MAX,
+            timer: 10.0,
+            rng: Rng(0x6C8E_9CF5 ^ seed as u32),
+            sample_rate,
+            sample_dt: 1.0 / sample_rate,
+        }
+    }
+
+    fn lp_coef(&self, cutoff: f32) -> f32 {
+        1.0 - (-TAU * cutoff / self.sample_rate).exp()
+    }
+
+    /// Plaatst een ping/echo in een vrij slot (of het zwakst klinkende).
+    fn add(&mut self, ping: Ping) {
+        let level = |p: &Ping| if !p.active { -1.0 } else { p.amp * (-p.t / p.tail).exp() };
+        if let Some(slot) = self.pings.iter_mut().min_by(|a, b| level(a).total_cmp(&level(b))) {
+            *slot = ping;
+        }
+    }
+
+    fn shimmer(rng: &mut Rng) -> [(f32, f32); SHIMMER] {
+        std::array::from_fn(|_| {
+            let spread = rng.range(0.01, 0.07) * if rng.unit() < 0.5 { -1.0 } else { 1.0 };
+            (1.0 + spread, rng.unit())
+        })
+    }
+
+    /// Eén losse ping met één kleine echo op een wisselende tijd erna.
+    fn ping(&mut self) {
+        let rng = &mut self.rng;
+        let mut note = rng.next_u32() as usize % SONAR_NOTES.len();
+        if note == self.last_note {
+            note = (note + 1 + rng.next_u32() as usize % (SONAR_NOTES.len() - 1)) % SONAR_NOTES.len();
+        }
+        self.last_note = note;
+        let freq = SONAR_NOTES[note];
+        let tail = rng.range(0.6, 0.8);
+        // Elke ping uit een andere richting; de echo komt van de andere kant terug
+        let pan = rng.range(-0.9, 0.9);
+        let (l, r) = pan_gains(pan);
+        let ping = Ping {
+            active: true, delay: 0.0, t: 0.0, freq, phase: 0.0, amp: 1.0,
+            tail, shimmer: Self::shimmer(rng),
+            lp_coef: 1.0, lp: 0.0, gain_l: l, gain_r: r,
+        };
+
+        // Echo: klein, iets doffer, van de andere kant, op 0.4–2.2 s
+        let echo_side = if pan > 0.0 { -1.0 } else { 1.0 };
+        let (l, r) = pan_gains(echo_side * rng.range(0.3, 0.9));
+        let echo = Ping {
+            active: true, delay: rng.range(0.4, 2.2), t: 0.0,
+            freq: freq * (1.0 + rng.range(-0.01, 0.01)), phase: 0.0,
+            amp: rng.range(0.15, 0.3), tail: tail * 1.2,
+            shimmer: Self::shimmer(rng), lp_coef: 0.0, lp: 0.0, gain_l: l, gain_r: r,
+        };
+        let echo = Ping { lp_coef: self.lp_coef(freq * 2.5), ..echo };
+        self.add(ping);
+        self.add(echo);
+    }
+
+    /// `depth`: 1 = diepzee (sonar actief), 0 = getijdenpoel.
+    fn control(&mut self, dt: f32, tempo: f32, depth: f32) {
+        if depth < 0.5 {
+            // Bij terugkeer naar de diepzee niet meteen, maar wel binnen afzienbare tijd
+            self.timer = self.timer.min(self.rng.range(6.0, 15.0));
+            return;
+        }
+        self.timer -= dt;
+        if self.timer <= 0.0 {
+            self.ping();
+            // Onregelmatig: soms vlak na elkaar, soms een hele tijd niets.
+            // Volgt het tempo maar heel losjes.
+            self.timer = self.rng.range(5.0, 25.0) / tempo.powf(0.3);
+        }
+    }
+
+    fn active(&self) -> bool {
+        self.pings.iter().any(|p| p.active)
+    }
+
+    #[inline]
+    fn render(&mut self) -> (f32, f32) {
+        let dt = self.sample_dt;
+        let (mut l, mut r) = (0.0f32, 0.0f32);
+        for p in self.pings.iter_mut().filter(|p| p.active) {
+            if p.delay > 0.0 {
+                p.delay -= dt;
+                continue;
+            }
+            p.t += dt;
+            let t = p.t;
+            let attack = 1.0 - (-t / 0.004).exp();
+
+            // Toon: snel inzakken (~12 dB in 0.2 s), dan een zachte naklank
+            // (~-25 dB na 1 s, ~-38 dB na 2 s; de galm in de mix doet de rest)
+            let tone_env = p.amp * attack * (0.8 * (-t / 0.1).exp() + 0.2 * (-t / p.tail).exp());
+            p.phase = (p.phase + p.freq * dt) % 1.0;
+            let mut s = (p.phase * TAU).sin() * tone_env;
+
+            // Glinsterende wolk van licht verstemde tonen, zwelt kort aan en sterft traag
+            let shimmer_env = p.amp * 0.035 * (1.0 - (-t / 0.15).exp()) * (-t / p.tail).exp();
+            for (ratio, phase) in p.shimmer.iter_mut() {
+                *phase = (*phase + p.freq * *ratio * dt) % 1.0;
+                s += (*phase * TAU).sin() * shimmer_env;
+            }
+
+            p.lp += (s - p.lp) * p.lp_coef;
+            l += p.lp * p.gain_l;
+            r += p.lp * p.gain_r;
+
+            if t > 10.0 * p.tail {
+                p.active = false;
+            }
+        }
+
+        (l, r)
+    }
+}
+
 // ─── DroneSynth ──────────────────────────────────────────────────────────────
 
 /// Mengniveau van de branding.
 const SURF_LEVEL: f32 = 0.22;
+/// Mengniveau van het onweer.
+const STORM_LEVEL: f32 = 0.3;
+/// Mengniveau van de sonar.
+const SONAR_LEVEL: f32 = 0.5;
 
 pub struct DroneSynth {
     sample_rate: f32,
@@ -564,11 +1376,14 @@ pub struct DroneSynth {
     cellos:   [Cello; 2],
     theremin: Theremin,
     pad:      [PadTone; 3],
+    pad_chords: PadChords,
     pad_amp:  [f32; 3],
     drops:    [Drop; MAX_DROPS],
     murmur:     Box<dyn AudioUnit>,
     murmur_amp: Shared,
     surf:     Surf,
+    storm:    Storm,
+    sonar:    Sonar,
     reverb:   Box<dyn AudioUnit>,
 
     /// Doelwaarden, schrijfbaar vanuit andere threads
@@ -579,6 +1394,8 @@ pub struct DroneSynth {
 
     control_counter: u32,
     fade_in:         f32,
+    /// Afgevlakte mengpaneel-gains (zie `mix`)
+    mix:             [f32; mix::LEN],
     // Per-sample gains, bijgewerkt op control-rate
     cello_gains: [(f32, f32); 2],
     theremin_gain: (f32, f32),
@@ -604,13 +1421,16 @@ impl DroneSynth {
             ],
             theremin: Theremin::new(sample_rate, 37),
             pad: std::array::from_fn(|i| {
-                PadTone::new(sample_rate, 50 + i as u64, PAD_MIDI[i], PAD_PERIODS[i], i as f32 * 2.1)
+                PadTone::new(sample_rate, 50 + i as u64, PAD_CHORDS[0][i], PAD_PERIODS[i], i as f32 * 2.1, PAD_BRIGHT[i])
             }),
+            pad_chords: PadChords { current: 0, timer: PAD_CHORD_LEN.0 },
             pad_amp: [0.0; 3],
             drops: [Drop::default(); MAX_DROPS],
             murmur: prepare(Box::new(murmur), sample_rate, 71),
             murmur_amp,
             surf: Surf::new(sample_rate, 97),
+            storm: Storm::new(sample_rate, 113),
+            sonar: Sonar::new(sample_rate, 131),
             // Highpass vóór de hal houdt de galmstaart helder in plaats van dreunend
             reverb: prepare(
                 Box::new((highpass_hz(200.0, 0.6) | highpass_hz(200.0, 0.6)) >> reverb_stereo(22.0, 7.0, 0.55)),
@@ -622,6 +1442,7 @@ impl DroneSynth {
             burst_phase: 0.0,
             control_counter: 0,
             fade_in: 0.0,
+            mix: [1.0; mix::LEN],
             cello_gains: [(0.0, 0.0); 2],
             theremin_gain: (0.0, 0.0),
         }
@@ -634,6 +1455,11 @@ impl DroneSynth {
 
     pub fn set_params(&mut self, p: &DroneParams) {
         self.handle.set(p);
+    }
+
+    /// Mengpaneel: lineaire gain per kanaal, in de volgorde van `mix`.
+    pub fn set_mix(&mut self, gains: &[f32]) {
+        self.handle.set_mix(gains);
     }
 
     /// Alleen de temperatuur zetten (0 = koudst, 1 = heetst); overige parameters blijven.
@@ -653,6 +1479,11 @@ impl DroneSynth {
         // Temperatuur traag volgen zodat tempowissels geleidelijk verlopen (~4 s);
         // clusterwaarden iets sneller (~1.5 s) zodat ze nog hoorbaar reageren.
         let target = self.handle.get();
+        // Mengpaneel-gains in ~50 ms volgen, zodat een fader niet klikt
+        let k_mix = (dt / 0.05).min(1.0);
+        for (m, t) in self.mix.iter_mut().zip(self.handle.get_mix()) {
+            *m += (t - *m) * k_mix;
+        }
         let (k_slow, k_fast) = ((dt / 4.0).min(1.0), (dt / 1.5).min(1.0));
         let s = &mut self.smooth;
         s.temperature += (target.temperature - s.temperature) * k_slow;
@@ -663,6 +1494,20 @@ impl DroneSynth {
         s.pan_lead    += (target.pan_lead    - s.pan_lead)    * k_fast;
         // Hypothesewissel: branding in ~3 s in- of uitfaden
         s.surface     += (target.surface     - s.surface)     * (dt / 3.0).min(1.0);
+        // Donderwolk volgt de verduistering op scherm vrijwel direct; inslag-velden
+        // zijn gebeurtenissen en worden niet afgevlakt
+        s.storm       += (target.storm       - s.storm)       * (dt / 0.15).min(1.0);
+        s.strike_id    = target.strike_id;
+        s.strike_age   = target.strike_age;
+        s.strike_power = target.strike_power;
+        s.strike_pan   = target.strike_pan;
+        s.strike_super = target.strike_super;
+        s.strike_eta   = target.strike_eta;
+        // Bliksem uit: onweer in ~0.5 s weg (aan gaat net zo snel, maar dan is er
+        // toch nog niets te horen tot de eerste donderwolk)
+        s.lightning   += (target.lightning   - s.lightning)   * (dt / 0.15).min(1.0);
+        // De nacht valt al geleidelijk (10 s schemering); alleen sprongen afvlakken
+        s.night       += (target.night       - s.night)       * (dt / 0.5).min(1.0);
         let p = *s;
         let tempo = self.tempo();
         let warmth = p.temperature;
@@ -677,7 +1522,15 @@ impl DroneSynth {
         self.theremin_gain = pan_gains(self.theremin.pan(p.pan_lead));
 
         // Binaurale zweving: delta (2 Hz) bij koud tot alfa (9 Hz) bij heet
-        let beat_hz = 2.0 + 7.0 * warmth;
+        // Geen hoorbare zweving meer (bij lage tonen werd dat een wobbel): links en
+        // rechts faseren alleen traag langs elkaar, iets sneller bij warmte
+        let beat_hz = 0.2 + 0.4 * warmth;
+        // Langzame akkoordwisselingen; de stemmen glijden mee (follow in PadTone)
+        if let Some(chord) = self.pad_chords.control(dt, tempo, &mut self.rng) {
+            for (tone, &midi) in self.pad.iter_mut().zip(chord.iter()) {
+                tone.base = midi_hz(midi);
+            }
+        }
         for (i, tone) in self.pad.iter_mut().enumerate() {
             self.pad_amp[i] = tone.control(dt, tempo, beat_hz);
         }
@@ -695,6 +1548,12 @@ impl DroneSynth {
         if p.surface > 0.001 {
             self.surf.control(dt, tempo, &mut self.rng);
         }
+        if target.lightning <= 0.0 && p.lightning < 0.01 {
+            self.storm.silence();
+        }
+        self.storm.hold = self.handle.hold.value() as u32;
+        self.storm.control(dt, &p, p.storm);
+        self.sonar.control(dt, tempo, 1.0 - p.surface);
 
         if self.fade_in < 1.0 {
             self.fade_in = (self.fade_in + dt / 4.0).min(1.0);
@@ -705,7 +1564,8 @@ impl DroneSynth {
         let Some(slot) = self.drops.iter_mut().find(|d| !d.active) else { return };
         let degree = DROP_LOW + (self.rng.next_u32() % (DROP_HIGH - DROP_LOW + 1) as u32) as i32;
         let duration = self.rng.range(0.04, 0.14);
-        let (l, r) = pan_gains(self.rng.range(-0.8, 0.8));
+        // Elke druppel op een eigen plek in het volle stereobeeld
+        let (l, r) = pan_gains(self.rng.range(-1.0, 1.0));
         // Chaos: tot een halve toon naast de toonladder, en grilliger op- én neerwaartse glijders
         let chaos = self.smooth.chaos;
         let detune = 2.0f32.powf(self.rng.range(-1.0, 1.0) * chaos / 12.0);
@@ -751,7 +1611,10 @@ impl DroneSynth {
 
         // Meer drive bij chaos maakt de cello's ook luider — grotendeels compenseren,
         // zodat chaos vooral als rasp klinkt en niet als volume
-        let cello_gain = 0.10 / (1.0 + 1.0 * self.smooth.chaos);
+        let mx = self.mix;
+        // In de getijdenpoel zwijgen de cello's: daar zorgt de branding al voor lange
+        // klanken (in- en uitfaden met dezelfde ~3 s als de branding)
+        let cello_gain = 0.10 / (1.0 + 1.0 * self.smooth.chaos) * mx[mix::CELLOS] * (1.0 - self.smooth.surface);
         for (i, cello) in self.cellos.iter_mut().enumerate() {
             let s = cello.net.get_mono() * cello_gain;
             let (gl, gr) = self.cello_gains[i];
@@ -759,23 +1622,28 @@ impl DroneSynth {
             sl += s * gl * 0.5; sr += s * gr * 0.5;
         }
 
-        let t = self.theremin.net.get_mono() * 0.20;
+        // Theremin en druppels staan 10 dB lager dan oorspronkelijk (0.20 → 0.063 en
+        // 0.035/0.09 → 0.011/0.0285), op verzoek vastgezet
+        // 's Nachts zwijgt de theremin: zakt mee met de schemering, komt terug bij zonsopgang
+        let t = self.theremin.net.get_mono() * 0.063 * mx[mix::THEREMIN] * (1.0 - self.smooth.night);
         let (gl, gr) = self.theremin_gain;
         dl += t * gl; dr += t * gr;
         sl += t * gl * 0.9; sr += t * gr * 0.9;
 
         for (i, tone) in self.pad.iter_mut().enumerate() {
-            let (pl, pr) = tone.net.get_stereo();
-            let a = self.pad_amp[i] * 0.07;
+            let (pl, pr) = tone.render();
+            let a = self.pad_amp[i] * PAD_WEIGHTS[i] * 0.16 * mx[mix::BRAINWAVES];
             dl += pl * a; dr += pr * a;
             sl += pl * a * 0.6; sr += pr * a * 0.6;
         }
 
         let (wl, wr) = self.render_drops();
-        dl += wl * 0.035; dr += wr * 0.035;
-        sl += wl * 0.09;  sr += wr * 0.09;
+        let (wl, wr) = (wl * mx[mix::DROPLETS], wr * mx[mix::DROPLETS]);
+        dl += wl * 0.011;  dr += wr * 0.011;
+        sl += wl * 0.0285; sr += wr * 0.0285;
 
         let (ml, mr) = self.murmur.get_stereo();
+        let (ml, mr) = (ml * mx[mix::STREAM], mr * mx[mix::STREAM]);
         dl += ml * 0.02; dr += mr * 0.02;
         sl += ml * 0.03; sr += mr * 0.03;
 
@@ -784,14 +1652,36 @@ impl DroneSynth {
         if surface > 0.001 {
             let (bl, br) = self.surf.net.get_stereo();
             let (gl, gr) = pan_gains(self.surf.pan);
-            let a = surface * SURF_LEVEL * std::f32::consts::SQRT_2;
+            let a = surface * SURF_LEVEL * std::f32::consts::SQRT_2 * mx[mix::SURF];
             dl += bl * gl * a; dr += br * gr * a;
             sl += bl * gl * a * 0.25; sr += br * gr * a * 0.25;
         }
 
-        let (rl, rr) = self.reverb.filter_stereo(sl, sr);
+        // Onweer: alleen renderen tijdens donderwolk of nagalm van een inslag
+        if self.storm.active(self.smooth.storm) {
+            let ((tl, tr), (ll, lr)) = self.storm.render(mx[mix::THUNDER], mx[mix::LIGHTNING]);
+            let (gl, gr) = pan_gains(self.storm.pan);
+            let a = STORM_LEVEL * std::f32::consts::SQRT_2 * self.smooth.lightning;
+            dl += tl * gl * a; dr += tr * gr * a;
+            sl += tl * gl * a * 0.35; sr += tr * gr * a * 0.35;
+            // Bliksem: wat meer galm dan de donder, zodat de knal niet kurkdroog is
+            dl += ll * gl * a; dr += lr * gr * a;
+            sl += ll * gl * a * LIGHTNING_REVERB_SEND; sr += lr * gr * a * LIGHTNING_REVERB_SEND;
+        }
 
-        let g = self.fade_in;
+        // Sonar: alleen in de diepzee, met veel galm (onderwaterruimte)
+        let depth = 1.0 - surface;
+        if depth > 0.001 && self.sonar.active() {
+            let (ol, or) = self.sonar.render();
+            let a = depth * SONAR_LEVEL * mx[mix::SONAR];
+            dl += ol * a; dr += or * a;
+            sl += ol * a * 0.8; sr += or * a * 0.8;
+        }
+
+        let (rl, rr) = self.reverb.filter_stereo(sl, sr);
+        let (rl, rr) = (rl * mx[mix::REVERB], rr * mx[mix::REVERB]);
+
+        let g = self.fade_in * mx[mix::MASTER];
         let out_l = (dl + rl) * g;
         let out_r = (dr + rr) * g;
         // Zachte limiter: tanh houdt pieken onder 1 zonder hard te clippen
