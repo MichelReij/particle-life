@@ -605,8 +605,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 
     // Calculate interval based on electrical activity with much more variation.
     // electricalActivity is normalized 0-1 (see the fix above) — 16s interval
-    // at zero activity down to 1s at max activity.
+    // at zero activity down to 1s at max activity (before LIGHTNING_INTERVAL_SCALE).
     let base_interval = 16.0 - (normalized_activity * 15.0);
+
+    // Stretches every interval (base + variation) by a fixed factor. Without it
+    // the life optimum (2.1 kJ = activity 0.7) gave ~5 strikes per minute — with
+    // ~3s of pre-flash darkening and ~4-5s of thunder each, a near-continuous
+    // storm. ×3 keeps the character (bursts, lulls, activity dependence) but
+    // brings the optimum down to ~1.6 strikes per minute (median ~29s).
+    let LIGHTNING_INTERVAL_SCALE = 3.0;
 
     // Initialize next lightning time if not set (first time or after reset)
     if (lightning_bolt.next_lightning_time <= 0.0) {
@@ -756,12 +763,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         // Initialize to 0, will be set to 1 when last generation is reached
 
         // Safety check: ensure next_lightning_time doesn't overflow or become invalid
-        let next_time = time + base_interval + final_variation;
-        if (next_time > time && next_time < time + 300.0) {  // Sanity check: must be reasonable future time
+        let next_time = time + (base_interval + final_variation) * LIGHTNING_INTERVAL_SCALE;
+        // Sanity check: must be a reasonable future time. The longest legitimate
+        // interval is (16 + 120) × LIGHTNING_INTERVAL_SCALE = 408s, so the bound
+        // must sit above that — otherwise the calmest lulls would hit the fallback.
+        if (next_time > time && next_time < time + 600.0) {
             lightning_bolt.next_lightning_time = next_time;
         } else {
-            // Fallback: simple 5-second interval if calculation went wrong
-            lightning_bolt.next_lightning_time = time + 5.0;
+            // Fallback: simple interval if calculation went wrong
+            lightning_bolt.next_lightning_time = time + 5.0 * LIGHTNING_INTERVAL_SCALE;
         }
 
         // A new slot means a new preview needs to be generated for it.
