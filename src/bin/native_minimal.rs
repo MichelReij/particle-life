@@ -323,7 +323,7 @@ impl ApplicationHandler for MinimalNativeApp {
                 self.communicate_night_alpha_to_esp32();
 
                 // Sonificatie update
-                let (_gpu_type_ref, _gpu_global_ref) = if self.simulation_params.current_zoom_level > 3.0 {
+                let (gpu_type_ref, gpu_global_ref) = if self.simulation_params.current_zoom_level > 3.0 {
                     match &self.last_gpu_stats {
                         Some((per_type, global)) => (
                             Some(per_type as &[GpuTypeStats; 7]),
@@ -335,7 +335,15 @@ impl ApplicationHandler for MinimalNativeApp {
                     (None, None)
                 };
 
-                // Standalone audio patch: sonificatie-koppeling tijdelijk uitgeschakeld
+                self.sonification_state = particle_life_wasm::sonification::compute_sonification(
+                    &self.simulation_params,
+                    gpu_type_ref,
+                    gpu_global_ref,
+                    &self.sonification_state,
+                );
+                if let Some(e) = &self.audio_engine {
+                    e.set_drone_params(&self.sonification_state.drone);
+                }
 
                 // Poll vorige readback — altijd, vóór render
                 if let Some(stats_reader) = &mut self.stats_reader {

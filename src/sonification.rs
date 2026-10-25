@@ -11,6 +11,7 @@
 //
 // De bijdrage van GpuTypeStats schaalt proportioneel met (zoom − 5) / 7.
 
+use crate::dsp::DroneParams;
 use crate::SimulationParams;
 
 /// Ruwe statistieken per particle-type (stats_out[0..6]).
@@ -104,6 +105,9 @@ pub struct SonificationState {
     pub gpu_blend: f32,
     /// Huidig zoomniveau (kopie voor downstream gebruik)
     pub zoom: f32,
+    /// Besturing van de ambient drone (dsp::DroneSynth): temperatuur altijd,
+    /// clusterstatistieken alleen boven 3× zoom (geschaald met gpu_blend)
+    pub drone: DroneParams,
 }
 
 impl Default for SonificationState {
@@ -126,6 +130,7 @@ impl Default for SonificationState {
             master_amplitude: 0.65,
             gpu_blend: 0.0,
             zoom: 1.0,
+            drone: DroneParams::default(),
         }
     }
 }
@@ -292,5 +297,64 @@ pub fn compute_sonification(
         s.amplitude  += ALPHA * (target_amp   - s.amplitude);
     }
 
-    SonificationState { stems, master_amplitude, gpu_blend, zoom }
+    let drone = drone_params(params, gpu_stats, gpu_blend);
+
+    SonificationState { stems, master_amplitude, gpu_blend, zoom, drone }
+}
+
+/// Normalisatie van GpuTypeStats::energy (world-units/s) — zelfde schaal als de stems.
+const DRONE_ENERGY_NORM: f32 = 500.0;
+/// Een type telt pas als "beweeglijkste" mee met minstens zoveel deeltjes in beeld,
+/// anders springt de theremin achter een paar losse deeltjes aan.
+const DRONE_MIN_LEAD_COUNT: f32 = 5.0;
+
+/// Drone-besturing. Zonder GPU-stats (zoom ≤ 3) alleen temperatuur en hypothese — de drone
+/// gaat dan over de algemene toestand van de simulatie. Ingezoomd mengen de
+/// clusterwaarden geleidelijk in via gpu_blend.
+fn drone_params(
+    params: &SimulationParams,
+    gpu_stats: Option<&[GpuTypeStats; 7]>,
+    gpu_blend: f32,
+) -> DroneParams {
+    let mut p = DroneParams {
+        temperature: temperature_norm(params),
+        surface:     if params.is_wlp { 1.0 } else { 0.0 },
+        ..DroneParams::default()
+    };
+    let Some(stats) = gpu_stats else { return p };
+    let total: f32 = stats.iter().map(|s| s.viewport_count).sum();
+    if total < 1.0 {
+        return p;
+    }
+
+    // Gemiddelden gewogen naar aantal deeltjes in beeld
+    let (mut energy, mut order, mut center) = (0.0f32, 0.0f32, 0.0f32);
+    for s in stats {
+        let w = s.viewport_count / total;
+        energy += w * (s.energy / DRONE_ENERGY_NORM).clamp(0.0, 1.0);
+        order  += w * s.order.clamp(0.0, 1.0);
+        center += w * (s.centroid_x * 2.0 - 1.0);
+    }
+    let lead = stats
+        .iter()
+        .filter(|s| s.viewport_count >= DRONE_MIN_LEAD_COUNT)
+        .max_by(|a, b| a.energy.total_cmp(&b.energy))
+        .map_or(center, |s| s.centroid_x * 2.0 - 1.0);
+
+    p.chaos      = gpu_blend * energy * (1.0 - order);
+    p.motion     = gpu_blend * energy;
+    p.calm       = gpu_blend * order * (1.0 - energy);
+    p.pan_center = gpu_blend * center.clamp(-1.0, 1.0);
+    p.pan_lead   = gpu_blend * lead.clamp(-1.0, 1.0);
+    p
+}
+
+/// Temperatuur [min, max] van de actieve hypothese → [0, 1].
+pub fn temperature_norm(params: &SimulationParams) -> f32 {
+    let (min, max) = if params.is_wlp {
+        (crate::life_params_gen::wlp::SLIDER1_MIN, crate::life_params_gen::wlp::SLIDER1_MAX)
+    } else {
+        (crate::life_params_gen::htv::SLIDER1_MIN, crate::life_params_gen::htv::SLIDER1_MAX)
+    };
+    ((params.temperature_level - min) / (max - min)).clamp(0.0, 1.0)
 }

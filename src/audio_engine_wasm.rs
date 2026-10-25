@@ -11,7 +11,7 @@
 //   3. Na addModule() stuurt de engine de opgeslagen module via port.postMessage.
 //   4. audio-processor.js ontvangt de module, roept init() aan en start de synth.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -19,6 +19,7 @@ use web_sys::{
     AudioContext, AudioWorkletNode, MediaStream, MediaStreamAudioDestinationNode,
 };
 
+use crate::dsp::DroneParams;
 use crate::sonification::SonificationState;
 
 // ─── WASM-module opslag (injecteerbaar vanuit main.ts) ───────────────────────
@@ -43,6 +44,8 @@ pub struct WasmAudioEngine {
     node:        Rc<RefCell<Option<AudioWorkletNode>>>,
     stream_dest: Rc<MediaStreamAudioDestinationNode>,
     paused:      bool,
+    /// Laatst verstuurde drone-parameters; None = nog niets verstuurd
+    last_sent: Cell<Option<DroneParams>>,
 }
 
 impl WasmAudioEngine {
@@ -116,11 +119,28 @@ impl WasmAudioEngine {
             node,
             stream_dest,
             paused: true,
+            last_sent: Cell::new(None),
         })
     }
 
-    pub fn update(&self, _new_state: SonificationState) {
-        // Standalone patch: geen state-updates
+    /// Stuurt de drone-parameters naar de AudioWorklet, alleen bij merkbare
+    /// verandering (update() wordt elke frame aangeroepen).
+    pub fn update(&self, new_state: SonificationState) {
+        let p = new_state.drone;
+        if let Some(last) = self.last_sent.get() {
+            let changed = p.to_array().iter().zip(last.to_array()).any(|(a, b)| (a - b).abs() >= 0.002);
+            if !changed {
+                return;
+            }
+        }
+        if let Some(node) = self.node.borrow().as_ref() {
+            if let Ok(port) = node.port() {
+                let params = js_sys::Float32Array::from(&p.to_array()[..]);
+                if port.post_message(&params).is_ok() {
+                    self.last_sent.set(Some(p));
+                }
+            }
+        }
     }
 
     pub fn set_paused(&mut self, paused: bool) {
