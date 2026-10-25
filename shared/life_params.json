@@ -101,7 +101,6 @@
                 "css_stops": [
                     [3, "blue"],
                     [80, "blue"],
-                    [87, "yellow"],
                     [95, "green"],
                     [115, "green"],
                     [120, "yellow"],
@@ -140,7 +139,6 @@
                 "css_stops": [
                     [3, "blue"],
                     [30, "blue"],
-                    [35, "yellow"],
                     [40, "green"],
                     [60, "green"],
                     [65, "yellow"],
