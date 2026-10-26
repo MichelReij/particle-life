@@ -319,7 +319,9 @@ fn drone_params(
     let mut p = DroneParams {
         temperature: temperature_norm(params),
         surface:     if params.is_wlp { 1.0 } else { 0.0 },
-        night:       (params.night_alpha / SimulationParams::NIGHT_MAX_ALPHA).clamp(0.0, 1.0),
+        // Zichtbare duisternis: de theremin zwijgt pas helemaal als het hele scherm
+        // donker is, en klinkt weer zodra er ergens licht terugkomt
+        night:       params.night_darkness,
         ..DroneParams::default()
     };
     let Some(stats) = gpu_stats else { return p };

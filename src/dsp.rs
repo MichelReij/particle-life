@@ -836,7 +836,8 @@ fn wave_shape(x: f32) -> (f32, f32, f32) {
     } else {
         let t = (x - CRASH) / (1.0 - CRASH);
         let hit  = (-t * 18.0).exp();
-        let wash = (-t * 3.5).exp();
+        // Uitrol na het breken: sneller weg dan eerder (3.5), minder lang naruisen
+        let wash = (-t * 6.0).exp();
         (
             0.25 + 0.75 * wash + 0.4 * hit,
             600.0 * 4.0f32.powf(wash) + 2500.0 * hit,
@@ -2125,8 +2126,8 @@ impl Happenings {
 
 // ─── DroneSynth ──────────────────────────────────────────────────────────────
 
-/// Mengniveau van de branding.
-const SURF_LEVEL: f32 = 0.22;
+/// Mengniveau van de branding (−5 dB t.o.v. de eerdere 0.22).
+const SURF_LEVEL: f32 = 0.124;
 /// Mengniveau van het onweer.
 const STORM_LEVEL: f32 = 0.3;
 /// Mengniveau van de sonar.

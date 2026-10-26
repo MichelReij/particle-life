@@ -255,7 +255,8 @@ impl ESP32Manager {
         }
     }
 
-    // Queue a night_alpha update for UART transmission.
+    // Queue a night update for UART transmission: de zichtbare duisternis [0, 1]
+    // (SimulationParams::night_darkness — 1 = hele scherm donker).
     // Only queues when the value changed by ≥ 0.01 or a 1-second heartbeat is due.
     pub fn update_night_alpha(&self, alpha: f32) {
         if let Ok(mut state) = self.shared_state.lock() {
@@ -1398,7 +1399,7 @@ fn send_pending_lightning_events(
     }
 }
 
-// Send pending night_alpha to ESP32 as a 4-byte binary NightPacket (0xBD + u16 BE + 0xCE)
+// Send pending night value to ESP32 as a 4-byte binary NightPacket (0xBD + u16 BE + 0xCE)
 fn send_pending_night_alpha(
     port: &mut Box<dyn SerialPort>,
     shared_state: &Arc<Mutex<ESP32SharedState>>,
@@ -1418,8 +1419,9 @@ fn send_pending_night_alpha(
     };
 
     if let Some(alpha) = alpha_to_send {
-        // Normalize: alpha 0.0–0.8 → raw 0–4095 (12-bit)
-        let raw = ((alpha / 0.8) * 4095.0).clamp(0.0, 4095.0) as u16;
+        // Zichtbare duisternis 0.0–1.0 → raw 0–4095 (12-bit); 4095 alleen als het
+        // hele scherm donker is
+        let raw = (alpha * 4095.0).clamp(0.0, 4095.0) as u16;
         let packet: [u8; 4] = [
             0xBD,
             ((raw >> 8) & 0xFF) as u8,

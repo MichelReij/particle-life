@@ -115,8 +115,15 @@ pub struct SimulationParams {
     // UV-index scale 0–11
     pub uv_level: f32,
 
-    // Day/night cycle overlay alpha (0.0 = day, 0.5 = full night). WLP only.
+    // Day/night cycle overlay alpha (0.0 = day, NIGHT_MAX_ALPHA = full night). WLP only.
+    // Dit is de sterkte van de nacht, niet hoeveel van het scherm donker is — zie
+    // night_darkness.
     pub night_alpha: f32,
+
+    // Zichtbare duisternis [0, 1]: hoeveel van het (ronde) scherm daadwerkelijk donker
+    // is, zoals night_frag.wgsl het tekent. 1 alleen als het hele scherm volledig
+    // donker is; zodra er ergens nog licht te zien is, lager. Dit gaat naar de ESP32's.
+    pub night_darkness: f32,
 
     // Simulation time at the moment WLP became active — cycle starts from here so
     // switching to WLP always begins with a full day.
@@ -198,6 +205,7 @@ impl SimulationParams {
             is_wlp: false,
             uv_level: 5.5,       // Mid UV-index as default
             night_alpha: 0.0,
+            night_darkness: 0.0,
             wlp_start_time: 0.0,
             temperature_level: 20.0,
         }
@@ -414,6 +422,7 @@ impl SimulationParams {
     pub fn update_night_alpha(&mut self) {
         if !self.is_wlp {
             self.night_alpha = 0.0;
+            self.night_darkness = 0.0;
             return;
         }
         const DAY: f32      = 80.0;
@@ -434,9 +443,47 @@ impl SimulationParams {
             (1.0 - (t - DAY - FADE_IN - NIGHT) / FADE_OUT) * MAX_ALPHA
         };
 
+        self.night_darkness = Self::visible_darkness(t, self.night_alpha);
+
         // Night friction: above 75% of MAX_ALPHA, friction scales up to 2× (minder UV = meer rust).
         let night_fraction = (self.night_alpha / MAX_ALPHA - 0.75).max(0.0) / 0.25;
         self.friction = self.base_friction * (1.0 + night_fraction);
+    }
+
+    /// Hoeveel van het ronde scherm donker is [0, 1] op tijdstip `t` in de 120 s-cyclus.
+    /// Bootst night_frag.wgsl na: een donkere band met zachte randen die van rechts
+    /// naar links over het scherm trekt, maal de sterkte `alpha`. Gemiddeld over de
+    /// zichtbare cirkel (kolommen in het midden tellen zwaarder dan de randen).
+    /// De vaste getallen moeten gelijk blijven aan die in night_frag.wgsl.
+    fn visible_darkness(t: f32, alpha: f32) -> f32 {
+        const DAY: f32 = 80.0;
+        const NON_DAY: f32 = 40.0;
+        const FUZZ: f32 = 0.30;
+        const CORE_WIDTH: f32 = 1.4;
+        const COLUMNS: usize = 64;
+        if alpha <= 0.0 {
+            return 0.0;
+        }
+        let band_width = CORE_WIDTH + 2.0 * FUZZ;
+        let travel = 1.0 + 2.0 * FUZZ + band_width;
+        let t_non = (t - DAY).max(0.0);
+        let tx_eve = (1.0 + FUZZ + band_width) - (t_non / NON_DAY) * travel;
+        let tx_morn = tx_eve - band_width;
+        let smoothstep = |e0: f32, e1: f32, x: f32| {
+            let k = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+            k * k * (3.0 - 2.0 * k)
+        };
+        let (mut dark, mut weight) = (0.0f32, 0.0f32);
+        for i in 0..COLUMNS {
+            let px = (i as f32 + 0.5) / COLUMNS as f32;
+            // Hoogte van de cirkel in deze kolom
+            let w = (0.25 - (px - 0.5).powi(2)).max(0.0).sqrt();
+            let eve_side = 1.0 - smoothstep(tx_eve - FUZZ, tx_eve + FUZZ, px);
+            let morn_side = smoothstep(tx_morn - FUZZ, tx_morn + FUZZ, px);
+            dark += w * eve_side * morn_side;
+            weight += w;
+        }
+        (dark / weight * alpha / SimulationParams::NIGHT_MAX_ALPHA).clamp(0.0, 1.0)
     }
 
     // These functions handle the complex mappings from user-friendly parameters
@@ -960,5 +1007,45 @@ impl SimulationParams {
         self.apply_electrical_activity(electrical);
 
         // Note: sleep parameter is handled separately by the application
+    }
+}
+
+#[cfg(test)]
+mod night_tests {
+    use super::SimulationParams;
+
+    fn darkness_at(t: f32) -> f32 {
+        let mut p = SimulationParams::new();
+        p.is_wlp = true;
+        p.wlp_start_time = 0.0;
+        p.time = t;
+        p.update_night_alpha();
+        p.night_darkness
+    }
+
+    #[test]
+    fn nachtwaarde_volgt_wat_er_zichtbaar_donker_is() {
+        assert_eq!(darkness_at(40.0), 0.0, "dag");
+        let early = darkness_at(84.0);
+        assert!(early > 0.0 && early < 0.5, "donker schuift het beeld in: {early}");
+        assert!(darkness_at(100.0) > 0.999, "hele scherm donker: {}", darkness_at(100.0));
+        // De oude night_alpha stond hier nog op maximaal, terwijl het licht al terugkeert
+        let morning = darkness_at(106.0);
+        assert!(morning > 0.05 && morning < 0.95, "licht keert terug terwijl alpha nog maximaal is: {morning}");
+        assert!(darkness_at(115.0) < morning, "wordt verder licht");
+        assert_eq!(darkness_at(130.0), 0.0, "weer dag");
+        // Alleen echt maximaal als er nergens licht meer is
+        for t in [90.0, 95.0, 103.0, 108.0] {
+            assert!(darkness_at(t) < 1.0, "op {t}s is er nog ergens licht");
+        }
+    }
+
+    #[test]
+    fn diepzee_heeft_geen_nacht() {
+        let mut p = SimulationParams::new();
+        p.is_wlp = false;
+        p.time = 100.0;
+        p.update_night_alpha();
+        assert_eq!(p.night_darkness, 0.0);
     }
 }

@@ -720,11 +720,13 @@ impl MinimalNativeApp {
         if now.duration_since(self.last_night_alpha_update).as_millis() < 100 { return; }
         self.last_night_alpha_update = now;
 
-        let alpha = self.simulation_params.night_alpha;
+        // Zichtbare duisternis, niet de sterkte van de nacht: maximaal alleen als het
+        // hele scherm donker is (zie SimulationParams::night_darkness)
+        let darkness = self.simulation_params.night_darkness;
         if let Some(esp32) = &self.esp32_manager {
-            esp32.update_night_alpha(alpha);
+            esp32.update_night_alpha(darkness);
         }
-        self.last_night_alpha_sent = alpha;
+        self.last_night_alpha_sent = darkness;
     }
 }
 
