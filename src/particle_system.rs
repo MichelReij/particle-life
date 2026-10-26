@@ -68,17 +68,17 @@ const PARTICLE_TYPE_SIZE_MULTIPLIERS: [f32; NUM_TYPES] = [
 // Types 0-7 are HTV's palette; 8-10 are WLP-exclusive tones, contrasting with
 // the HTV palette above them.
 const DEFAULT_COLORS: [[f32; 3]; NUM_TYPES] = [
-    [0.4435, 0.6471, 0.5528], // #71a58d - Blue
-    [0.8570, 0.7567, 0.5449], // #dbc18b - Yellow
-    [0.7540, 0.2949, 0.4556], // #c04b74 - Red
-    [0.6598, 0.3962, 0.6094], // #a8659b - Purple
-    [0.3153, 0.6550, 0.4474], // #50a772 - Green
-    [0.5254, 0.5925, 0.4079], // #869768 - Olive green
-    [0.4112, 0.5815, 0.7227], // #6994b8 - Orange
-    [0.6332, 0.5649, 0.6777], // #a190ad - WLP: lavender
-    [0.5224, 0.6671, 0.7465], // #85aabe - WLP: sky blue
-    [0.6478, 0.6650, 0.1350], // #a5aa22 - WLP: olive-yellow
-    [0.5414, 0.4696, 0.6847], // #8a78af - WLP: violet
+    [0.4437, 0.6471, 0.5490], // #71a58c - Blue
+    [0.8576, 0.7609, 0.4943], // #dbc27e - Yellow
+    [0.7636, 0.2931, 0.4078], // #c34b68 - Red
+    [0.6607, 0.3963, 0.6036], // #a8659a - Purple
+    [0.3130, 0.6551, 0.4477], // #50a772 - Green
+    [0.5216, 0.5928, 0.4151], // #85976a - Olive green
+    [0.4178, 0.5824, 0.7055], // #6b95b4 - Orange
+    [0.6348, 0.5650, 0.6697], // #a290ab - WLP: lavender
+    [0.5267, 0.6674, 0.7333], // #86aabb - WLP: sky blue
+    [0.6375, 0.6670, 0.1964], // #a3aa32 - WLP: olive-yellow
+    [0.5450, 0.4704, 0.6709], // #8b78ab - WLP: violet
 ];
 
 #[derive(Debug)]

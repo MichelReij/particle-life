@@ -2040,6 +2040,7 @@ export function initColorPanel(): void {
     document
         .getElementById("copy-palette-btn")
         ?.addEventListener("click", () => {
+            // Zelfde volgorde en namen als DEFAULT_COLORS in particle_system.rs
             const typeNames = [
                 "Blue",
                 "Yellow",
@@ -2048,6 +2049,10 @@ export function initColorPanel(): void {
                 "Green",
                 "Olive green",
                 "Orange",
+                "WLP: lavender",
+                "WLP: sky blue",
+                "WLP: olive-yellow",
+                "WLP: violet",
             ];
             const lines = typeOklch.map(([l, c, h], i) => {
                 const [r, g, b] = oklchToSrgb(l, c, h);
@@ -2055,7 +2060,7 @@ export function initColorPanel(): void {
                 const fmt = (x: number) => x.toFixed(4);
                 return `    [${fmt(r)}, ${fmt(g)}, ${fmt(b)}], // ${hex} - ${typeNames[i]}`;
             });
-            const text = `const DEFAULT_COLORS: [[f32; 3]; 8] = [\n${lines.join("\n")}\n];`;
+            const text = `const DEFAULT_COLORS: [[f32; 3]; NUM_TYPES] = [\n${lines.join("\n")}\n];`;
             navigator.clipboard.writeText(text).then(() => {
                 const btn = document.getElementById("copy-palette-btn");
                 if (btn) {
