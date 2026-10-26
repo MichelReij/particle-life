@@ -7,7 +7,7 @@ The simulation runs particles in a virtual world of 3240×3240 units, rendered t
 ## Two deployment targets
 
 ### Native — Origin of Life installation
-The native binary (`native_minimal`) runs on a dedicated machine connected to a round 1080×1080 display. It receives sensor data from ESP32 hardware (temperature, pressure, pH, electrical activity) via serial/ESP-NOW, and uses that data to steer the simulation parameters in real time. Audio is produced via a supersaw synthesizer that maps simulation statistics to 7 voices, one per particle type.
+The native binary (`native_minimal`) runs on a dedicated machine connected to a round 1080×1080 display. It receives sensor data from ESP32 hardware (temperature, pressure, pH, electrical activity) via serial/ESP-NOW, and uses that data to steer the simulation parameters in real time. Audio is an ambient drone synthesized in real time (Rust/funDSP) and steered by the simulation: temperature sets the tempo, each hypothesis has its own sound world (surf and thunderstorms in the warm little ponds, sonar and hissing vents in the deep sea), and when zoomed in the drone reacts to particle clusters.
 
 ### Web (WASM) — experimentation and development
 The WASM build runs in any WebGPU-capable browser at `localhost:3000`. It is primarily used to experiment with parameters, visual effects, and new features before deploying to the installation. The web version does not include the ESP32 sensor integration.
@@ -34,9 +34,10 @@ rust/particle-life/
 │   ├── simulation_params.rs    # Central parameter struct (shared)
 │   ├── particle_system.rs      # CPU-side particle state
 │   ├── webgpu_renderer.rs      # Render pipeline
-│   ├── sonification.rs         # Simulation stats → StemState mapping
+│   ├── dsp.rs                  # Ambient drone synthesizer (native + web AudioWorklet)
+│   ├── sonification.rs         # Simulation state → drone parameters
 │   ├── stats_reader.rs         # GPU readback of simulation statistics
-│   ├── audio_engine.rs         # Supersaw synthesizer (native)
+│   ├── audio_engine.rs         # Native audio output (rodio)
 │   ├── esp32_communication.rs  # Sensor data ingestion (native)
 │   └── shaders/
 │       ├── compute.wgsl        # Particle physics
@@ -53,7 +54,7 @@ The zoom slider runs from 1x to 12x. The mapping is **exponential** (`zoom = 12^
 
 ## Sonification
 
-The simulation is continuously sonified via a 7-voice synthesizer — one voice per particle type. Each voice is a supersaw oscillator with a lowpass gate, noise layer, and saturation.
+The simulation is continuously sonified via an ambient drone (`src/dsp.rs`): bowed cellos, a theremin, a deep brainwave pad, water droplets, and hypothesis-specific layers (surf and thunder for the warm little ponds; sonar and hydrothermal vents for the deep sea). The statistics below steer it when zoomed in.
 
 ### Simulation statistics (GPU readback)
 
@@ -80,20 +81,16 @@ The key insight is the interaction between `order` and `energy`:
 
 | order | energy | situation | sound |
 |---|---|---|---|
-| high | low | stable cluster, little motion | deep, clean, calm |
-| high | high | vibrating cluster | buzzing, tense, saturated |
-| low | high | chaos, particles flying | noisy, wide, turbulent |
-| low | low | sparse, inactive | quiet, ambient |
+| high | low | stable cluster, little motion | calm: longer, softer theremin phrases |
+| low | high | chaos, particles flying | rough: harder, rasping cello bowing, erratic theremin |
+| any | high | lots of motion | more water droplets and a fuller stream |
 
-- `viewport_count` per type → voice amplitude (absent types go silent)
-- `order × energy` (vibration) → saturation/buzz drive
-- `energy` → pitch drift upward
-- `order` → gate openness and amplitude
-- `centroid_x` → stereo panning
-- `cluster_count` + `avg_cluster_size` → global detune width (many small clusters = wide, few large clusters = tight)
-- `total_viewport_count` → master amplitude (empty viewport = quieter)
+- Count-weighted mean `energy` × (1 − `order`) → chaos; mean `energy` → motion; `order` × (1 − `energy`) → calm
+- Count-weighted `centroid_x` → cello panning; the most energetic type's `centroid_x` → theremin panning
 
-GPU stats blend in linearly from zoom 2x onward, reaching full weight at zoom 12x.
+Below 3x zoom the drone only follows the overall simulation state (temperature sets the tempo,
+hypothesis, lightning, day/night). Above 3x the statistics blend in linearly with zoom, reaching
+full weight at 12x.
 
 ## Performance
 

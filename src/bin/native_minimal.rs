@@ -210,7 +210,7 @@ impl ApplicationHandler for MinimalNativeApp {
         // AudioEngine initialiseren
         match AudioEngine::new() {
             Ok(engine) => {
-                console_log!("✅ AudioEngine (supersaw) actief — 7 stemmen @ 44.1 kHz");
+                console_log!("✅ AudioEngine actief — ambient drone");
                 self.audio_engine = Some(engine);
             }
             Err(e) => {

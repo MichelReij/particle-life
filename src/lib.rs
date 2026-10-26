@@ -30,21 +30,17 @@ mod webgpu_renderer;
 #[cfg(not(target_arch = "wasm32"))]
 mod esp32_communication;
 
-// Audio system only for native builds (oud mp3-systeem, voor referentie)
-#[cfg(not(target_arch = "wasm32"))]
-mod audio;
-
-// Gedeelde DSP-primitieven (SawOscillator, BiquadLPF, NoiseGen, Stem)
+// Ambient drone (DroneSynth) — gedeeld tussen native en de WASM-AudioWorklet
 pub mod dsp;
 
-// Sonificatie: parameter → StemState mapping — gedeeld tussen native en WASM
+// Sonificatie: simulatietoestand → DroneParams — gedeeld tussen native en WASM
 pub mod sonification;
 
-// Audio engine: supersaw synthesizer via rodio (native only)
+// Audio engine: ambient drone via rodio (native only)
 #[cfg(not(target_arch = "wasm32"))]
 pub mod audio_engine;
 
-// Audio engine: supersaw synthesizer via Web Audio API (WASM only)
+// Audio engine: ambient drone via Web Audio API / AudioWorklet (WASM only)
 #[cfg(target_arch = "wasm32")]
 pub mod audio_engine_wasm;
 
@@ -67,8 +63,6 @@ pub use webgpu_renderer::*;
 #[cfg(not(target_arch = "wasm32"))]
 pub use esp32_communication::*;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub use audio::*;
 
 // Spread over how many seconds a population-count transition (see
 // initialize_particles_for_grow_transition/shrink_transition) stages each
@@ -398,7 +392,7 @@ impl ParticleLifeEngine {
     }
 
     /// Mengpaneel: lineaire gain per kanaal (volgorde: dsp::mix — cellos, theremin,
-    /// brainwaves, droplets, stream, surf, thunder, lightning, sonar, reverb,
+    /// brainwaves, droplets, stream, surf, thunder, lightning, sonar, vents, reverb,
     /// master), optioneel gevolgd door de bliksem-sample-and-hold in samples.
     #[wasm_bindgen]
     pub fn set_audio_mix(&mut self, gains: &[f32]) {

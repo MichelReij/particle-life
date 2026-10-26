@@ -22,9 +22,9 @@ src/
   shader_constants.rs      # Shader constants
   config.rs                # Configuration constants
   esp32_communication.rs   # ESP32 serial comm (native only)
-  audio.rs                 # OLD audio system — simple mp3 player (native only, kept for reference)
-  audio_engine.rs          # NEW audio engine — supersaw synthesizer (native only)
-  sonification.rs          # Parameter → StemState mapping (native only)
+  dsp.rs                   # Ambient drone (DroneSynth) — native + WASM-AudioWorklet
+  audio_engine.rs          # Native audio-uitvoer van de drone via rodio
+  sonification.rs          # Simulatie → DroneParams (+ StormTracker voor onweer)
   stats_reader.rs          # GPU readback for particle-type statistics (native only)
   shaders/
     compute.wgsl           # Particle physics compute shader (GPU, runs every frame)
@@ -50,7 +50,7 @@ src/
 | UI | HTML/TypeScript | winit window |
 | Bundler | Webpack | — |
 | External I/O | — | ESP32 via serial (115200 baud) |
-| Audio | — | rodio (supersaw synthesizer) |
+| Audio | AudioWorklet (ambient drone) | rodio (ambient drone) |
 
 ## Build Commands
 
@@ -69,24 +69,18 @@ cargo build --release     # Release native binary
 ./target/debug/native_minimal  # Run directly
 ```
 
-### Native — audio: mp3-demo (default) vs. zelfgebouwde synthesizer
+### Audio: ambient drone
 
-De `demo_audio` feature staat sinds kort **standaard aan** (`default = ["demo_audio"]` in
-`Cargo.toml`) — de supersaw-synthesizer is nog niet productierijp, dus een gewone build/run
-speelt nu `assets/brainwaves.mp3` in loop af via rodio:
+Native en web spelen dezelfde zelf gesynthetiseerde ambient drone (`src/dsp.rs`,
+`DroneSynth`), aangestuurd vanuit de simulatie (`src/sonification.rs`). Native via rodio
+(`src/audio_engine.rs`), web via een AudioWorklet (`src/audio_engine_wasm.rs`,
+`src/audio_worklet_exports.rs`, `public/audio-processor.js`). Het mengpaneel staat in de
+web-UI (`src/audio-mixer.ts`). Offline renderen voor metingen:
 ```bash
-cargo build --release       # demo_audio zit al in de default features
-./target/release/native_minimal
+cargo run --release --example render_drone -- uit.wav [seconden] ...   # zie de example voor alle argumenten
 ```
-`quick-launch.sh` gebruikt deze default al (geen aparte flag nodig).
-
-Om i.p.v. daarvan de zelfgebouwde supersaw-synthesizer te testen, expliciet uitschakelen:
-```bash
-cargo build --release --no-default-features
-./target/release/native_minimal
-```
-Alle andere functionaliteit blijft in beide gevallen identiek. De WASM/web-build gebruikt
-sowieso `audio_engine_wasm.rs` (Web Audio API) en wordt door deze feature niet geraakt.
+De vroegere mp3-weergave (`demo_audio`, `assets/audio/brainwaves.mp3`) is verwijderd; het
+mp3-bestand dient alleen nog als klankreferentie voor de brainwaves-pad.
 
 ## Simulation Parameters
 
@@ -155,87 +149,49 @@ De embed (`src/embed.ts`) is volledig zelfstandig:
 
 ---
 
-## Sonification System (NEW — work in progress)
+## Sonification System
 
-The native binary generates sound from the simulation state. This was added in April 2025 and was **not yet compiled/tested** when this CLAUDE.md was written. There will likely be compile errors to fix.
+Native en web spelen dezelfde ambient drone (`dsp::DroneSynth`, funDSP), aangestuurd door
+de simulatie. Geen stem per deeltjestype meer: een vaste set lagen in C-mineur pentatonisch.
 
 ### Architecture
 
 ```
-SimulationParams ──────────────────────────────────────────┐
-                  → sonification::compute_sonification()   │
-GpuTypeStats ─────→   (elke frame, EMA-smoothed)          │
-(10 Hz readback         ↓                                  │
- bij zoom > 5x)    SonificationState { stems: [StemState; 7] }
-                         ↓
-                   audio_engine::AudioEngine
-                   (rodio thread, non-blocking)
-                         ↓
-                   7× Stem: supersaw + biquad LPF + noise + tanh
-                         ↓
-                   stereo audio output
+SimulationParams ─┐
+GpuTypeStats ─────┼→ sonification::compute_sonification() → SonificationState.drone
+(alleen zoom > 3) │   + StormTracker (bliksemplanning via de simulatieklok)
+LightningBolt ────┘                       ↓  DroneParams (temperatuur, chaos, beweging,
+                                             rust, panning, hypothese, onweer, nacht)
+             native: audio_engine::AudioEngine (rodio)  ·  web: AudioWorklet
+                                          ↓
+                                   dsp::DroneSynth → stereo
 ```
+
+### Lagen (src/dsp.rs)
+
+| Laag | Wanneer | Kern |
+|---|---|---|
+| Cello's | diepzee (zwijgen in WLP) | soft_saw + kastresonanties, adempauzes; chaos → rasp |
+| Theremin | altijd, zwijgt 's nachts (WLP) | portamento, random-walk frasen |
+| Brainwaves | altijd | diepe basdrone naar `assets/audio/brainwaves.mp3`, langzame akkoordwissels (faden, niet glijden) |
+| Druppels + stroompje | altijd | gestemde druppels; beweging → meer |
+| Branding | WLP | aanzwellende golven + schuim |
+| Onweer | WLP, in sync met de bliksem | donderwolk-gegrom, overstuurde knal + geknetter, donderrollen |
+| Sonar | HTV | losse pings met een kleine echo, wisselende richting |
+| Vents | HTV | sissende straal, pijp-toon, bellen (groottemodel), achtergrondgerommel |
+
+Temperatuur bepaalt het tempo (0.1–2.2). Mengpaneel (web): `src/audio-mixer.ts`, volgorde
+`dsp::mix`. Renders voor metingen: `examples/render_drone.rs`.
 
 ### Zoom-gestuurde sonische lens
 
-- **zoom 1x–5x**: alleen `SimulationParams` → ambient, traag, globaal karakter
-- **zoom 5x–12x**: `SimulationParams` + `GpuTypeStats` (readback 10 Hz) → rijker, reageert op clusters
-- De GPU-blend schaalt lineair: `(zoom - 5) / 7`
+- **zoom ≤ 3x**: alleen algemene simulatietoestand (temperatuur, hypothese, onweer, nacht)
+- **zoom > 3x**: daarnaast `GpuTypeStats` → chaos/beweging/rust/panning, geschaald met `gpu_blend`
 
 ### GpuTypeStats (stats_compute.wgsl → stats_reader.rs)
 
-Per particle-type (7 total), berekend in `stats_compute.wgsl`:
-```
-stats_out[type] = vec4<f32>(centroid_x, centroid_y, mean_speed, density)
-```
-- `centroid_x/y`: gewogen positie in viewport [0, 1] → stereo panning
-- `mean_speed`: gemiddelde snelheidsgrootte → noise niveau
-- `density`: fractie tov verwacht gemiddelde (>1 = cluster in beeld) → gate opening + amplitude
-
-**Dispatch**: 7 workgroups (één per type), elke 6 frames (~10 Hz). Slechts 112 bytes readback.
-
-### StemState per particle-type
-
-Elk van de 7 particle-types heeft een eigen "stem":
-```
-type 0 (blauw)  → A1  = 55.0 Hz
-type 1 (geel)   → E2  = 82.4 Hz
-type 2 (rood)   → B2  = 123.5 Hz  (klein, snel, hoog)
-type 3 (paars)  → G#1 = 51.9 Hz
-type 4 (groen)  → D2  = 73.4 Hz
-type 5 (olijf)  → A#1 = 58.3 Hz
-type 6 (oranje) → C#2 = 69.3 Hz
-```
-
-### Parameter mappings (sonification.rs)
-
-| SimulationParams | → StemState |
-|---|---|
-| `inter_type_attraction_scale` [-1,3] | → `gate` [0.05, 0.9] — lowpass gate openheid |
-| `r_smooth` [0.1, 20] | → `saturation` [0.7, 0.1] — rasp (tanh drive) |
-| `lenia_growth_sigma` [0.02, 0.16] | → `noise` [0, 0.5] — witte ruis bijmenging |
-| `friction` [0.01, 0.98] | → `frequency` +8% bij hoge temp — thermische pitch |
-| `current_zoom_level` | → `master_amplitude` [0.35, 0.75] |
-
-### Per-stem GPU correcties (bij zoom > 5x)
-
-| GpuTypeStats veld | → StemState effect |
-|---|---|
-| `density > 1` | → gate verder open, meer amplitude |
-| `mean_speed` | → noise omhoog, pitch +4% |
-| `centroid_x` [0,1] | → stereo pan [-1, 1] |
-| `density` | → saturation boost |
-
-### AudioEngine (audio_engine.rs)
-
-Per stem:
-1. **4× SawOscillator** met spread ±20 cent (supersaw)
-2. **BiquadLPF** — 2-pool resonante lowpass, cutoff 80 Hz..8 kHz via `gate`
-3. **NoiseGen** (xorshift32) — witte ruis bijmenging via `noise`
-4. **tanh-saturatie** — drive = 1 + saturation × 4 (de Plinky-achtige rasp)
-5. **Stereo pan** — constant-power, aangestuurd door `pan`
-
-Mix: 7 stems / NUM_STEMS, × master_amplitude, geleverd als rodio::Source (44.1 kHz, stereo, blokgrootte 512).
+Per particle-type: `vec4(viewport_count, energy, order, centroid_x)`; globaal (index 7):
+`vec4(total_viewport_count, cluster_count, avg_cluster_size, 0)`.
 
 ### StatsReader (stats_reader.rs)
 
@@ -254,7 +210,7 @@ Mix: 7 stems / NUM_STEMS, × master_amplitude, geleverd als rodio::Source (44.1 
 - `pub current_buffer_index: usize`
 - `pub fn queue(&self) -> &wgpu::Queue`
 
-**AudioEngine is non-blocking**: update() gebruikt `try_lock()` — als de audio thread de lock heeft, wordt de update overgeslagen (geen klik, geen blokkering).
+**AudioEngine is non-blocking**: parameters gaan via `fundsp::Shared` (atomair) naar de audio-thread (`DroneHandle`); geen locks.
 
 ### Keyboard controls (native)
 
