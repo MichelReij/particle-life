@@ -1511,7 +1511,8 @@ impl Sonar {
 // seconden aanhoudt en uitdooft, met daaronder zacht de brommende pijp-toon van de
 // schoorsteen en af en toe een losse bel. Bewust zonder ritme — eerdere versies
 // met stoten klonken als slagwerk. Daaronder een zacht, diep gerommel van de
-// aardkorst. Hoe heter, hoe actiever.
+// aardkorst, en nog dieper tektonisch gerommel dat los van de uitbarstingen
+// onregelmatig aanzwelt en wegebt. Hoe heter, hoe actiever.
 
 /// Maximaal aantal gelijktijdig klinkende bellen.
 const MAX_BUBBLES: usize = 32;
@@ -1523,9 +1524,12 @@ const VENT_PIPE_HIGH: i32 = 10;
 /// Bewust niet gestemd — echte bellen hebben elke toonhoogte, naar hun grootte.
 const BUBBLE_FREQ: (f32, f32) = (1500.0, 250.0);
 /// Versterking van de pijp-toon (smalle banddoorlaat op ruis is van zichzelf zacht).
-const VENT_PIPE_GAIN: f32 = 32.0;
+/// Meegeschaald met de wortel van de Q, zodat het niveau gelijk blijft.
+const VENT_PIPE_GAIN: f32 = 50.0;
 /// Kwaliteit (smalheid) van de pijpresonantie: hoger = meer toon, minder gerommel.
-const VENT_PIPE_Q: f32 = 12.0;
+/// Was 12: dat bruisende, golvende gerommel plus de stijgende toon klonk als een
+/// doortrekkende wc. Nu smaller, als een verre, rustige toon.
+const VENT_PIPE_Q: f32 = 30.0;
 /// Bellen per seconde bij volle druk, en hun sterkte.
 const VENT_BUBBLE_RATE: f32 = 80.0;
 const VENT_BUBBLE_GAIN: f32 = 2.6;
@@ -1538,6 +1542,14 @@ const VENT_BUBBLE_REVERB: f32 = 0.9;
 const VENT_HISS_GAIN: f32 = 0.5;
 /// Volume per uitbarsting (dB, bereik), willekeurig binnen.
 const VENT_LEVEL_DB: (f32, f32) = (-20.0, -5.0);
+/// Aardbevingsgerommel: zeer lage ruis (< 60 Hz) die bij aanzwellen door een
+/// zachte verzadiging gaat, zodat er een schurend, malend randje bij komt (ook
+/// hoorbaar op speakers zonder diepe bas). Drive vóór de verzadiging, niveau erna.
+const QUAKE_DRIVE: f32 = 6.0;
+const QUAKE_GAIN:  f32 = 0.25;
+/// Onderstroom (altijd aanwezig) en de sterkte van een aanzwelling (bereik).
+const QUAKE_FLOOR: f32 = 0.15;
+const QUAKE_SWELL: (f32, f32) = (0.5, 1.0);
 
 /// Banddoorlaat (RBJ, 0 dB piek); coëfficiënten op control-rate bijgewerkt.
 #[derive(Clone, Copy, Default)]
@@ -1671,6 +1683,12 @@ struct Vent {
     /// Zacht gerommel van de aardkorst (breed, per kanaal eigen ruis)
     rumble_net: Box<dyn AudioUnit>,
     rumble_amp: Shared,
+    /// Diep tektonisch gerommel dat los van de uitbarstingen aanzwelt en wegebt
+    quake_net:  Box<dyn AudioUnit>,
+    quake_amp:  Shared,
+    /// Lopende aanzwelling: tijd erin, opkomst, uitdoving, piek; en tijd tot de volgende
+    quake:      (f32, f32, f32, f32),
+    quake_timer: f32,
     /// Sissende straal (ruis 1.8–7 kHz, per kanaal eigen ruis), gepand naar de bron
     hiss_net:   Box<dyn AudioUnit>,
     hiss_amp:   Shared,
@@ -1701,6 +1719,11 @@ impl Vent {
         let rumble_amp = shared(0.0);
         let hiss_amp   = shared(0.0);
         let rumble = || (brown() >> lowpass_hz(140.0, 0.7)) * 3.0 * (var(&rumble_amp) >> follow(0.2));
+        let quake_amp = shared(0.0);
+        let quake = || {
+            ((brown() >> lowpass_hz(60.0, 0.9)) * QUAKE_DRIVE * (var(&quake_amp) >> follow(0.3))
+                >> shape(Tanh(1.0)) >> lowpass_hz(200.0, 0.7)) * QUAKE_GAIN
+        };
         let hiss = || {
             (noise() >> highpass_hz(1800.0, 0.6) >> lowpass_hz(7000.0, 0.6))
                 * (var(&hiss_amp) >> follow(0.08))
@@ -1708,6 +1731,10 @@ impl Vent {
         Self {
             rumble_net: prepare(Box::new(rumble() | rumble()), sample_rate, seed),
             rumble_amp,
+            quake_net: prepare(Box::new(quake() | quake()), sample_rate, seed + 2),
+            quake_amp,
+            quake: (0.0, 1.0, 1.0, 0.0),
+            quake_timer: 5.0,
             hiss_net: prepare(Box::new(hiss() | hiss()), sample_rate, seed + 1),
             hiss_amp,
             pipe: [[Bandpass::default(); 2]; 2],
@@ -1783,8 +1810,9 @@ impl Vent {
         }
         self.flutter.0 += (self.flutter.1 - self.flutter.0) * (dt / 0.4).min(1.0);
 
-        // Pijp-toon kruipt ~4% mee omhoog met de druk
-        let f = self.pipe_freq * (1.0 + 0.04 * p);
+        // Pijp-toon op vaste hoogte: meestijgen met de druk klonk als een
+        // vollopend reservoir
+        let f = self.pipe_freq;
         for ch in self.pipe.iter_mut() {
             ch[0].set(f, VENT_PIPE_Q, self.sample_rate);
             ch[1].set(f * 2.03, VENT_PIPE_Q, self.sample_rate);
@@ -1799,6 +1827,25 @@ impl Vent {
         }
 
         self.rumble_amp.set_value(background + 0.2 * p);
+
+        // Tektonisch gerommel: onregelmatige aanzwellingen (elke ~8–25 s, 1.5–4 s
+        // opkomen, 4–9 s wegebben) boven een altijd aanwezige onderstroom; een
+        // uitbarsting duwt het iets op
+        self.quake_timer -= dt;
+        if self.quake_timer <= 0.0 {
+            let rng = &mut self.rng;
+            self.quake = (0.0, rng.range(1.5, 4.0), rng.range(4.0, 9.0), rng.range(QUAKE_SWELL.0, QUAKE_SWELL.1));
+            self.quake_timer = rng.range(8.0, 25.0);
+        }
+        let (qt, qrise, qfall, qpeak) = &mut self.quake;
+        *qt += dt;
+        let swell = if *qt < *qrise {
+            0.5 - 0.5 * (std::f32::consts::PI * *qt / *qrise).cos()
+        } else {
+            (-(*qt - *qrise) / (*qfall * 0.4)).exp()
+        };
+        let quake = QUAKE_FLOOR * (1.0 + 0.3 * self.breath.cos()) + *qpeak * swell + 0.3 * p;
+        self.quake_amp.set_value(quake);
         self.hiss_amp.set_value(p * self.flutter.0 * VENT_HISS_GAIN);
     }
 
@@ -1807,6 +1854,9 @@ impl Vent {
     #[inline]
     fn render(&mut self) -> ((f32, f32), (f32, f32)) {
         let (mut l, mut r) = self.rumble_net.get_stereo();
+        let (ql, qr) = self.quake_net.get_stereo();
+        l += ql;
+        r += qr;
 
         let p = self.pressure;
         let (gl, gr) = pan_gains(self.pan);
@@ -1815,9 +1865,10 @@ impl Vent {
         l += hl * gl * std::f32::consts::SQRT_2;
         r += hr * gr * std::f32::consts::SQRT_2;
 
-        // Pijp-toon: zacht en vloeiend onder het gesis
+        // Pijp-toon: zacht en vloeiend onder het gesis. Zonder de golving van de
+        // straal — die gaf de toon een gorgelend, doorspoelend karakter.
         if p > 1e-4 {
-            let drive = p * self.flutter.0 * VENT_PIPE_GAIN;
+            let drive = p * VENT_PIPE_GAIN;
             let mut out = [0.0f32; 2];
             for (o, ch) in out.iter_mut().zip(self.pipe.iter_mut()) {
                 let n = self.rng.range(-1.0, 1.0);
@@ -2407,8 +2458,9 @@ impl DroneSynth {
         // zodat chaos vooral als rasp klinkt en niet als volume
         let mx = self.mix;
         // In de getijdenpoel zwijgen de cello's: daar zorgt de branding al voor lange
-        // klanken (in- en uitfaden met dezelfde ~3 s als de branding)
-        let cello_gain = 0.10 / (1.0 + 1.0 * self.smooth.chaos) * mx[mix::CELLOS] * (1.0 - self.smooth.surface);
+        // klanken (in- en uitfaden met dezelfde ~3 s als de branding). In de diepzee
+        // +5 dB (was 0.10)
+        let cello_gain = 0.178 / (1.0 + 1.0 * self.smooth.chaos) * mx[mix::CELLOS] * (1.0 - self.smooth.surface);
         for (i, cello) in self.cellos.iter_mut().enumerate() {
             let s = cello.net.get_mono() * cello_gain;
             let (gl, gr) = self.cello_gains[i];
