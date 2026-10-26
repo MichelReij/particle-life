@@ -142,6 +142,7 @@ pub struct ESP32SharedState {
     pub status: ESP32Status,
     pub last_update: Instant,
     pub pending_lightning_events: Vec<ESP32LightningEvent>, // Queue of lightning events to send
+    pub pending_eruptions: Vec<crate::eruptions::Eruption>, // Queue of eruption events to send (HTV)
     pub pending_night_alpha: Option<f32>,          // Set when night_alpha needs to be sent
     pub last_sent_night_alpha: f32,                // Track last sent value to avoid redundant sends
     pub last_night_send_time: Instant,             // For periodic night heartbeat
@@ -154,6 +155,7 @@ impl Default for ESP32SharedState {
             status: ESP32Status::Disconnected,
             last_update: Instant::now(),
             pending_lightning_events: Vec::new(),
+            pending_eruptions: Vec::new(),
             pending_night_alpha: None,
             last_sent_night_alpha: -1.0, // force first send
             last_night_send_time: Instant::now(),
@@ -255,6 +257,14 @@ impl ESP32Manager {
         }
     }
 
+    // Queue a hydrothermal eruption (HTV) for the neopixel ring: sent the moment it
+    // starts, the same moment the vents audio and the bubbles on screen begin
+    pub fn send_eruption_event(&self, eruption: &crate::eruptions::Eruption) {
+        if let Ok(mut state) = self.shared_state.lock() {
+            state.pending_eruptions.push(*eruption);
+        }
+    }
+
     // Queue a night update for UART transmission: de zichtbare duisternis [0, 1]
     // (SimulationParams::night_darkness — 1 = hele scherm donker).
     // Only queues when the value changed by ≥ 0.01 or a 1-second heartbeat is due.
@@ -335,6 +345,9 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
 
                     // Check for pending lightning events to send
                     send_pending_lightning_events(serial_port, &shared_state);
+
+                    // Send pending eruption events (HTV)
+                    send_pending_eruptions(serial_port, &shared_state);
 
                     // Send pending night alpha update
                     send_pending_night_alpha(serial_port, &shared_state);
@@ -1394,6 +1407,39 @@ fn send_pending_lightning_events(
 
         if let Err(e) = port.write_all(&packet) {
             println!("❌ ESP32: Failed to send lightning event: {}", e);
+            break;
+        }
+    }
+}
+
+// Send pending eruptions as 18-byte EruptionPackets (see ESP32_UART_Protocol.h):
+// [0xBE] [eruption_id u32 BE] [position u8] [reach u8] [intensity u16 BE]
+// [heat u16 BE] [ramp_ms u16 BE] [hold_ms u16 BE] [fade_ms u16 BE] [0xCF]
+fn send_pending_eruptions(
+    port: &mut Box<dyn SerialPort>,
+    shared_state: &Arc<Mutex<ESP32SharedState>>,
+) {
+    let eruptions = match shared_state.lock() {
+        Ok(mut state) if !state.pending_eruptions.is_empty() => std::mem::take(&mut state.pending_eruptions),
+        _ => return,
+    };
+    for e in eruptions {
+        let raw = |v: f32| (v * 4095.0).clamp(0.0, 4095.0) as u16;
+        let ms = |s: f32| (s * 1000.0).round().clamp(0.0, u16::MAX as f32) as u16;
+        let mut packet = Vec::with_capacity(18);
+        packet.push(0xBE);
+        packet.extend_from_slice(&e.id.to_be_bytes());
+        packet.push(e.position_byte());
+        packet.push(e.reach);
+        packet.extend_from_slice(&raw(e.ring_intensity()).to_be_bytes());
+        packet.extend_from_slice(&raw(e.heat).to_be_bytes());
+        packet.extend_from_slice(&ms(e.ramp).to_be_bytes());
+        packet.extend_from_slice(&ms(e.hold).to_be_bytes());
+        packet.extend_from_slice(&ms(e.fade).to_be_bytes());
+        packet.push(0xCF);
+        debug_assert_eq!(packet.len(), 18);
+        if let Err(err) = port.write_all(&packet) {
+            println!("❌ ESP32: Failed to send eruption: {}", err);
             break;
         }
     }

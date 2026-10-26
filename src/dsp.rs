@@ -167,6 +167,15 @@ pub struct DroneParams {
     pub converge_pan: f32,
     pub diverge: f32,
     pub diverge_pan: f32,
+    /// Hydrothermale uitbarsting (alleen diepzee, gepland door de simulatie, zie
+    /// eruptions.rs): teller, seconden sinds het begin, sterkte [0, 1], positie
+    /// [-1, 1], en hoe lang de straal aanhoudt en uitdooft (s)
+    pub eruption_id: f32,
+    pub eruption_age: f32,
+    pub eruption_strength: f32,
+    pub eruption_pan: f32,
+    pub eruption_hold: f32,
+    pub eruption_release: f32,
     /// De grootste zichtbare klonten, elk met een eigen stem (alleen ingezoomd)
     pub voices: [BlobVoice; BLOB_VOICES],
 }
@@ -215,6 +224,8 @@ impl Default for DroneParams {
             merge_id: 0.0, merge_age: 10.0, merge_strength: 0.0, merge_pan: 0.0,
             split_id: 0.0, split_age: 10.0, split_strength: 0.0, split_pan: 0.0,
             converge: 0.0, converge_pan: 0.0, diverge: 0.0, diverge_pan: 0.0,
+            eruption_id: 0.0, eruption_age: 10.0, eruption_strength: 0.0, eruption_pan: 0.0,
+            eruption_hold: 0.0, eruption_release: 0.0,
             voices: [BlobVoice::default(); BLOB_VOICES],
         }
     }
@@ -222,7 +233,7 @@ impl Default for DroneParams {
 
 impl DroneParams {
     /// Losse waarden vóór de klont-stemmen.
-    const SCALARS: usize = 28;
+    const SCALARS: usize = 34;
     pub const LEN: usize = Self::SCALARS + BLOB_VOICES * BlobVoice::FIELDS;
 
     /// Volgorde zoals verstuurd naar de AudioWorklet.
@@ -234,6 +245,8 @@ impl DroneParams {
             self.merge_id, self.merge_age, self.merge_strength, self.merge_pan,
             self.split_id, self.split_age, self.split_strength, self.split_pan,
             self.converge, self.converge_pan, self.diverge, self.diverge_pan,
+            self.eruption_id, self.eruption_age, self.eruption_strength, self.eruption_pan,
+            self.eruption_hold, self.eruption_release,
         ];
         let mut a = [0.0f32; Self::LEN];
         a[..Self::SCALARS].copy_from_slice(&scalars);
@@ -274,6 +287,12 @@ impl DroneParams {
             converge_pan:   v[25],
             diverge:        v[26],
             diverge_pan:    v[27],
+            eruption_id:       v[28],
+            eruption_age:      v[29],
+            eruption_strength: v[30],
+            eruption_pan:      v[31],
+            eruption_hold:     v[32],
+            eruption_release:  v[33],
             voices: std::array::from_fn(|i| {
                 let c = &v[Self::SCALARS + i * BlobVoice::FIELDS..][..BlobVoice::FIELDS];
                 BlobVoice { id: c[0], level: c[1], pan: c[2], size: c[3], motion: c[4], agitation: c[5] }
@@ -311,6 +330,12 @@ impl DroneParams {
             converge_pan:   self.converge_pan.clamp(-1.0, 1.0),
             diverge:        self.diverge.clamp(0.0, 1.0),
             diverge_pan:    self.diverge_pan.clamp(-1.0, 1.0),
+            eruption_id:       self.eruption_id,
+            eruption_age:      self.eruption_age.clamp(0.0, 10.0),
+            eruption_strength: self.eruption_strength.clamp(0.0, 1.0),
+            eruption_pan:      self.eruption_pan.clamp(-1.0, 1.0),
+            eruption_hold:     self.eruption_hold.clamp(0.0, 10.0),
+            eruption_release:  self.eruption_release.clamp(0.0, 10.0),
             voices:         self.voices.map(|v| v.clamped()),
         }
     }
@@ -1697,8 +1722,8 @@ struct Vent {
     bubbles:    BubbleStream,
     rng:        Rng,
     sample_rate: f32,
-    /// Seconden tot de volgende uitbarsting
-    timer:      f32,
+    /// Laatst geziene eruption_id; None tot de eerste parameters binnen zijn
+    last_eruption: Option<f32>,
     /// Lopende uitbarsting
     erupting:   bool,
     t:          f32,
@@ -1741,7 +1766,7 @@ impl Vent {
             bubbles: BubbleStream::new(sample_rate, VENT_BUBBLE_LP),
             rng: Rng(0x3C6E_F372 ^ seed as u32),
             sample_rate,
-            timer: 12.0,
+            last_eruption: None,
             erupting: false,
             t: 0.0,
             hold: 3.0,
@@ -1755,37 +1780,39 @@ impl Vent {
         }
     }
 
-    fn erupt(&mut self, warmth: f32) {
+    /// Eén uitbarsting, gepland door de simulatie (zelfde moment als de bubbels
+    /// op scherm en de lava op de neopixel-ring).
+    fn erupt(&mut self, p: &DroneParams, warmth: f32) {
         let rng = &mut self.rng;
         self.erupting = true;
         self.t = 0.0;
-        self.hold = rng.range(1.5, 4.5);
-        self.release = rng.range(1.5, 3.0);
-        // Per uitbarsting een eigen volume, gelijkmatig verdeeld tussen −20 en −5 dB:
-        // de ene bron klinkt dichtbij, de andere ver weg
-        let level_db = rng.range(VENT_LEVEL_DB.0, VENT_LEVEL_DB.1);
+        self.hold = p.eruption_hold.max(0.5);
+        self.release = p.eruption_release.max(0.5);
+        // Per uitbarsting een eigen volume tussen −20 en −5 dB: de ene bron klinkt
+        // dichtbij, de andere ver weg
+        let level_db = VENT_LEVEL_DB.0 + (VENT_LEVEL_DB.1 - VENT_LEVEL_DB.0) * p.eruption_strength;
         self.strength = 10f32.powf(level_db / 20.0) * (0.6 + 0.4 * warmth);
         let degree = VENT_PIPE_LOW + (rng.next_u32() % (VENT_PIPE_HIGH - VENT_PIPE_LOW + 1) as u32) as i32;
         self.pipe_freq = degree_hz(degree);
-        self.pan = rng.range(-0.8, 0.8);
+        self.pan = p.eruption_pan * 0.8;
     }
 
     /// `depth`: 1 = diepzee, 0 = getijdenpoel. `warmth`: temperatuur 0..1.
-    fn control(&mut self, dt: f32, depth: f32, warmth: f32) {
+    fn control(&mut self, dt: f32, depth: f32, warmth: f32, p: &DroneParams) {
         // Traag ademend achtergrondgerommel (~25 s)
         self.breath = (self.breath + dt / 25.0 * TAU) % TAU;
         let background = 0.06 + 0.025 * self.breath.sin();
 
+        // Nieuwe uitbarsting van de simulatie — maar niet een oude die al voorbij
+        // was toen de synth (opnieuw) startte
+        if self.last_eruption != Some(p.eruption_id) {
+            if self.last_eruption.is_some() && p.eruption_age < 0.5 && depth >= 0.5 {
+                self.erupt(p, warmth);
+            }
+            self.last_eruption = Some(p.eruption_id);
+        }
         if depth < 0.5 {
             self.erupting = false;
-            self.timer = self.timer.min(self.rng.range(6.0, 15.0));
-        } else if !self.erupting {
-            self.timer -= dt;
-            if self.timer <= 0.0 {
-                self.erupt(warmth);
-                // Onregelmatig; hoe heter, hoe vaker (heet ~10–33 s, koud ~30–100 s)
-                self.timer = self.rng.range(15.0, 50.0) / (0.5 + warmth);
-            }
         }
 
         if self.erupting {
@@ -2179,6 +2206,8 @@ impl Happenings {
 
 /// Mengniveau van de branding (−5 dB t.o.v. de eerdere 0.22).
 const SURF_LEVEL: f32 = 0.124;
+/// Mengniveau van de klont-gebeurtenissen (−10 dB; op 1.0 waren ze veel te hard).
+const EVENTS_LEVEL: f32 = 0.316;
 /// Mengniveau van het onweer.
 const STORM_LEVEL: f32 = 0.3;
 /// Mengniveau van de sonar.
@@ -2339,6 +2368,13 @@ impl DroneSynth {
         s.converge_pan   = target.converge_pan;
         s.diverge        = target.diverge;
         s.diverge_pan    = target.diverge_pan;
+        // Uitbarsting: ook een gebeurtenis
+        s.eruption_id       = target.eruption_id;
+        s.eruption_age      = target.eruption_age;
+        s.eruption_strength = target.eruption_strength;
+        s.eruption_pan      = target.eruption_pan;
+        s.eruption_hold     = target.eruption_hold;
+        s.eruption_release  = target.eruption_release;
         // Bliksem uit: onweer in ~0.5 s weg (aan gaat net zo snel, maar dan is er
         // toch nog niets te horen tot de eerste donderwolk)
         s.lightning   += (target.lightning   - s.lightning)   * (dt / 0.15).min(1.0);
@@ -2393,7 +2429,7 @@ impl DroneSynth {
         self.storm.hold = self.handle.hold.value() as u32;
         self.storm.control(dt, &p, p.storm);
         self.sonar.control(dt, tempo, 1.0 - p.surface);
-        self.vent.control(dt, 1.0 - p.surface, warmth);
+        self.vent.control(dt, 1.0 - p.surface, warmth, &p);
         self.happenings.control(dt, &p);
         if std::mem::take(&mut self.happenings.chord_change) {
             // Bloei: de pad gaat (op zijn eigen rustige manier) naar een nieuw akkoord
@@ -2540,7 +2576,7 @@ impl DroneSynth {
         // Klont-gebeurtenissen (alleen ingezoomd): veel galm, ze horen bij de ruimte
         if self.happenings.active() {
             let (el, er) = self.happenings.render();
-            let a = mx[mix::EVENTS];
+            let a = EVENTS_LEVEL * mx[mix::EVENTS];
             dl += el * a; dr += er * a;
             sl += el * a * 0.7; sr += er * a * 0.7;
         }

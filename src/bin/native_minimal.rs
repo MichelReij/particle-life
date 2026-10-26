@@ -74,6 +74,7 @@ struct MinimalNativeApp {
     last_lightning_bolt: Option<LightningBolt>,
     storm_tracker: particle_life_wasm::sonification::StormTracker,
     blob_tracker: particle_life_wasm::blobs::BlobTracker,
+    eruption_scheduler: particle_life_wasm::eruptions::EruptionScheduler,
     last_night_alpha_sent: f32,
     last_night_alpha_update: std::time::Instant,
 }
@@ -127,6 +128,7 @@ impl Default for MinimalNativeApp {
             last_lightning_bolt: None,
             storm_tracker: Default::default(),
             blob_tracker: Default::default(),
+            eruption_scheduler: Default::default(),
             last_night_alpha_sent: -1.0,
             last_night_alpha_update: std::time::Instant::now(),
         }
@@ -367,6 +369,17 @@ impl ApplicationHandler for MinimalNativeApp {
                     delta_time,
                     &mut self.sonification_state.drone,
                 );
+                // Hydrothermale uitbarstingen (HTV): één moment voor vents-geluid,
+                // bubbels op het scherm en lava op de neopixel-ring
+                if let Some(eruption) = self.eruption_scheduler.update(&self.simulation_params) {
+                    if let Some(esp32) = &self.esp32_manager {
+                        esp32.send_eruption_event(&eruption);
+                    }
+                }
+                self.eruption_scheduler.apply_to_drone(self.current_time, &mut self.sonification_state.drone);
+                if let Some(r) = self.renderer.as_mut() {
+                    r.set_eruptions(&self.eruption_scheduler.gpu_data());
+                }
                 if let Some(e) = &self.audio_engine {
                     e.set_drone_params(&self.sonification_state.drone);
                 }

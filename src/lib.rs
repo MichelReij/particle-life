@@ -54,6 +54,9 @@ pub mod stats_reader;
 // Klonten herkennen en volgen in de dichtheidskaart → gebeurtenissen voor de drone
 pub mod blobs;
 
+// Hydrothermale uitbarstingen (HTV): één klok voor vents-geluid, bubbels en neopixels
+pub mod eruptions;
+
 pub use buffer_utils::*;
 pub use config::*;
 pub use interaction_rules::*;
@@ -115,6 +118,7 @@ pub struct ParticleLifeEngine {
     last_seen_flash_id: u32,
     storm_tracker: sonification::StormTracker,
     blob_tracker: blobs::BlobTracker,
+    eruption_scheduler: eruptions::EruptionScheduler,
     /// Mengpaneel-gains; bewaard zodat ze ook gelden voor een later aangemaakte engine
     audio_mix: Option<Vec<f32>>,
     // Sonificatie
@@ -175,6 +179,7 @@ impl ParticleLifeEngine {
             last_seen_flash_id: 0,
             storm_tracker: sonification::StormTracker::default(),
             blob_tracker: blobs::BlobTracker::default(),
+            eruption_scheduler: eruptions::EruptionScheduler::default(),
             audio_mix: None,
             audio_engine: None, // Lazy: aangemaakt bij eerste set_audio_paused(false)
             sonification_state: sonification::SonificationState::default(),
@@ -376,6 +381,14 @@ impl ParticleLifeEngine {
             delta_time,
             &mut self.sonification_state.drone,
         );
+        // Hydrothermale uitbarstingen (HTV): vents-geluid en bubbels op hetzelfde moment
+        if let Some(e) = self.eruption_scheduler.update(&self.simulation_params) {
+            crate::console_log!("🌋 Uitbarsting {} (grootte {:.2}, bron {:.2}, {:.2})", e.id, e.size, e.x, e.y);
+        }
+        self.eruption_scheduler.apply_to_drone(self.simulation_params.time, &mut self.sonification_state.drone);
+        if let Some(r) = self.renderer.as_mut() {
+            r.set_eruptions(&self.eruption_scheduler.gpu_data());
+        }
         if let Some(ref engine) = self.audio_engine {
             engine.update(self.sonification_state.clone());
         }
