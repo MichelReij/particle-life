@@ -51,6 +51,9 @@ pub mod audio_worklet_exports;
 // GPU stats reader: particle-type statistieken voor sonificatie
 pub mod stats_reader;
 
+// Klonten herkennen en volgen in de dichtheidskaart → gebeurtenissen voor de drone
+pub mod blobs;
+
 pub use buffer_utils::*;
 pub use config::*;
 pub use interaction_rules::*;
@@ -111,6 +114,7 @@ pub struct ParticleLifeEngine {
     rule_evolution: RuleEvolution,
     last_seen_flash_id: u32,
     storm_tracker: sonification::StormTracker,
+    blob_tracker: blobs::BlobTracker,
     /// Mengpaneel-gains; bewaard zodat ze ook gelden voor een later aangemaakte engine
     audio_mix: Option<Vec<f32>>,
     // Sonificatie
@@ -170,6 +174,7 @@ impl ParticleLifeEngine {
             rule_evolution,
             last_seen_flash_id: 0,
             storm_tracker: sonification::StormTracker::default(),
+            blob_tracker: blobs::BlobTracker::default(),
             audio_mix: None,
             audio_engine: None, // Lazy: aangemaakt bij eerste set_audio_paused(false)
             sonification_state: sonification::SonificationState::default(),
@@ -358,6 +363,19 @@ impl ParticleLifeEngine {
         );
         let bolt = self.renderer.as_ref().and_then(|r| r.get_cached_lightning_bolt());
         self.storm_tracker.update(bolt.as_ref(), &self.simulation_params, &mut self.sonification_state.drone);
+        // Klont-gebeurtenissen: alleen ingezoomd (dezelfde grens als de GPU-statistieken)
+        let zoomed_in = self.simulation_params.current_zoom_level > 3.0;
+        let grid = self.stats_reader.as_ref().and_then(|s| s.latest_grid()).filter(|_| zoomed_in);
+        let speed = self.last_gpu_stats.as_ref().map_or(0.0, |(t, _)| sonification::mean_speed(t));
+        let p = &self.simulation_params;
+        self.blob_tracker.update(
+            grid,
+            (p.viewport_center_x, p.viewport_center_y, p.viewport_width),
+            speed,
+            blobs::event_blend(self.simulation_params.current_zoom_level),
+            delta_time,
+            &mut self.sonification_state.drone,
+        );
         if let Some(ref engine) = self.audio_engine {
             engine.update(self.sonification_state.clone());
         }
@@ -392,8 +410,8 @@ impl ParticleLifeEngine {
     }
 
     /// Mengpaneel: lineaire gain per kanaal (volgorde: dsp::mix — cellos, theremin,
-    /// brainwaves, droplets, stream, surf, thunder, lightning, sonar, vents, reverb,
-    /// master), optioneel gevolgd door de bliksem-sample-and-hold in samples.
+    /// brainwaves, droplets, stream, surf, thunder, lightning, sonar, vents, events,
+    /// reverb, master), optioneel gevolgd door de bliksem-sample-and-hold in samples.
     #[wasm_bindgen]
     pub fn set_audio_mix(&mut self, gains: &[f32]) {
         self.audio_mix = Some(gains.to_vec());

@@ -15,6 +15,12 @@
 // centroid_x     : gewogen X-positie in viewport [0,1] (voor stereo panning)
 // cluster_count  : aantal niet-lege cellen in 8×8 viewport-grid (benadering #clusters)
 // avg_cluster_size: total_viewport_count / cluster_count
+//
+// Tweede ingang `grid_main` (één thread per particle): dichtheidskaart van de viewport
+// voor het herkennen en volgen van klonten (blobs.rs). Per cel van een GRID_DIM×GRID_DIM
+// raster: aantal particles, de som van hun snelheden en de som van hun snelheidsgrootte
+// (vaste komma, × VEL_SCALE), als vier atomaire i32's. De buffer wordt vóór elke
+// dispatch op nul gezet.
 
 struct Particle {
     pos:              vec2<f32>,
@@ -83,6 +89,12 @@ struct SimParams {
 @group(0) @binding(0) var<storage, read>       particles:  array<Particle>;
 @group(0) @binding(1) var<uniform>             sim_params: SimParams;
 @group(0) @binding(2) var<storage, read_write> stats_out:  array<vec4<f32>, 8>;
+@group(0) @binding(3) var<storage, read_write> grid:       array<atomic<i32>>;
+
+// Moet gelijk blijven aan blobs::GRID_DIM en blobs::VEL_SCALE
+const GRID_DIM:  u32 = 24u;
+const VEL_SCALE: f32 = 16.0;
+const VEL_CLAMP: f32 = 4000.0;
 
 // Per-type scratch (workgroups 0-6): 6 × 64 × 4 = 1536 bytes
 var<workgroup> scratch_count: array<f32, 64>;
@@ -245,4 +257,27 @@ fn main(
             stats_out[7] = vec4<f32>(total, cluster_count, avg_size, 0.0);
         }
     }
+}
+
+@compute @workgroup_size(64)
+fn grid_main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let idx = gid.x;
+    if idx >= sim_params.num_particles { return; }
+    let p = particles[idx];
+    if p.is_active != 1u { return; }
+
+    let vp_left = sim_params.viewport_center_x - sim_params.viewport_width  * 0.5;
+    let vp_top  = sim_params.viewport_center_y - sim_params.viewport_height * 0.5;
+    let nx = (p.pos.x - vp_left) / max(sim_params.viewport_width,  1.0);
+    let ny = (p.pos.y - vp_top)  / max(sim_params.viewport_height, 1.0);
+    if nx < 0.0 || nx >= 1.0 || ny < 0.0 || ny >= 1.0 { return; }
+
+    let cx = min(u32(nx * f32(GRID_DIM)), GRID_DIM - 1u);
+    let cy = min(u32(ny * f32(GRID_DIM)), GRID_DIM - 1u);
+    let base = (cy * GRID_DIM + cx) * 4u;
+    let v = clamp(p.vel, vec2<f32>(-VEL_CLAMP), vec2<f32>(VEL_CLAMP));
+    atomicAdd(&grid[base], 1);
+    atomicAdd(&grid[base + 1u], i32(v.x * VEL_SCALE));
+    atomicAdd(&grid[base + 2u], i32(v.y * VEL_SCALE));
+    atomicAdd(&grid[base + 3u], i32(length(v) * VEL_SCALE));
 }

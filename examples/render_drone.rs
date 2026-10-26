@@ -15,8 +15,10 @@
 // grootte wisselt, elke vierde is een superbliksem.
 // Mix: komma-gescheiden lineaire gains in de volgorde van dsp::mix (cellos,
 // theremin, brainwaves, droplets, stream, surf, thunder, lightning, sonar, vents,
-// reverb, master, en optioneel de bliksem-sample-and-hold), bijv.
-// "1,0,0,0,0,0,0,0,0,0,1,1" om alleen de cello's (met galm) te horen.
+// events, reverb, master, en optioneel de bliksem-sample-and-hold), bijv.
+// "1,0,0,0,0,0,0,0,0,0,0,1,1" om alleen de cello's (met galm) te horen.
+// Klont-interval > 0 (na de nacht-vlag): gesimuleerde klont-stemmen en om de zoveel
+// seconden afwisselend samensmelten, uiteenvallen en een bewegende klont (zie blob_params).
 // Nacht 1: dag-nachtcyclus van de getijdenpoel (80 s dag, 10 s schemering, 20 s
 // nacht, 10 s ochtend), zoals SimulationParams::update_night_alpha.
 
@@ -35,6 +37,7 @@ fn main() -> std::io::Result<()> {
     let (chaos, motion, calm, surface) = (arg(5), arg(6), arg(7), arg(8));
     let storm_interval = arg(9);
     let night_cycle = arg(11) > 0.0;
+    let blob_interval = arg(12);
 
     let frames = (seconds * SAMPLE_RATE as f32) as u32;
     let mut synth = DroneSynth::new(SAMPLE_RATE as f32);
@@ -71,7 +74,8 @@ fn main() -> std::io::Result<()> {
                 calm:        calm * cluster,
                 surface,
                 night: if night_cycle { night(i as f32 / SAMPLE_RATE as f32) } else { 0.0 },
-                ..storm_params(i as f32 / SAMPLE_RATE as f32, storm_interval)
+                ..blob_params(i as f32 / SAMPLE_RATE as f32, blob_interval,
+                    storm_params(i as f32 / SAMPLE_RATE as f32, storm_interval))
             });
         }
         let (l, r) = synth.render();
@@ -90,6 +94,51 @@ fn main() -> std::io::Result<()> {
         seconds / started.elapsed().as_secs_f32(),
     );
     Ok(())
+}
+
+/// Klonten zoals BlobTracker ze aanlevert. Twee klonten liggen er de hele tijd (een
+/// grote links, een kleine rechts); om de beurt per interval: naderen (2 s) →
+/// samensmelten (een stem verdwijnt) → nazinderen (1.5 s); uiteenvallen (een stem
+/// verschijnt) → uiteendrijven (2.5 s); een onrustige klont die 3 s van links naar
+/// rechts beweegt.
+fn blob_params(t: f32, interval: f32, base: DroneParams) -> DroneParams {
+    if interval <= 0.0 {
+        return base;
+    }
+    let n = (t / interval).floor();
+    let since = t - n * interval;
+    let kind = n as usize % 3;
+    let mut p = base;
+    p.merge_strength = 0.8;
+    p.split_strength = 0.8;
+    // Aantal samensmeltingen/uiteenvallen tot nu toe (soort 1 resp. 2, eerste in cyclus 1 resp. 2)
+    let done = |k: usize, at: f32| {
+        let cycles = (n as usize + 3 - k) / 3;
+        (cycles as f32 - if kind == k && since < at { 1.0 } else { 0.0 }).max(0.0)
+    };
+    p.merge_id = done(1, 2.0);
+    p.split_id = done(2, 0.0);
+    p.merge_age = if kind == 1 && since >= 2.0 { since - 2.0 } else { 10.0 };
+    p.split_age = if kind == 2 { since } else { 10.0 };
+    match kind {
+        1 if since < 2.0 => { p.converge = 0.3 + 0.35 * since; p.converge_pan = -0.3; }
+        1 if since < 3.5 => { p.converge = 0.8 * (1.0 - (since - 2.0) / 1.5); p.converge_pan = -0.3; }
+        2 if since < 2.5 => { p.diverge = 0.8 * (1.0 - since / 2.5); p.diverge_pan = 0.3; }
+        _ => {}
+    }
+    use particle_life_wasm::dsp::BlobVoice;
+    p.voices[0] = BlobVoice { id: 1.0, level: 0.9, pan: -0.5, size: 0.8, motion: 0.0, agitation: 0.2 };
+    p.voices[1] = BlobVoice { id: 2.0, level: 0.6, pan: 0.6, size: 0.3, motion: 0.0, agitation: 0.4 };
+    match kind {
+        // Naderende klont die bij het samensmelten opgaat in klont 1
+        1 if since < 2.0 => p.voices[2] = BlobVoice { id: 10.0 + n, level: 0.6, pan: -0.1 - 0.2 * since, size: 0.4, motion: 0.4, agitation: 0.5 },
+        // Afgesplitste klont die uiteendrijft
+        2 if since < 6.0 => p.voices[2] = BlobVoice { id: 10.0 + n, level: 0.5, pan: (-0.3 + 0.2 * since).min(0.9), size: 0.3, motion: (0.6 - 0.2 * since).max(0.0), agitation: 0.5 },
+        // Onrustige klont die van links naar rechts beweegt
+        0 if n > 0.0 && since < 3.0 => p.voices[2] = BlobVoice { id: 10.0 + n, level: 0.7, pan: -0.8 + since / 3.0 * 1.6, size: 0.5, motion: 0.8, agitation: 0.8 },
+        _ => {}
+    }
+    p
 }
 
 /// Nacht [0, 1] volgens de cyclus van SimulationParams::update_night_alpha.

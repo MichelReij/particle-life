@@ -10,17 +10,27 @@
 //   2. stats_reader.make_bind_group(device, output_particle_buffer, sim_params_buffer)
 //   3. In render loop: if stats_reader.maybe_dispatch(&mut encoder, &bind_group, count) { submit; start_readback() }
 //   4. Elke frame: if let Some(stats) = stats_reader.poll_result() { sla op }
+//   5. latest_grid(): de dichtheidskaart van dezelfde meting, voor blobs::BlobTracker
 
+use crate::blobs::{DensityGrid, GRID_CELLS};
 use crate::sonification::{GpuGlobalStats, GpuTypeStats};
 use std::sync::{Arc, Mutex};
 
 /// 8 vec4 (7 per-type + 1 globaal) × 16 bytes = 128 bytes
 const STATS_BUFFER_SIZE: u64 = 8 * 4 * 4;
+/// Dichtheidskaart: per cel 4 × i32 (aantal, Σvx, Σvy, Σ|v|)
+const GRID_BUFFER_SIZE: u64 = (GRID_CELLS * 4 * 4) as u64;
 
 type StatsResult = ([GpuTypeStats; 7], GpuGlobalStats);
 
 pub struct StatsReader {
     pub pipeline:          wgpu::ComputePipeline,
+    /// Tweede ingang van dezelfde shader (`grid_main`): de dichtheidskaart
+    grid_pipeline:         wgpu::ComputePipeline,
+    grid_buffer:           wgpu::Buffer,
+    /// Laatst teruggelezen dichtheidskaart, met oplopend volgnummer
+    last_grid:             Option<DensityGrid>,
+    grid_seq:              u64,
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub stats_buffer:      wgpu::Buffer,
     pub staging_buffer:    wgpu::Buffer,
@@ -78,6 +88,16 @@ impl StatsReader {
                         },
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
                 ],
             }
         );
@@ -101,6 +121,25 @@ impl StatsReader {
             }
         );
 
+        let grid_pipeline = device.create_compute_pipeline(
+            &wgpu::ComputePipelineDescriptor {
+                label:               Some("Stats Grid Pipeline"),
+                layout:              Some(&pipeline_layout),
+                module:              &shader,
+                entry_point:         Some("grid_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                cache:               None,
+            }
+        );
+
+        let grid_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label:              Some("Stats Grid Buffer"),
+            size:               GRID_BUFFER_SIZE,
+            usage:              wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC
+                                | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         let stats_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label:              Some("Stats Buffer"),
             size:               STATS_BUFFER_SIZE,
@@ -108,15 +147,20 @@ impl StatsReader {
             mapped_at_creation: false,
         });
 
+        // Stats en dichtheidskaart achter elkaar in één terugleesbuffer
         let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label:              Some("Stats Staging Buffer"),
-            size:               STATS_BUFFER_SIZE,
+            size:               STATS_BUFFER_SIZE + GRID_BUFFER_SIZE,
             usage:              wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
 
         Self {
             pipeline,
+            grid_pipeline,
+            grid_buffer,
+            last_grid: None,
+            grid_seq: 0,
             bind_group_layout,
             stats_buffer,
             staging_buffer,
@@ -143,6 +187,7 @@ impl StatsReader {
                 wgpu::BindGroupEntry { binding: 0, resource: particle_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: sim_params_buffer.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 2, resource: self.stats_buffer.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: self.grid_buffer.as_entire_binding() },
             ],
         })
     }
@@ -153,13 +198,16 @@ impl StatsReader {
         &mut self,
         encoder:       &mut wgpu::CommandEncoder,
         bind_group:    &wgpu::BindGroup,
-        _num_particles: u32,
+        num_particles: u32,
     ) -> bool {
         self.frame_counter += 1;
         if self.frame_counter < self.poll_interval {
             return false;
         }
         self.frame_counter = 0;
+
+        // Dichtheidskaart wordt atomair opgeteld: eerst op nul
+        encoder.clear_buffer(&self.grid_buffer, 0, None);
 
         // Stats compute pass
         {
@@ -170,13 +218,22 @@ impl StatsReader {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, bind_group, &[]);
             pass.dispatch_workgroups(8, 1, 1); // 7 per type + 1 globaal
+
+            // Dichtheidskaart: één thread per particle
+            pass.set_pipeline(&self.grid_pipeline);
+            pass.dispatch_workgroups(num_particles.max(1).div_ceil(64), 1, 1);
         }
 
-        // Kopieer stats_buffer → staging_buffer voor CPU-readback
+        // Kopieer stats + kaart → staging_buffer voor CPU-readback
         encoder.copy_buffer_to_buffer(
             &self.stats_buffer, 0,
             &self.staging_buffer, 0,
             STATS_BUFFER_SIZE,
+        );
+        encoder.copy_buffer_to_buffer(
+            &self.grid_buffer, 0,
+            &self.staging_buffer, STATS_BUFFER_SIZE,
+            GRID_BUFFER_SIZE,
         );
 
         true
@@ -222,9 +279,18 @@ impl StatsReader {
         }
         let global = GpuGlobalStats::from_floats(floats[28..32].try_into().unwrap());
 
+        let grid_raw: &[i32] = bytemuck::cast_slice(&raw[STATS_BUFFER_SIZE as usize..]);
+        self.grid_seq += 1;
+        self.last_grid = Some(DensityGrid::from_raw(grid_raw, self.grid_seq));
+
         drop(raw);
         self.staging_buffer.unmap();
 
         Some((per_type, global))
+    }
+
+    /// Laatst teruggelezen dichtheidskaart (zie blobs.rs).
+    pub fn latest_grid(&self) -> Option<&DensityGrid> {
+        self.last_grid.as_ref()
     }
 }

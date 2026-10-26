@@ -455,3 +455,12 @@ impl StormTracker {
         drone.strike_eta   = if self.next_time > 0.0 && time_to_next > 0.0 { time_to_next.min(10.0) } else { 10.0 };
     }
 }
+
+/// Gemiddelde particle-snelheid in beeld (world-units/s), gewogen naar aantal per type.
+pub fn mean_speed(stats: &[GpuTypeStats; 7]) -> f32 {
+    let total: f32 = stats.iter().map(|s| s.viewport_count).sum();
+    if total < 1.0 {
+        return 0.0;
+    }
+    stats.iter().map(|s| s.energy * s.viewport_count).sum::<f32>() / total
+}

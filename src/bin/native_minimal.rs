@@ -73,6 +73,7 @@ struct MinimalNativeApp {
     /// Laatst teruggelezen bliksemstatus — voor het onweer in de drone
     last_lightning_bolt: Option<LightningBolt>,
     storm_tracker: particle_life_wasm::sonification::StormTracker,
+    blob_tracker: particle_life_wasm::blobs::BlobTracker,
     last_night_alpha_sent: f32,
     last_night_alpha_update: std::time::Instant,
 }
@@ -125,6 +126,7 @@ impl Default for MinimalNativeApp {
             last_sent_preview_next_time: 0.0,
             last_lightning_bolt: None,
             storm_tracker: Default::default(),
+            blob_tracker: Default::default(),
             last_night_alpha_sent: -1.0,
             last_night_alpha_update: std::time::Instant::now(),
         }
@@ -349,6 +351,20 @@ impl ApplicationHandler for MinimalNativeApp {
                 self.storm_tracker.update(
                     self.last_lightning_bolt.as_ref(),
                     &self.simulation_params,
+                    &mut self.sonification_state.drone,
+                );
+                // Klont-gebeurtenissen: alleen ingezoomd (dezelfde grens als de GPU-statistieken)
+                let zoomed_in = self.simulation_params.current_zoom_level > 3.0;
+                let grid = self.stats_reader.as_ref().and_then(|s| s.latest_grid()).filter(|_| zoomed_in);
+                let speed = self.last_gpu_stats.as_ref()
+                    .map_or(0.0, |(t, _)| particle_life_wasm::sonification::mean_speed(t));
+                let p = &self.simulation_params;
+                self.blob_tracker.update(
+                    grid,
+                    (p.viewport_center_x, p.viewport_center_y, p.viewport_width),
+                    speed,
+                    particle_life_wasm::blobs::event_blend(self.simulation_params.current_zoom_level),
+                    delta_time,
                     &mut self.sonification_state.drone,
                 );
                 if let Some(e) = &self.audio_engine {

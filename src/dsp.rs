@@ -36,6 +36,10 @@
 //
 // In de diepzee (HTV) klinkt af en toe een losse sonar-ping met een kleine echo,
 // en rommelen hydrothermale bronnen die af en toe uitbarsten (water en bellen).
+//
+// Ingezoomd is elke grote zichtbare klont een eigen geluidsbron (toon, borrelen,
+// zoeven, op zijn plek), en klinkt wat er tussen klonten gebeurt (blobs.rs):
+// naderen en samensmelten, uiteenvallen en uiteendrijven.
 
 use fundsp::prelude32::*;
 
@@ -146,6 +150,60 @@ pub struct DroneParams {
     pub lightning: f32,
     /// Nacht [0, 1] (getijdenpoel): 1 = volle nacht → theremin zwijgt
     pub night: f32,
+    /// Klonten samengesmolten (alleen ingezoomd, zie blobs.rs): teller, seconden
+    /// sinds de laatste, sterkte [0, 1] en positie [-1, 1]
+    pub merge_id: f32,
+    pub merge_age: f32,
+    pub merge_strength: f32,
+    pub merge_pan: f32,
+    /// Klont uiteengevallen: idem
+    pub split_id: f32,
+    pub split_age: f32,
+    pub split_strength: f32,
+    pub split_pan: f32,
+    /// Doorlopend: klonten die naar elkaar toe bewegen (en nazinderen na het
+    /// samensmelten), en klonten die uit elkaar drijven — activiteit [0, 1] en positie
+    pub converge: f32,
+    pub converge_pan: f32,
+    pub diverge: f32,
+    pub diverge_pan: f32,
+    /// De grootste zichtbare klonten, elk met een eigen stem (alleen ingezoomd)
+    pub voices: [BlobVoice; BLOB_VOICES],
+}
+
+/// Aantal klonten dat tegelijk een eigen stem heeft.
+pub const BLOB_VOICES: usize = 6;
+
+/// Eén zichtbare klont als geluidsbron (zie blobs.rs). Een stem met level 0 is leeg.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct BlobVoice {
+    /// Vast id zolang de klont gevolgd wordt
+    pub id:        f32,
+    /// Aanwezigheid [0, 1]: grootte van de klont, maal hoe ver ingezoomd
+    pub level:     f32,
+    /// Plaats [-1, 1]
+    pub pan:       f32,
+    /// Grootte [0, 1] → toonhoogte bij het ontstaan (groot = laag)
+    pub size:      f32,
+    /// Beweging als geheel [0, 1]
+    pub motion:    f32,
+    /// Onrust binnen de klont [0, 1]
+    pub agitation: f32,
+}
+
+impl BlobVoice {
+    const FIELDS: usize = 6;
+
+    fn clamped(&self) -> Self {
+        Self {
+            id:        self.id,
+            level:     self.level.clamp(0.0, 1.0),
+            pan:       self.pan.clamp(-1.0, 1.0),
+            size:      self.size.clamp(0.0, 1.0),
+            motion:    self.motion.clamp(0.0, 1.0),
+            agitation: self.agitation.clamp(0.0, 1.0),
+        }
+    }
 }
 
 impl Default for DroneParams {
@@ -154,20 +212,35 @@ impl Default for DroneParams {
             temperature: 0.5, chaos: 0.0, motion: 0.0, calm: 0.0, pan_center: 0.0, pan_lead: 0.0, surface: 0.0,
             storm: 0.0, strike_id: 0.0, strike_age: 10.0, strike_power: 0.0, strike_pan: 0.0, strike_super: 0.0,
             strike_eta: 10.0, lightning: 0.0, night: 0.0,
+            merge_id: 0.0, merge_age: 10.0, merge_strength: 0.0, merge_pan: 0.0,
+            split_id: 0.0, split_age: 10.0, split_strength: 0.0, split_pan: 0.0,
+            converge: 0.0, converge_pan: 0.0, diverge: 0.0, diverge_pan: 0.0,
+            voices: [BlobVoice::default(); BLOB_VOICES],
         }
     }
 }
 
 impl DroneParams {
-    pub const LEN: usize = 16;
+    /// Losse waarden vóór de klont-stemmen.
+    const SCALARS: usize = 28;
+    pub const LEN: usize = Self::SCALARS + BLOB_VOICES * BlobVoice::FIELDS;
 
     /// Volgorde zoals verstuurd naar de AudioWorklet.
     pub fn to_array(&self) -> [f32; Self::LEN] {
-        [
+        let scalars = [
             self.temperature, self.chaos, self.motion, self.calm, self.pan_center, self.pan_lead, self.surface,
             self.storm, self.strike_id, self.strike_age, self.strike_power, self.strike_pan, self.strike_super,
             self.strike_eta, self.lightning, self.night,
-        ]
+            self.merge_id, self.merge_age, self.merge_strength, self.merge_pan,
+            self.split_id, self.split_age, self.split_strength, self.split_pan,
+            self.converge, self.converge_pan, self.diverge, self.diverge_pan,
+        ];
+        let mut a = [0.0f32; Self::LEN];
+        a[..Self::SCALARS].copy_from_slice(&scalars);
+        for (chunk, v) in a[Self::SCALARS..].chunks_exact_mut(BlobVoice::FIELDS).zip(&self.voices) {
+            chunk.copy_from_slice(&[v.id, v.level, v.pan, v.size, v.motion, v.agitation]);
+        }
+        a
     }
 
     pub fn from_slice(v: &[f32]) -> Option<Self> {
@@ -189,6 +262,22 @@ impl DroneParams {
             strike_eta:   v[13],
             lightning:    v[14],
             night:        v[15],
+            merge_id:       v[16],
+            merge_age:      v[17],
+            merge_strength: v[18],
+            merge_pan:      v[19],
+            split_id:       v[20],
+            split_age:      v[21],
+            split_strength: v[22],
+            split_pan:      v[23],
+            converge:       v[24],
+            converge_pan:   v[25],
+            diverge:        v[26],
+            diverge_pan:    v[27],
+            voices: std::array::from_fn(|i| {
+                let c = &v[Self::SCALARS + i * BlobVoice::FIELDS..][..BlobVoice::FIELDS];
+                BlobVoice { id: c[0], level: c[1], pan: c[2], size: c[3], motion: c[4], agitation: c[5] }
+            }),
         })
     }
 
@@ -210,6 +299,19 @@ impl DroneParams {
             strike_eta:   self.strike_eta.clamp(0.0, 10.0),
             lightning:    self.lightning.clamp(0.0, 1.0),
             night:        self.night.clamp(0.0, 1.0),
+            merge_id:       self.merge_id,
+            merge_age:      self.merge_age.clamp(0.0, 10.0),
+            merge_strength: self.merge_strength.clamp(0.0, 1.0),
+            merge_pan:      self.merge_pan.clamp(-1.0, 1.0),
+            split_id:       self.split_id,
+            split_age:      self.split_age.clamp(0.0, 10.0),
+            split_strength: self.split_strength.clamp(0.0, 1.0),
+            split_pan:      self.split_pan.clamp(-1.0, 1.0),
+            converge:       self.converge.clamp(0.0, 1.0),
+            converge_pan:   self.converge_pan.clamp(-1.0, 1.0),
+            diverge:        self.diverge.clamp(0.0, 1.0),
+            diverge_pan:    self.diverge_pan.clamp(-1.0, 1.0),
+            voices:         self.voices.map(|v| v.clamped()),
         }
     }
 }
@@ -228,13 +330,14 @@ pub mod mix {
     pub const LIGHTNING:  usize = 7;
     pub const SONAR:      usize = 8;
     pub const VENTS:      usize = 9;
-    pub const REVERB:     usize = 10;
-    pub const MASTER:     usize = 11;
+    pub const EVENTS:     usize = 10;
+    pub const REVERB:     usize = 11;
+    pub const MASTER:     usize = 12;
     /// Aantal gain-kanalen
-    pub const LEN:        usize = 12;
+    pub const LEN:        usize = 13;
     /// Geen gain maar een instelling, direct na de kanalen: sample-and-hold van de
     /// bliksem in samples (1 = uit, max 16)
-    pub const LIGHTNING_HOLD: usize = 12;
+    pub const LIGHTNING_HOLD: usize = 13;
     pub const HOLD_MAX:   f32   = 16.0;
 }
 
@@ -1481,6 +1584,88 @@ struct Bubble {
     gain_r: f32,
 }
 
+/// Stroom luchtbellen naar een groottemodel, door een afstandsfilter. Gedeeld door de
+/// vents en de klont-gebeurtenissen.
+struct BubbleStream {
+    bubbles:   [Bubble; MAX_BUBBLES],
+    /// Afstandsfilter (one-pole lowpass per kanaal): verte dempt de hoogte
+    lp:        (f32, f32),
+    lp_coef:   f32,
+    sample_rate: f32,
+    sample_dt: f32,
+}
+
+impl BubbleStream {
+    fn new(sample_rate: f32, lowpass_hz: f32) -> Self {
+        Self {
+            bubbles: [Bubble::default(); MAX_BUBBLES],
+            lp: (0.0, 0.0),
+            lp_coef: 1.0 - (-TAU * lowpass_hz / sample_rate).exp(),
+            sample_rate,
+            sample_dt: 1.0 / sample_rate,
+        }
+    }
+
+    /// Eén bel rond `pan` (± `spread`), met sterkte `strength`. Grootte willekeurig:
+    /// veel kleine en weinig grote bellen.
+    fn spawn(&mut self, rng: &mut Rng, pan: f32, spread: f32, strength: f32) {
+        let size = rng.unit().powi(2);
+        self.spawn_sized(rng, pan, spread, strength, size);
+    }
+
+    /// Eén bel van een gegeven grootte 0..1. De grootte bepaalt toonhoogte (klein =
+    /// hoog), luidheid (groot = harder) en duur.
+    fn spawn_sized(&mut self, rng: &mut Rng, pan: f32, spread: f32, strength: f32, size: f32) {
+        let Some(slot) = self.bubbles.iter_mut().find(|b| !b.active) else { return };
+        let freq = BUBBLE_FREQ.0 * (BUBBLE_FREQ.1 / BUBBLE_FREQ.0).powf(size);
+        // Een bel klinkt maar een handvol trillingen: kleine tikken kort, grote
+        // "blubben" iets langer
+        let cycles = rng.range(10.0, 25.0);
+        let tau = cycles / (freq * 2.5);
+        let (l, r) = pan_gains(pan + rng.range(-spread, spread));
+        *slot = Bubble {
+            active: true,
+            rise:   1.0,
+            rise_coef: (-1.0 / (0.0015 * self.sample_rate)).exp(),
+            phase:  0.0,
+            freq,
+            // De toon stijgt licht (~10%) terwijl de bel krimpt — een grotere
+            // stijging klonk als een laser ("space sound")
+            chirp:  0.1 / (2.5 * tau) * rng.range(0.5, 1.5),
+            amp:    (0.35 + 0.65 * size) * rng.range(0.6, 1.0) * strength,
+            decay:  (-1.0 / (tau * self.sample_rate)).exp(),
+            gain_l: l,
+            gain_r: r,
+        };
+    }
+
+    fn active(&self) -> bool {
+        self.bubbles.iter().any(|b| b.active) || self.lp.0.abs() + self.lp.1.abs() > 1e-6
+    }
+
+    #[inline]
+    fn render(&mut self, gain: f32) -> (f32, f32) {
+        let dt = self.sample_dt;
+        let (mut l, mut r) = (0.0f32, 0.0f32);
+        for b in self.bubbles.iter_mut().filter(|b| b.active) {
+            b.phase = (b.phase + b.freq * dt) % 1.0;
+            b.freq *= 1.0 + b.chirp * dt;
+            b.amp *= b.decay;
+            b.rise *= b.rise_coef;
+            let s = (b.phase * TAU).sin() * b.amp * (1.0 - b.rise) * gain;
+            l += s * b.gain_l;
+            r += s * b.gain_r;
+            if b.amp < 1e-4 {
+                b.active = false;
+            }
+        }
+        let k = self.lp_coef;
+        self.lp.0 += (l - self.lp.0) * k;
+        self.lp.1 += (r - self.lp.1) * k;
+        self.lp
+    }
+}
+
 struct Vent {
     /// Zacht gerommel van de aardkorst (breed, per kanaal eigen ruis)
     rumble_net: Box<dyn AudioUnit>,
@@ -1490,10 +1675,9 @@ struct Vent {
     hiss_amp:   Shared,
     /// Pijpresonanties per kanaal: grondtoon en tweede modus
     pipe:       [[Bandpass; 2]; 2],
-    bubbles:    [Bubble; MAX_BUBBLES],
+    bubbles:    BubbleStream,
     rng:        Rng,
     sample_rate: f32,
-    sample_dt:  f32,
     /// Seconden tot de volgende uitbarsting
     timer:      f32,
     /// Lopende uitbarsting
@@ -1509,9 +1693,6 @@ struct Vent {
     /// Trage, onregelmatige golving van de straal (geen ritme)
     flutter:    (f32, f32),
     breath:     f32,
-    /// Afstandsfilter op de bellen (one-pole lowpass per kanaal)
-    bubble_lp:  (f32, f32),
-    bubble_lp_coef: f32,
 }
 
 impl Vent {
@@ -1529,10 +1710,9 @@ impl Vent {
             hiss_net: prepare(Box::new(hiss() | hiss()), sample_rate, seed + 1),
             hiss_amp,
             pipe: [[Bandpass::default(); 2]; 2],
-            bubbles: [Bubble::default(); MAX_BUBBLES],
+            bubbles: BubbleStream::new(sample_rate, VENT_BUBBLE_LP),
             rng: Rng(0x3C6E_F372 ^ seed as u32),
             sample_rate,
-            sample_dt: 1.0 / sample_rate,
             timer: 12.0,
             erupting: false,
             t: 0.0,
@@ -1544,8 +1724,6 @@ impl Vent {
             pressure: 0.0,
             flutter: (1.0, 1.0),
             breath: 0.0,
-            bubble_lp: (0.0, 0.0),
-            bubble_lp_coef: 1.0 - (-TAU * VENT_BUBBLE_LP / sample_rate).exp(),
         }
     }
 
@@ -1562,34 +1740,6 @@ impl Vent {
         let degree = VENT_PIPE_LOW + (rng.next_u32() % (VENT_PIPE_HIGH - VENT_PIPE_LOW + 1) as u32) as i32;
         self.pipe_freq = degree_hz(degree);
         self.pan = rng.range(-0.8, 0.8);
-    }
-
-    fn spawn_bubble(&mut self, strength: f32) {
-        let Some(slot) = self.bubbles.iter_mut().find(|b| !b.active) else { return };
-        let rng = &mut self.rng;
-        // Grootte 0..1, met veel kleine en weinig grote bellen. De grootte bepaalt
-        // toonhoogte (klein = hoog), luidheid (groot = harder) en duur.
-        let size = rng.unit().powi(2);
-        let freq = BUBBLE_FREQ.0 * (BUBBLE_FREQ.1 / BUBBLE_FREQ.0).powf(size);
-        // Een bel klinkt maar een handvol trillingen: kleine tikken kort, grote
-        // "blubben" iets langer
-        let cycles = rng.range(10.0, 25.0);
-        let tau = cycles / (freq * 2.5);
-        let (l, r) = pan_gains(self.pan + rng.range(-0.15, 0.15));
-        *slot = Bubble {
-            active: true,
-            rise:   1.0,
-            rise_coef: (-1.0 / (0.0015 * self.sample_rate)).exp(),
-            phase:  0.0,
-            freq,
-            // De toon stijgt licht (~10%) terwijl de bel krimpt — een grotere
-            // stijging klonk als een laser ("space sound")
-            chirp:  0.1 / (2.5 * tau) * rng.range(0.5, 1.5),
-            amp:    (0.35 + 0.65 * size) * rng.range(0.6, 1.0) * strength,
-            decay:  (-1.0 / (tau * self.sample_rate)).exp(),
-            gain_l: l,
-            gain_r: r,
-        };
     }
 
     /// `depth`: 1 = diepzee, 0 = getijdenpoel. `warmth`: temperatuur 0..1.
@@ -1644,7 +1794,7 @@ impl Vent {
         // verre, zachte bron blijft er een hoorbare bellenstroom
         let bubbling = p.max(0.0).sqrt();
         if self.rng.unit() < VENT_BUBBLE_RATE * bubbling * dt {
-            self.spawn_bubble(bubbling);
+            self.bubbles.spawn(&mut self.rng, self.pan, 0.15, bubbling);
         }
 
         self.rumble_amp.set_value(background + 0.2 * p);
@@ -1677,24 +1827,299 @@ impl Vent {
         }
 
         // Losse bellen, door een afstandsfilter (verte dempt de hoogte)
-        let dt = self.sample_dt;
-        let (mut bl, mut br) = (0.0f32, 0.0f32);
-        for b in self.bubbles.iter_mut().filter(|b| b.active) {
-            b.phase = (b.phase + b.freq * dt) % 1.0;
-            b.freq *= 1.0 + b.chirp * dt;
-            b.amp *= b.decay;
-            b.rise *= b.rise_coef;
-            let s = (b.phase * TAU).sin() * b.amp * (1.0 - b.rise) * VENT_BUBBLE_GAIN;
-            bl += s * b.gain_l;
-            br += s * b.gain_r;
-            if b.amp < 1e-4 {
-                b.active = false;
+        ((l, r), self.bubbles.render(VENT_BUBBLE_GAIN))
+    }
+}
+
+// ─── 9. Klonten (alleen ingezoomd, zie blobs.rs) ─────────────────────────────
+//
+// Elke grote zichtbare klont is een eigen geluidsbron, zodat je hoort wat je ziet:
+//   - een zachte toon, toonhoogte naar de grootte bij het ontstaan (groot = laag) en
+//     daarna vast; een lichte trilling naarmate de klont onrustiger is
+//   - borrelende belletjes naar de onrust binnen de klont
+//   - een zacht zoevend geluid naar zijn beweging als geheel (helderder = sneller)
+//   - alles op de plek van de klont; een nieuwe klont zwelt in, een verdwenen klont
+//     sterft weg — samensmelten en uiteenvallen hoor je zo vanzelf
+// Daarbovenop wat er tússen klonten gebeurt: een opborreling op het moment van
+// samensmelten of uiteenvallen, klotsend water zolang ze naderen of uiteendrijven, en
+// bij samensmelten zwellen galm en pad even aan en gaat de pad naar een nieuw akkoord.
+
+/// Klont-stemmen: toon, zoeven en borrelen
+const VOICE_TONE_GAIN:   f32 = 0.05;
+const VOICE_SWISH_GAIN:  f32 = 0.25;
+const VOICE_BUBBLE_RATE: f32 = 30.0;
+/// Toonhoogte van een stem in pentatonische treden: grootste klont .. kleinste
+const VOICE_DEGREES: (i32, i32) = (5, 14);
+/// In- en uitfaden van een stem (s)
+const VOICE_FADE_IN:  f32 = 0.6;
+const VOICE_FADE_OUT: f32 = 1.2;
+/// Borrelen zolang klonten naderen of uiteendrijven (bewust bescheiden: dat gebeurt
+/// vaak, en het moment van samensmelten of uiteenvallen moet erbovenuit komen)
+const EVENT_BUBBLE_RATE:  f32 = 25.0;
+/// Het moment zelf: een opborreling van zoveel bellen over EVENT_BURST_TIME s, een
+/// "gloep" van een paar dikke bellen en een golf klotsend water die nadeint
+const EVENT_BURST:        f32 = 50.0;
+const EVENT_BURST_TIME:   f32 = 0.8;
+const EVENT_WAVE_DECAY:   f32 = 1.5;
+/// Afstandsfilter van de bellen (Hz)
+const EVENT_BUBBLE_LP:    f32 = 1500.0;
+const EVENT_BUBBLE_GAIN:  f32 = 2.2;
+const EVENT_SLOSH_GAIN:   f32 = 1.0;
+
+/// Geluid van één klont-stem.
+#[derive(Clone, Copy, Default)]
+struct VoiceState {
+    /// In gebruik voor een klont (ook tijdens het wegsterven)
+    live:      bool,
+    /// De klont is nog in beeld
+    present:   bool,
+    id:        f32,
+    fade:      f32,
+    freq:      f32,
+    phase:     f32,
+    trill:     f32,
+    /// Doel- en afgevlakte waarden: aanwezigheid, plaats, beweging, onrust
+    target:    BlobVoice,
+    level:     f32,
+    pan:       f32,
+    motion:    f32,
+    agitation: f32,
+    gains:     (f32, f32),
+    swish:     [Bandpass; 2],
+}
+
+struct Happenings {
+    voices:      [VoiceState; BLOB_VOICES],
+    bubbles:     BubbleStream,
+    rng:         Rng,
+    sample_rate: f32,
+    sample_dt:   f32,
+    last_merge:  Option<f32>,
+    last_split:  Option<f32>,
+    /// Afgevlakte activiteit en positie: naar elkaar toe, uit elkaar
+    converge:    (f32, f32),
+    diverge:     (f32, f32),
+    /// Opborreling: nog te maken bellen, en waar
+    burst:       (f32, f32),
+    /// Klotsen: banddoorlaten (L/R, eigen ruis) en een trage, onregelmatige golving
+    slosh:       [Bandpass; 2],
+    slosh_wave:  (f32, f32),
+    /// Golf klotsend water na samensmelten of uiteenvallen: sterkte en plaats
+    wave:        (f32, f32),
+    /// Zwelling van galm en pad na samensmelten: hoogte en tijd sinds start
+    swell:       (f32, f32),
+    swell_t:     f32,
+    /// Zet DroneSynth om bij samensmelten een nieuw pad-akkoord te kiezen
+    chord_change: bool,
+}
+
+impl Happenings {
+    fn new(sample_rate: f32, seed: u64) -> Self {
+        Self {
+            voices: [VoiceState::default(); BLOB_VOICES],
+            bubbles: BubbleStream::new(sample_rate, EVENT_BUBBLE_LP),
+            rng: Rng(0x1F83_D9AB ^ seed as u32),
+            sample_rate,
+            sample_dt: 1.0 / sample_rate,
+            last_merge: None,
+            last_split: None,
+            converge: (0.0, 0.0),
+            diverge: (0.0, 0.0),
+            burst: (0.0, 0.0),
+            slosh: [Bandpass::default(); 2],
+            slosh_wave: (1.0, 1.0),
+            wave: (0.0, 0.0),
+            swell: (0.0, 0.0),
+            swell_t: 100.0,
+            chord_change: false,
+        }
+    }
+
+    /// Klont-stemmen bijwerken: bekende klonten volgen, nieuwe laten inzwellen,
+    /// verdwenen klonten laten wegsterven.
+    fn update_voices(&mut self, dt: f32, incoming: &[BlobVoice; BLOB_VOICES]) {
+        for st in self.voices.iter_mut() {
+            st.present = false;
+        }
+        for v in incoming.iter().filter(|v| v.level > 0.001) {
+            if let Some(st) = self.voices.iter_mut().find(|s| s.live && s.id == v.id) {
+                st.present = true;
+                st.target = *v;
+            } else if let Some(st) = self.voices.iter_mut().find(|s| !s.live) {
+                // Toonhoogte naar de grootte bij het ontstaan, daarna vast
+                let span = (VOICE_DEGREES.1 - VOICE_DEGREES.0) as f32;
+                let degree = VOICE_DEGREES.1 - (v.size * span).round() as i32;
+                *st = VoiceState {
+                    live: true, present: true, id: v.id, fade: 0.0,
+                    freq: degree_hz(degree), target: *v,
+                    level: v.level, pan: v.pan, motion: v.motion, agitation: v.agitation,
+                    ..VoiceState::default()
+                };
             }
         }
-        let k = self.bubble_lp_coef;
-        self.bubble_lp.0 += (bl - self.bubble_lp.0) * k;
-        self.bubble_lp.1 += (br - self.bubble_lp.1) * k;
-        ((l, r), self.bubble_lp)
+
+        let k = (dt / 0.3).min(1.0);
+        for st in self.voices.iter_mut().filter(|s| s.live) {
+            if st.present {
+                st.fade = (st.fade + dt / VOICE_FADE_IN).min(1.0);
+                st.level     += (st.target.level     - st.level)     * k;
+                st.pan       += (st.target.pan       - st.pan)       * k;
+                st.motion    += (st.target.motion    - st.motion)    * k;
+                st.agitation += (st.target.agitation - st.agitation) * k;
+            } else {
+                st.fade -= dt / VOICE_FADE_OUT;
+                if st.fade <= 0.0 {
+                    st.live = false;
+                    continue;
+                }
+            }
+            st.gains = pan_gains(st.pan);
+            let center = 500.0 + 2500.0 * st.motion;
+            for bp in st.swish.iter_mut() {
+                bp.set(center, 1.5, self.sample_rate);
+            }
+        }
+
+        // Borrelen naar de onrust van elke klont
+        let mut spawns = Vec::new();
+        for st in self.voices.iter().filter(|s| s.live) {
+            let rate = VOICE_BUBBLE_RATE * st.agitation * st.level * st.fade;
+            if self.rng.unit() < rate * dt {
+                spawns.push((st.pan, (0.4 + 0.6 * st.agitation) * st.level));
+            }
+        }
+        for (pan, strength) in spawns {
+            self.bubbles.spawn(&mut self.rng, pan, 0.1, strength);
+        }
+    }
+
+    fn control(&mut self, dt: f32, p: &DroneParams) {
+        self.update_voices(dt, &p.voices);
+
+        // Samensmelten of uiteenvallen (alleen als het vers is, zie Storm::control):
+        // een gloep van dikke bellen, een opborreling en een golf klotsend water;
+        // samensmelten laat galm en pad opzwellen en kiest een nieuw pad-akkoord
+        if self.last_merge != Some(p.merge_id) {
+            if self.last_merge.is_some() && p.merge_age < 0.5 && p.merge_strength > 0.01 {
+                let (s, pan) = (p.merge_strength, p.merge_pan);
+                self.moment(s, pan, &[pan, pan, pan]);
+                self.swell = (self.swell.0.max(s), 0.0);
+                self.swell_t = 0.0;
+                self.chord_change = true;
+            }
+            self.last_merge = Some(p.merge_id);
+        }
+        if self.last_split != Some(p.split_id) {
+            if self.last_split.is_some() && p.split_age < 0.5 && p.split_strength > 0.01 {
+                let (s, pan) = (p.split_strength, p.split_pan);
+                // Twee dikke bellen die elk een kant op gaan
+                self.moment(s, pan, &[pan - 0.3, pan + 0.3]);
+                self.swell = (self.swell.0.max(0.6 * s), 0.0);
+                self.swell_t = 0.0;
+            }
+            self.last_split = Some(p.split_id);
+        }
+        self.wave.0 *= (-dt / EVENT_WAVE_DECAY).exp();
+
+        // Activiteit tussen klonten volgen: snel op (~0.3 s), rustig weg (~0.8 s)
+        let follow = |cur: &mut (f32, f32), target: f32, pan: f32| {
+            let k = if target > cur.0 { dt / 0.3 } else { dt / 0.8 };
+            cur.0 += (target - cur.0) * k.min(1.0);
+            if target > 0.01 {
+                cur.1 += (pan - cur.1) * (dt / 0.3).min(1.0);
+            }
+        };
+        follow(&mut self.converge, p.converge, p.converge_pan);
+        follow(&mut self.diverge, p.diverge, p.diverge_pan);
+
+        // Bellen bij naderen/uiteendrijven, plus de opborreling
+        for (act, pan) in [self.converge, self.diverge] {
+            if self.rng.unit() < EVENT_BUBBLE_RATE * act * dt {
+                self.bubbles.spawn(&mut self.rng, pan, 0.25, (0.4 + 0.6 * act).min(1.0));
+            }
+        }
+        if self.burst.0 >= 1.0 && self.rng.unit() < EVENT_BURST / EVENT_BURST_TIME * dt {
+            self.burst.0 -= 1.0;
+            self.bubbles.spawn(&mut self.rng, self.burst.1, 0.3, 1.0);
+        }
+
+        // Klotsen: trage, onregelmatige golving (~1.5 nieuwe doelen per seconde)
+        if self.rng.unit() < dt * 1.5 {
+            self.slosh_wave.1 = self.rng.range(0.4, 1.2);
+        }
+        self.slosh_wave.0 += (self.slosh_wave.1 - self.slosh_wave.0) * (dt / 0.25).min(1.0);
+        let center = 250.0 + 250.0 * self.slosh_wave.0;
+        for bp in self.slosh.iter_mut() {
+            bp.set(center, 1.2, self.sample_rate);
+        }
+
+        // Zwelling: ~0.4 s aanzwellen, ~4 s wegebben
+        self.swell_t += dt;
+        let rise = 1.0 - (-self.swell_t / 0.4).exp();
+        let fall = (-self.swell_t / 4.0).exp();
+        self.swell.1 = self.swell.0 * rise * fall;
+        if self.swell_t > 20.0 {
+            self.swell.0 = 0.0;
+        }
+    }
+
+    /// Het moment van samensmelten of uiteenvallen: dikke bellen op `gloops`,
+    /// een opborreling en een golf klotsend water rond `pan`.
+    fn moment(&mut self, strength: f32, pan: f32, gloops: &[f32]) {
+        for &g in gloops {
+            let size = self.rng.range(0.8, 1.0);
+            self.bubbles.spawn_sized(&mut self.rng, g.clamp(-1.0, 1.0), 0.05, strength, size);
+        }
+        self.burst = (self.burst.0 + EVENT_BURST * strength, pan);
+        self.wave = (self.wave.0.max(strength), pan);
+    }
+
+    /// Hoeveel de galm en de pad nu extra opzwellen [0, 1].
+    fn swell(&self) -> f32 {
+        self.swell.1
+    }
+
+    fn active(&self) -> bool {
+        self.voices.iter().any(|v| v.live) || self.converge.0 > 1e-3 || self.diverge.0 > 1e-3
+            || self.burst.0 >= 1.0 || self.wave.0 > 1e-3 || self.bubbles.active()
+    }
+
+    #[inline]
+    fn render(&mut self) -> (f32, f32) {
+        let (mut l, mut r) = self.bubbles.render(EVENT_BUBBLE_GAIN);
+        let dt = self.sample_dt;
+
+        // Klont-stemmen: toon (met trilling naar onrust) en zoeven (naar beweging)
+        for st in self.voices.iter_mut().filter(|s| s.live) {
+            st.trill = (st.trill + 5.0 * dt) % 1.0;
+            let wobble = 1.0 + 0.004 * st.agitation * (st.trill * TAU).sin();
+            st.phase = (st.phase + st.freq * wobble * dt) % 1.0;
+            let a = st.phase * TAU;
+            let tone = (a.sin() + 0.25 * (2.0 * a).sin()) * st.level * st.fade * VOICE_TONE_GAIN;
+            let mut sl = tone;
+            let mut sr = tone;
+            if st.motion > 1e-3 {
+                // Kwadratisch: alleen duidelijk bewegende klonten zoeven hoorbaar
+                let s = st.motion * st.motion * st.level * st.fade * VOICE_SWISH_GAIN;
+                sl += st.swish[0].process(self.rng.range(-1.0, 1.0)) * s;
+                sr += st.swish[1].process(self.rng.range(-1.0, 1.0)) * s;
+            }
+            l += sl * st.gains.0;
+            r += sr * st.gains.1;
+        }
+
+        // Klotsend water waar klonten naderen of uiteendrijven, en de golf na het
+        // moment van samensmelten of uiteenvallen
+        let (act, pan) = if self.converge.0 >= self.diverge.0 { self.converge } else { self.diverge };
+        let (act, pan) = if self.wave.0 > act * self.slosh_wave.0 { (self.wave.0, self.wave.1) } else { (act * self.slosh_wave.0, pan) };
+        if act > 1e-3 {
+            let (gl, gr) = pan_gains(pan);
+            let a = act * EVENT_SLOSH_GAIN;
+            let (nl, nr) = (self.rng.range(-1.0, 1.0), self.rng.range(-1.0, 1.0));
+            l += self.slosh[0].process(nl) * a * gl;
+            r += self.slosh[1].process(nr) * a * gr;
+        }
+        (l, r)
     }
 }
 
@@ -1725,6 +2150,7 @@ pub struct DroneSynth {
     storm:    Storm,
     sonar:    Sonar,
     vent:     Vent,
+    happenings: Happenings,
     reverb:   Box<dyn AudioUnit>,
 
     /// Doelwaarden, schrijfbaar vanuit andere threads
@@ -1773,6 +2199,7 @@ impl DroneSynth {
             storm: Storm::new(sample_rate, 113),
             sonar: Sonar::new(sample_rate, 131),
             vent: Vent::new(sample_rate, 151),
+            happenings: Happenings::new(sample_rate, 173),
             // Highpass vóór de hal houdt de galmstaart helder in plaats van dreunend
             reverb: prepare(
                 Box::new((highpass_hz(200.0, 0.6) | highpass_hz(200.0, 0.6)) >> reverb_stereo(22.0, 7.0, 0.55)),
@@ -1845,6 +2272,21 @@ impl DroneSynth {
         s.strike_pan   = target.strike_pan;
         s.strike_super = target.strike_super;
         s.strike_eta   = target.strike_eta;
+        // Klont-gebeurtenissen: ook gebeurtenissen, niet afvlakken (Happenings doet
+        // zelf de in- en uitfade van de whoosh)
+        s.merge_id       = target.merge_id;
+        s.merge_age      = target.merge_age;
+        s.merge_strength = target.merge_strength;
+        s.merge_pan      = target.merge_pan;
+        s.split_id       = target.split_id;
+        s.split_age      = target.split_age;
+        s.split_strength = target.split_strength;
+        s.split_pan      = target.split_pan;
+        s.voices         = target.voices;
+        s.converge       = target.converge;
+        s.converge_pan   = target.converge_pan;
+        s.diverge        = target.diverge;
+        s.diverge_pan    = target.diverge_pan;
         // Bliksem uit: onweer in ~0.5 s weg (aan gaat net zo snel, maar dan is er
         // toch nog niets te horen tot de eerste donderwolk)
         s.lightning   += (target.lightning   - s.lightning)   * (dt / 0.15).min(1.0);
@@ -1900,6 +2342,11 @@ impl DroneSynth {
         self.storm.control(dt, &p, p.storm);
         self.sonar.control(dt, tempo, 1.0 - p.surface);
         self.vent.control(dt, 1.0 - p.surface, warmth);
+        self.happenings.control(dt, &p);
+        if std::mem::take(&mut self.happenings.chord_change) {
+            // Bloei: de pad gaat (op zijn eigen rustige manier) naar een nieuw akkoord
+            self.pad_chords.timer = 0.0;
+        }
 
         if self.fade_in < 1.0 {
             self.fade_in = (self.fade_in + dt / 4.0).min(1.0);
@@ -1978,7 +2425,9 @@ impl DroneSynth {
 
         for (i, tone) in self.pad.iter_mut().enumerate() {
             let (pl, pr) = tone.render();
-            let a = self.pad_amp[i] * PAD_WEIGHTS[i] * 0.16 * mx[mix::BRAINWAVES];
+            // Zwelt even mee aan bij een klont-gebeurtenis
+            let a = self.pad_amp[i] * PAD_WEIGHTS[i] * 0.16 * mx[mix::BRAINWAVES]
+                * (1.0 + 0.6 * self.happenings.swell());
             dl += pl * a; dr += pr * a;
             sl += pl * a * 0.6; sr += pr * a * 0.6;
         }
@@ -2035,8 +2484,18 @@ impl DroneSynth {
             sl += bl * a * VENT_BUBBLE_REVERB; sr += br * a * VENT_BUBBLE_REVERB;
         }
 
+        // Klont-gebeurtenissen (alleen ingezoomd): veel galm, ze horen bij de ruimte
+        if self.happenings.active() {
+            let (el, er) = self.happenings.render();
+            let a = mx[mix::EVENTS];
+            dl += el * a; dr += er * a;
+            sl += el * a * 0.7; sr += er * a * 0.7;
+        }
+
         let (rl, rr) = self.reverb.filter_stereo(sl, sr);
-        let (rl, rr) = (rl * mx[mix::REVERB], rr * mx[mix::REVERB]);
+        // De galm zwelt even aan bij een klont-gebeurtenis
+        let reverb = mx[mix::REVERB] * (1.0 + 0.8 * self.happenings.swell());
+        let (rl, rr) = (rl * reverb, rr * reverb);
 
         let g = self.fade_in * mx[mix::MASTER];
         let out_l = (dl + rl) * g;
