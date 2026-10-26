@@ -44,6 +44,8 @@ class App {
     // Mengpaneel-gains die nog naar de engine moeten — pas versturen als de
     // engine niet bezig is (zie engineBusy)
     private pendingMix: Float32Array | null = null;
+    // Audio-pauzestand die nog naar de engine moet (zie applyAudioState)
+    private pendingAudioPaused: boolean | null = null;
 
     async init() {
         console.log("🔧 App.init() called");
@@ -478,6 +480,10 @@ class App {
                 this.engine.set_audio_mix(this.pendingMix);
                 this.pendingMix = null;
             }
+            if (this.pendingAudioPaused !== null && this.engine && !this.engineBusy) {
+                this.engine.set_audio_paused(this.pendingAudioPaused);
+                this.pendingAudioPaused = null;
+            }
 
             if (!this.isPaused && this.engine && !this.engineBusy) {
                 try {
@@ -517,9 +523,10 @@ class App {
                     cancelAnimationFrame(this.animationId);
                     this.animationId = null;
                 }
-                if (this.isAudioOn) this.engine?.set_audio_paused(true);
+                if (this.isAudioOn) this.setAudioPaused(true);
             } else {
-                if (this.isAudioOn) this.engine?.set_audio_paused(false);
+                // Niet hervatten als de simulatie zelf gepauzeerd is
+                this.applyAudioState();
                 if (this.animationId === null) {
                     this.lastTime = performance.now();
                     this.fpsLastTime = this.lastTime;
@@ -556,12 +563,32 @@ class App {
         this.isPaused = !this.isPaused;
         const icon = document.getElementById("pause-btn")?.querySelector(".material-symbols-outlined");
         if (icon) icon.textContent = this.isPaused ? "play_arrow" : "pause";
+        // Pauze legt ook de audio stil (alleen als die aan stond)
+        if (this.isAudioOn) this.applyAudioState();
+    }
+
+    // Audio klinkt alleen als hij aan staat én de simulatie niet gepauzeerd is.
+    private applyAudioState() {
+        this.setAudioPaused(!this.isAudioOn || this.isPaused);
+    }
+
+    // Direct aan de engine doorgeven (binnen de klik, nodig voor het starten van
+    // de AudioContext); alleen uitstellen naar de animatielus als de engine bezig
+    // is met de bliksem-readback (zie engineBusy).
+    private setAudioPaused(paused: boolean) {
+        if (!this.engine) return;
+        if (this.engineBusy) {
+            this.pendingAudioPaused = paused;
+        } else {
+            this.pendingAudioPaused = null;
+            this.engine.set_audio_paused(paused);
+        }
     }
 
     private toggleAudio() {
         if (!this.engine) return;
         this.isAudioOn = !this.isAudioOn;
-        this.engine.set_audio_paused(!this.isAudioOn);
+        this.applyAudioState();
 
         const btn = document.getElementById("audio-btn");
         const icon = btn?.querySelector(".material-symbols-outlined");
