@@ -34,7 +34,8 @@
 // donderwolk-verduistering, een knal op het moment van de flits en daarna een
 // donderrol. Grotere bliksem = dichterbij; superbliksem krijgt een diepe dreun.
 //
-// In de diepzee (HTV) klinkt af en toe een losse sonar-ping met een kleine echo.
+// In de diepzee (HTV) klinkt af en toe een losse sonar-ping met een kleine echo,
+// en rommelen hydrothermale bronnen die af en toe uitbarsten (water en bellen).
 
 use fundsp::prelude32::*;
 
@@ -226,13 +227,14 @@ pub mod mix {
     pub const THUNDER:    usize = 6;
     pub const LIGHTNING:  usize = 7;
     pub const SONAR:      usize = 8;
-    pub const REVERB:     usize = 9;
-    pub const MASTER:     usize = 10;
+    pub const VENTS:      usize = 9;
+    pub const REVERB:     usize = 10;
+    pub const MASTER:     usize = 11;
     /// Aantal gain-kanalen
-    pub const LEN:        usize = 11;
+    pub const LEN:        usize = 12;
     /// Geen gain maar een instelling, direct na de kanalen: sample-and-hold van de
     /// bliksem in samples (1 = uit, max 16)
-    pub const LIGHTNING_HOLD: usize = 11;
+    pub const LIGHTNING_HOLD: usize = 12;
     pub const HOLD_MAX:   f32   = 16.0;
 }
 
@@ -536,7 +538,9 @@ impl Theremin {
 // akkoordtonen erboven. Vrijwel niets boven ~1 kHz, geen hoorbaar "wobbelen":
 // links en rechts verschillen maar een fractie van een Hz (traag faseren, breed
 // stereobeeld). Het volume ademt traag en beperkt; het akkoord wisselt langzaam
-// binnen de pentatoniek en de stemmen glijden mee.
+// binnen de pentatoniek. Bij een wissel glijden de stemmen niet (dat klonk als een
+// glijbaan met te veel "intentie") maar faden ze na elkaar uit, springen in stilte
+// naar hun nieuwe toon en zwellen weer aan.
 
 /// Akkoorden (MIDI, laag → hoog), alle binnen C-mineur pentatonisch.
 /// Het eerste is "thuis" en komt vaak terug.
@@ -554,6 +558,11 @@ const PAD_PERIODS:   [f32; 3] = [17.0, 13.0, 21.0]; // ademperiode in s bij temp
 const PAD_BRIGHT:    [f32; 3] = [41.0, 33.0, 47.0]; // periode van de klankkleur in s
 /// Seconden per akkoord bij tempo 1 (bereik, willekeurig binnen)
 const PAD_CHORD_LEN: (f32, f32) = (25.0, 50.0);
+/// Uit- en infaden van een stem bij een akkoordwissel (s)
+const PAD_FADE_OUT: f32 = 3.0;
+const PAD_FADE_IN:  f32 = 5.0;
+/// Vertraging per stem vóór die gaat wisselen (s, bereik), zodat ze na elkaar gaan
+const PAD_STAGGER: [(f32, f32); 3] = [(0.0, 1.5), (3.0, 6.0), (6.0, 12.0)];
 
 struct PadTone {
     net:     Box<dyn AudioUnit>,
@@ -570,6 +579,11 @@ struct PadTone {
     phase:   f32,
     bright_period: f32,
     bright_phase:  f32,
+    /// Volgende toon (Hz) bij een akkoordwissel, de wachttijd daarvoor, en de
+    /// fade (0..1) waarmee de stem uit- en weer infadet
+    target:  f32,
+    wait:    f32,
+    fade:    f32,
 }
 
 impl PadTone {
@@ -579,10 +593,11 @@ impl PadTone {
         let freq_r = shared(base);
         // Orgel-wavetable: grondtoon met octaaf-boventonen voor body, één opzoeking
         // per sample (drie losse sinussen per stem was te zwaar voor de worklet).
-        // De stemmen glijden in een paar seconden naar een nieuw akkoord.
         // Geen aparte chorus-tweelingtoon: links en rechts staan door de binaurale
         // zweving al een paar Hz uit elkaar, wat zelf een breed, zwevend geluid geeft.
-        let voice = |f: &Shared| var(f) >> follow(2.5) >> organ();
+        // Korte follow: alleen klikvrij, geen hoorbaar glijden (toonwissels gebeuren
+        // in stilte, zie control()).
+        let voice = |f: &Shared| var(f) >> follow(0.05) >> organ();
         let graph = voice(&freq_l) | voice(&freq_r);
         Self {
             net: prepare(Box::new(graph), sample_rate, seed),
@@ -596,11 +611,34 @@ impl PadTone {
             phase,
             bright_period,
             bright_phase: phase * 1.7,
+            target: base,
+            wait: 0.0,
+            fade: 1.0,
         }
+    }
+
+    /// Plant een wissel naar een nieuwe toon na `wait` seconden.
+    fn change_to(&mut self, freq: f32, wait: f32) {
+        self.target = freq;
+        self.wait = wait;
     }
 
     /// Retourneert de huidige amplitude van deze toon.
     fn control(&mut self, dt: f32, tempo: f32, beat_hz: f32) -> f32 {
+        // Akkoordwissel: wachten, uitfaden, in stilte springen, weer infaden
+        if self.target != self.base {
+            if self.wait > 0.0 {
+                self.wait -= dt;
+            } else {
+                self.fade -= dt / PAD_FADE_OUT;
+                if self.fade <= 0.0 {
+                    self.fade = 0.0;
+                    self.base = self.target;
+                }
+            }
+        } else if self.fade < 1.0 {
+            self.fade = (self.fade + dt / PAD_FADE_IN).min(1.0);
+        }
         self.phase = (self.phase + dt * tempo / self.period * TAU) % TAU;
         self.bright_phase = (self.bright_phase + dt / self.bright_period * TAU) % TAU;
         self.freq_l.set_value(self.base - beat_hz * 0.5);
@@ -609,8 +647,10 @@ impl PadTone {
         // eerste paar boventonen) en ademt daar heel langzaam ±25% omheen
         let cutoff = self.base * 3.5 * 1.25f32.powf(self.bright_phase.sin());
         self.lp_coef = 1.0 - (-TAU * cutoff / self.sample_rate).exp();
-        // Volume ademt traag en beperkt (~8 dB), zoals in het voorbeeld
-        0.7 + 0.3 * self.phase.sin()
+        // Volume ademt traag en beperkt (~8 dB), zoals in het voorbeeld; zacht
+        // in- en uitfaden (sin²) bij een akkoordwissel
+        let fade = (self.fade * std::f32::consts::FRAC_PI_2).sin().powi(2);
+        (0.7 + 0.3 * self.phase.sin()) * fade
     }
 
     #[inline]
@@ -1360,6 +1400,304 @@ impl Sonar {
     }
 }
 
+// ─── 8. Hydrothermale bronnen (alleen diepzee / HTV) ─────────────────────────
+//
+// Een bron die af en toe heet water omhoog spuit. Niet realistisch onder water,
+// maar herkenbaar: een sissende straal (als stoom) die snel opkomt, een paar
+// seconden aanhoudt en uitdooft, met daaronder zacht de brommende pijp-toon van de
+// schoorsteen en af en toe een losse bel. Bewust zonder ritme — eerdere versies
+// met stoten klonken als slagwerk. Daaronder een zacht, diep gerommel van de
+// aardkorst. Hoe heter, hoe actiever.
+
+/// Maximaal aantal gelijktijdig klinkende bellen.
+const MAX_BUBBLES: usize = 32;
+/// Pijp-toon in pentatonische treden (C3 .. C4) — boven de bas van pad en cello's,
+/// die hem lager volledig maskeerden.
+const VENT_PIPE_LOW:  i32 = 5;
+const VENT_PIPE_HIGH: i32 = 10;
+/// Toonhoogte van de bellen: van de kleinste (hoog) tot de grootste (laag), Hz.
+/// Bewust niet gestemd — echte bellen hebben elke toonhoogte, naar hun grootte.
+const BUBBLE_FREQ: (f32, f32) = (1500.0, 250.0);
+/// Versterking van de pijp-toon (smalle banddoorlaat op ruis is van zichzelf zacht).
+const VENT_PIPE_GAIN: f32 = 32.0;
+/// Kwaliteit (smalheid) van de pijpresonantie: hoger = meer toon, minder gerommel.
+const VENT_PIPE_Q: f32 = 12.0;
+/// Bellen per seconde bij volle druk, en hun sterkte.
+const VENT_BUBBLE_RATE: f32 = 80.0;
+const VENT_BUBBLE_GAIN: f32 = 2.6;
+/// Afstand van de bellen: afsnijfrequentie van het dempfilter (Hz), en hoeveel
+/// direct geluid en galm ze krijgen (de rest van de vents: 1.0 en 0.4)
+const VENT_BUBBLE_LP:     f32 = 1200.0;
+const VENT_BUBBLE_DRY:    f32 = 0.35;
+const VENT_BUBBLE_REVERB: f32 = 0.9;
+/// Versterking van het gesis.
+const VENT_HISS_GAIN: f32 = 0.5;
+/// Volume per uitbarsting (dB, bereik), willekeurig binnen.
+const VENT_LEVEL_DB: (f32, f32) = (-20.0, -5.0);
+
+/// Banddoorlaat (RBJ, 0 dB piek); coëfficiënten op control-rate bijgewerkt.
+#[derive(Clone, Copy, Default)]
+struct Bandpass {
+    b0: f32, a1: f32, a2: f32,
+    x1: f32, x2: f32, y1: f32, y2: f32,
+}
+
+impl Bandpass {
+    fn set(&mut self, freq: f32, q: f32, sample_rate: f32) {
+        let w0 = TAU * freq / sample_rate;
+        let alpha = w0.sin() / (2.0 * q);
+        let a0 = 1.0 + alpha;
+        self.b0 = alpha / a0;
+        self.a1 = -2.0 * w0.cos() / a0;
+        self.a2 = (1.0 - alpha) / a0;
+    }
+
+    #[inline]
+    fn process(&mut self, x: f32) -> f32 {
+        // b1 = 0, b2 = -b0
+        let y = self.b0 * (x - self.x2) - self.a1 * self.y1 - self.a2 * self.y2;
+        self.x2 = self.x1;
+        self.x1 = x;
+        self.y2 = self.y1;
+        self.y1 = y;
+        y
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct Bubble {
+    active: bool,
+    /// Zachte aanzet (~1.5 ms, tegen klikjes): loopt van 1 naar 0
+    rise:   f32,
+    rise_coef: f32,
+    phase:  f32,
+    freq:   f32,
+    /// Relatieve frequentiestijging per seconde (de bel krimpt tijdens het stijgen)
+    chirp:  f32,
+    amp:    f32,
+    /// Amplitude-factor per sample
+    decay:  f32,
+    gain_l: f32,
+    gain_r: f32,
+}
+
+struct Vent {
+    /// Zacht gerommel van de aardkorst (breed, per kanaal eigen ruis)
+    rumble_net: Box<dyn AudioUnit>,
+    rumble_amp: Shared,
+    /// Sissende straal (ruis 1.8–7 kHz, per kanaal eigen ruis), gepand naar de bron
+    hiss_net:   Box<dyn AudioUnit>,
+    hiss_amp:   Shared,
+    /// Pijpresonanties per kanaal: grondtoon en tweede modus
+    pipe:       [[Bandpass; 2]; 2],
+    bubbles:    [Bubble; MAX_BUBBLES],
+    rng:        Rng,
+    sample_rate: f32,
+    sample_dt:  f32,
+    /// Seconden tot de volgende uitbarsting
+    timer:      f32,
+    /// Lopende uitbarsting
+    erupting:   bool,
+    t:          f32,
+    hold:       f32,
+    release:    f32,
+    strength:   f32,
+    pipe_freq:  f32,
+    pan:        f32,
+    /// Druk [0, 1]: snel omhoog, houdt aan, dooft uit
+    pressure:   f32,
+    /// Trage, onregelmatige golving van de straal (geen ritme)
+    flutter:    (f32, f32),
+    breath:     f32,
+    /// Afstandsfilter op de bellen (one-pole lowpass per kanaal)
+    bubble_lp:  (f32, f32),
+    bubble_lp_coef: f32,
+}
+
+impl Vent {
+    fn new(sample_rate: f32, seed: u64) -> Self {
+        let rumble_amp = shared(0.0);
+        let hiss_amp   = shared(0.0);
+        let rumble = || (brown() >> lowpass_hz(140.0, 0.7)) * 3.0 * (var(&rumble_amp) >> follow(0.2));
+        let hiss = || {
+            (noise() >> highpass_hz(1800.0, 0.6) >> lowpass_hz(7000.0, 0.6))
+                * (var(&hiss_amp) >> follow(0.08))
+        };
+        Self {
+            rumble_net: prepare(Box::new(rumble() | rumble()), sample_rate, seed),
+            rumble_amp,
+            hiss_net: prepare(Box::new(hiss() | hiss()), sample_rate, seed + 1),
+            hiss_amp,
+            pipe: [[Bandpass::default(); 2]; 2],
+            bubbles: [Bubble::default(); MAX_BUBBLES],
+            rng: Rng(0x3C6E_F372 ^ seed as u32),
+            sample_rate,
+            sample_dt: 1.0 / sample_rate,
+            timer: 12.0,
+            erupting: false,
+            t: 0.0,
+            hold: 3.0,
+            release: 2.0,
+            strength: 0.0,
+            pipe_freq: 80.0,
+            pan: 0.0,
+            pressure: 0.0,
+            flutter: (1.0, 1.0),
+            breath: 0.0,
+            bubble_lp: (0.0, 0.0),
+            bubble_lp_coef: 1.0 - (-TAU * VENT_BUBBLE_LP / sample_rate).exp(),
+        }
+    }
+
+    fn erupt(&mut self, warmth: f32) {
+        let rng = &mut self.rng;
+        self.erupting = true;
+        self.t = 0.0;
+        self.hold = rng.range(1.5, 4.5);
+        self.release = rng.range(1.5, 3.0);
+        // Per uitbarsting een eigen volume, gelijkmatig verdeeld tussen −20 en −5 dB:
+        // de ene bron klinkt dichtbij, de andere ver weg
+        let level_db = rng.range(VENT_LEVEL_DB.0, VENT_LEVEL_DB.1);
+        self.strength = 10f32.powf(level_db / 20.0) * (0.6 + 0.4 * warmth);
+        let degree = VENT_PIPE_LOW + (rng.next_u32() % (VENT_PIPE_HIGH - VENT_PIPE_LOW + 1) as u32) as i32;
+        self.pipe_freq = degree_hz(degree);
+        self.pan = rng.range(-0.8, 0.8);
+    }
+
+    fn spawn_bubble(&mut self, strength: f32) {
+        let Some(slot) = self.bubbles.iter_mut().find(|b| !b.active) else { return };
+        let rng = &mut self.rng;
+        // Grootte 0..1, met veel kleine en weinig grote bellen. De grootte bepaalt
+        // toonhoogte (klein = hoog), luidheid (groot = harder) en duur.
+        let size = rng.unit().powi(2);
+        let freq = BUBBLE_FREQ.0 * (BUBBLE_FREQ.1 / BUBBLE_FREQ.0).powf(size);
+        // Een bel klinkt maar een handvol trillingen: kleine tikken kort, grote
+        // "blubben" iets langer
+        let cycles = rng.range(10.0, 25.0);
+        let tau = cycles / (freq * 2.5);
+        let (l, r) = pan_gains(self.pan + rng.range(-0.15, 0.15));
+        *slot = Bubble {
+            active: true,
+            rise:   1.0,
+            rise_coef: (-1.0 / (0.0015 * self.sample_rate)).exp(),
+            phase:  0.0,
+            freq,
+            // De toon stijgt licht (~10%) terwijl de bel krimpt — een grotere
+            // stijging klonk als een laser ("space sound")
+            chirp:  0.1 / (2.5 * tau) * rng.range(0.5, 1.5),
+            amp:    (0.35 + 0.65 * size) * rng.range(0.6, 1.0) * strength,
+            decay:  (-1.0 / (tau * self.sample_rate)).exp(),
+            gain_l: l,
+            gain_r: r,
+        };
+    }
+
+    /// `depth`: 1 = diepzee, 0 = getijdenpoel. `warmth`: temperatuur 0..1.
+    fn control(&mut self, dt: f32, depth: f32, warmth: f32) {
+        // Traag ademend achtergrondgerommel (~25 s)
+        self.breath = (self.breath + dt / 25.0 * TAU) % TAU;
+        let background = 0.06 + 0.025 * self.breath.sin();
+
+        if depth < 0.5 {
+            self.erupting = false;
+            self.timer = self.timer.min(self.rng.range(6.0, 15.0));
+        } else if !self.erupting {
+            self.timer -= dt;
+            if self.timer <= 0.0 {
+                self.erupt(warmth);
+                // Onregelmatig; hoe heter, hoe vaker (heet ~10–33 s, koud ~30–100 s)
+                self.timer = self.rng.range(15.0, 50.0) / (0.5 + warmth);
+            }
+        }
+
+        if self.erupting {
+            self.t += dt;
+            let t = self.t;
+            // Snel maar zacht opkomen (~0.3 s), aanhouden, dan uitdoven
+            let rise = 1.0 - (-t / 0.12).exp();
+            let fall = if t < self.hold { 1.0 } else { (-(t - self.hold) / self.release).exp() };
+            self.pressure = self.strength * rise * fall;
+            if t > self.hold + 6.0 * self.release {
+                self.erupting = false;
+            }
+        } else {
+            self.pressure = 0.0;
+        }
+        let p = self.pressure;
+
+        // Trage, onregelmatige golving van de straal (~2 nieuwe doelen per seconde,
+        // glijdend gevolgd) — geen stoten
+        if self.rng.unit() < dt * 2.0 {
+            self.flutter.1 = self.rng.range(0.7, 1.1);
+        }
+        self.flutter.0 += (self.flutter.1 - self.flutter.0) * (dt / 0.4).min(1.0);
+
+        // Pijp-toon kruipt ~4% mee omhoog met de druk
+        let f = self.pipe_freq * (1.0 + 0.04 * p);
+        for ch in self.pipe.iter_mut() {
+            ch[0].set(f, VENT_PIPE_Q, self.sample_rate);
+            ch[1].set(f * 2.03, VENT_PIPE_Q, self.sample_rate);
+        }
+
+        // Losse bellen, verspreid in de tijd
+        // Bellen schalen minder sterk met de druk dan de rest (wortel): ook bij een
+        // verre, zachte bron blijft er een hoorbare bellenstroom
+        let bubbling = p.max(0.0).sqrt();
+        if self.rng.unit() < VENT_BUBBLE_RATE * bubbling * dt {
+            self.spawn_bubble(bubbling);
+        }
+
+        self.rumble_amp.set_value(background + 0.2 * p);
+        self.hiss_amp.set_value(p * self.flutter.0 * VENT_HISS_GAIN);
+    }
+
+    /// Geeft (gerommel + straal + pijp-toon, bellen) apart terug: de bellen krijgen
+    /// meer galm en minder direct geluid, zodat ze verder weg klinken.
+    #[inline]
+    fn render(&mut self) -> ((f32, f32), (f32, f32)) {
+        let (mut l, mut r) = self.rumble_net.get_stereo();
+
+        let p = self.pressure;
+        let (gl, gr) = pan_gains(self.pan);
+        // Sissende straal vanaf de plek van de bron
+        let (hl, hr) = self.hiss_net.get_stereo();
+        l += hl * gl * std::f32::consts::SQRT_2;
+        r += hr * gr * std::f32::consts::SQRT_2;
+
+        // Pijp-toon: zacht en vloeiend onder het gesis
+        if p > 1e-4 {
+            let drive = p * self.flutter.0 * VENT_PIPE_GAIN;
+            let mut out = [0.0f32; 2];
+            for (o, ch) in out.iter_mut().zip(self.pipe.iter_mut()) {
+                let n = self.rng.range(-1.0, 1.0);
+                *o = ch[0].process(n) + 0.5 * ch[1].process(n);
+            }
+            l += out[0] * drive * gl;
+            r += out[1] * drive * gr;
+        }
+
+        // Losse bellen, door een afstandsfilter (verte dempt de hoogte)
+        let dt = self.sample_dt;
+        let (mut bl, mut br) = (0.0f32, 0.0f32);
+        for b in self.bubbles.iter_mut().filter(|b| b.active) {
+            b.phase = (b.phase + b.freq * dt) % 1.0;
+            b.freq *= 1.0 + b.chirp * dt;
+            b.amp *= b.decay;
+            b.rise *= b.rise_coef;
+            let s = (b.phase * TAU).sin() * b.amp * (1.0 - b.rise) * VENT_BUBBLE_GAIN;
+            bl += s * b.gain_l;
+            br += s * b.gain_r;
+            if b.amp < 1e-4 {
+                b.active = false;
+            }
+        }
+        let k = self.bubble_lp_coef;
+        self.bubble_lp.0 += (bl - self.bubble_lp.0) * k;
+        self.bubble_lp.1 += (br - self.bubble_lp.1) * k;
+        ((l, r), self.bubble_lp)
+    }
+}
+
 // ─── DroneSynth ──────────────────────────────────────────────────────────────
 
 /// Mengniveau van de branding.
@@ -1368,6 +1706,8 @@ const SURF_LEVEL: f32 = 0.22;
 const STORM_LEVEL: f32 = 0.3;
 /// Mengniveau van de sonar.
 const SONAR_LEVEL: f32 = 0.5;
+/// Mengniveau van de hydrothermale bronnen.
+const VENT_LEVEL: f32 = 0.55;
 
 pub struct DroneSynth {
     sample_rate: f32,
@@ -1384,6 +1724,7 @@ pub struct DroneSynth {
     surf:     Surf,
     storm:    Storm,
     sonar:    Sonar,
+    vent:     Vent,
     reverb:   Box<dyn AudioUnit>,
 
     /// Doelwaarden, schrijfbaar vanuit andere threads
@@ -1431,6 +1772,7 @@ impl DroneSynth {
             surf: Surf::new(sample_rate, 97),
             storm: Storm::new(sample_rate, 113),
             sonar: Sonar::new(sample_rate, 131),
+            vent: Vent::new(sample_rate, 151),
             // Highpass vóór de hal houdt de galmstaart helder in plaats van dreunend
             reverb: prepare(
                 Box::new((highpass_hz(200.0, 0.6) | highpass_hz(200.0, 0.6)) >> reverb_stereo(22.0, 7.0, 0.55)),
@@ -1525,10 +1867,13 @@ impl DroneSynth {
         // Geen hoorbare zweving meer (bij lage tonen werd dat een wobbel): links en
         // rechts faseren alleen traag langs elkaar, iets sneller bij warmte
         let beat_hz = 0.2 + 0.4 * warmth;
-        // Langzame akkoordwisselingen; de stemmen glijden mee (follow in PadTone)
+        // Langzame akkoordwisselingen: de stemmen wisselen na elkaar, in willekeurige
+        // volgorde, zonder te glijden (zie PadTone::control)
         if let Some(chord) = self.pad_chords.control(dt, tempo, &mut self.rng) {
-            for (tone, &midi) in self.pad.iter_mut().zip(chord.iter()) {
-                tone.base = midi_hz(midi);
+            let first = self.rng.next_u32() as usize % 3;
+            for (i, (tone, &midi)) in self.pad.iter_mut().zip(chord.iter()).enumerate() {
+                let (lo, hi) = PAD_STAGGER[(i + 3 - first) % 3];
+                tone.change_to(midi_hz(midi), self.rng.range(lo, hi));
             }
         }
         for (i, tone) in self.pad.iter_mut().enumerate() {
@@ -1554,6 +1899,7 @@ impl DroneSynth {
         self.storm.hold = self.handle.hold.value() as u32;
         self.storm.control(dt, &p, p.storm);
         self.sonar.control(dt, tempo, 1.0 - p.surface);
+        self.vent.control(dt, 1.0 - p.surface, warmth);
 
         if self.fade_in < 1.0 {
             self.fade_in = (self.fade_in + dt / 4.0).min(1.0);
@@ -1676,6 +2022,17 @@ impl DroneSynth {
             let a = depth * SONAR_LEVEL * mx[mix::SONAR];
             dl += ol * a; dr += or * a;
             sl += ol * a * 0.8; sr += or * a * 0.8;
+        }
+
+        // Hydrothermale bronnen: alleen in de diepzee
+        if depth > 0.001 {
+            let ((vl, vr), (bl, br)) = self.vent.render();
+            let a = depth * VENT_LEVEL * mx[mix::VENTS];
+            dl += vl * a; dr += vr * a;
+            sl += vl * a * 0.4; sr += vr * a * 0.4;
+            // Bellen: weinig direct geluid en veel galm, zodat ze op afstand klinken
+            dl += bl * a * VENT_BUBBLE_DRY; dr += br * a * VENT_BUBBLE_DRY;
+            sl += bl * a * VENT_BUBBLE_REVERB; sr += br * a * VENT_BUBBLE_REVERB;
         }
 
         let (rl, rr) = self.reverb.filter_stereo(sl, sr);

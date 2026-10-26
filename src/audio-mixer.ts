@@ -7,13 +7,14 @@
 const CHANNELS: { key: string; label: string; title: string }[] = [
     { key: "cellos", label: "Cellos", title: "Bowed cellos" },
     { key: "theremin", label: "Theremin", title: "Theremin phrases" },
-    { key: "brainwaves", label: "Brainwaves", title: "Sine pad C3/G3/Bb3 with binaural beat" },
+    { key: "brainwaves", label: "Brainwaves", title: "Deep, dark bass drone with slow chord changes" },
     { key: "droplets", label: "Droplets", title: "Tuned water droplets" },
     { key: "stream", label: "Stream", title: "Murmuring stream" },
     { key: "surf", label: "Surf", title: "Surf (warm little ponds only)" },
     { key: "thunder", label: "Thunder", title: "Rumble, thunder roll and boom" },
     { key: "lightning", label: "Lightning", title: "Crack and crackle" },
     { key: "sonar", label: "Sonar", title: "Sonar pings with echo (hydrothermal vents only)" },
+    { key: "vents", label: "Vents", title: "Rumbling vents with occasional eruptions and bubbles (hydrothermal vents only)" },
     { key: "reverb", label: "Reverb", title: "Reverb over all layers" },
     { key: "master", label: "Master", title: "Overall level" },
 ];

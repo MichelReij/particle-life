@@ -14,9 +14,9 @@
 // Onweer-interval > 0: elke zoveel seconden een inslag met 3 s donderwolk vooraf;
 // grootte wisselt, elke vierde is een superbliksem.
 // Mix: komma-gescheiden lineaire gains in de volgorde van dsp::mix (cellos,
-// theremin, brainwaves, droplets, stream, surf, thunder, lightning, sonar, reverb,
-// master, en optioneel de bliksem-sample-and-hold), bijv. "1,0,0,0,0,0,0,0,0,1,1"
-// om alleen de cello's (met galm) te horen.
+// theremin, brainwaves, droplets, stream, surf, thunder, lightning, sonar, vents,
+// reverb, master, en optioneel de bliksem-sample-and-hold), bijv.
+// "1,0,0,0,0,0,0,0,0,0,1,1" om alleen de cello's (met galm) te horen.
 // Nacht 1: dag-nachtcyclus van de getijdenpoel (80 s dag, 10 s schemering, 20 s
 // nacht, 10 s ochtend), zoals SimulationParams::update_night_alpha.
 
