@@ -52,7 +52,8 @@ pub struct WasmAudioEngine {
 }
 
 impl WasmAudioEngine {
-    pub fn new() -> Result<Self, JsValue> {
+    /// `asset_base`: map waar audio-processor.js staat; None = naast de pagina.
+    pub fn new(asset_base: Option<&str>) -> Result<Self, JsValue> {
         crate::console_log!("🎵 WasmAudioEngine v{} initialiseren...", env!("BUILD_ID"));
 
         let ctx = AudioContext::new()?;
@@ -63,7 +64,10 @@ impl WasmAudioEngine {
             let location = web_sys::window()
                 .ok_or_else(|| JsValue::from_str("geen window"))?
                 .location();
-            let href = location.href()?;
+            let href = match asset_base {
+                Some(b) => b.to_string(),
+                None => location.href()?,
+            };
             let base = web_sys::Url::new(&href)?;
             let abs  = web_sys::Url::new_with_base("audio-processor.js", &base.href())?;
             abs.href()
@@ -72,9 +76,6 @@ impl WasmAudioEngine {
         let node_clone        = Rc::clone(&node);
         let stream_dest_clone = Rc::clone(&stream_dest);
         let ctx_clone         = ctx.clone();
-
-        // Haal de opgeslagen WASM-module op voor gebruik in de async closure.
-        let wasm_module = WASM_MODULE.with(|m| m.borrow().clone()).unwrap_or(JsValue::UNDEFINED);
 
         wasm_bindgen_futures::spawn_local(async move {
             let worklet = match ctx_clone.audio_worklet() {
@@ -98,6 +99,12 @@ impl WasmAudioEngine {
             };
 
             // Stuur de WASM-module via de port zodat de AudioWorklet init() kan aanroepen.
+            // Pas nu ophalen (na addModule): in de embed worden de bytes op de
+            // achtergrond geladen en kunnen ze net na de klik binnenkomen.
+            let wasm_module = WASM_MODULE.with(|m| m.borrow().clone()).unwrap_or(JsValue::UNDEFINED);
+            if wasm_module.is_undefined() {
+                crate::console_log!("❌ Geen WASM-module voor de AudioWorklet (set_audio_wasm_module niet aangeroepen)");
+            }
             if let Ok(port) = worklet_node.port() {
                 let _ = port.post_message(&wasm_module);
             }

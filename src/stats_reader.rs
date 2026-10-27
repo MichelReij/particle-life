@@ -201,7 +201,11 @@ impl StatsReader {
         num_particles: u32,
     ) -> bool {
         self.frame_counter += 1;
-        if self.frame_counter < self.poll_interval {
+        // Niet opnieuw kopiëren zolang de vorige readback nog loopt: de staging-
+        // buffer is dan nog (in afwachting van) gemapt, en een kopie ernaartoe
+        // maakt de hele submit ongeldig — elke 6 frames een WebGPU-fout, wat in
+        // de browser de framerate liet instorten (en op een iPhone vastliep)
+        if self.readback_pending || self.frame_counter < self.poll_interval {
             return false;
         }
         self.frame_counter = 0;

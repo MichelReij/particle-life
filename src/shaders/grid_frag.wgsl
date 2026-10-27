@@ -117,8 +117,10 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let world_y = original_world_pos.y;
 
     // Grid spacing: fixed at 54 CSS pixels (= 1080px canvas / 20 lines reference)
-    // Expressed in world units so it stays constant regardless of canvas/world size
-    let world_per_css_px = sim_params.virtual_world_width / sim_params.canvas_render_width;
+    // Expressed in world units so it stays constant regardless of canvas/world size.
+    // The world is always 3 units per CSS pixel (3240/1080) — not world/canvas,
+    // since the canvas may have more physical pixels than CSS pixels (HiDPI embed).
+    let world_per_css_px = 3.0;
     let world_grid_spacing_x = 54.0 * (world_per_css_px);
     let world_grid_spacing_y = 54.0 * (world_per_css_px);
 

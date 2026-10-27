@@ -1,7 +1,7 @@
 // Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
 // Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
 
-import init, { ParticleLifeEngine } from "./pkg/particle_life_wasm";
+import init, { ParticleLifeEngine, set_audio_wasm_module } from "./pkg/particle_life_wasm";
 import {
     CANVAS_WIDTH,
     CANVAS_HEIGHT,
@@ -37,6 +37,7 @@ const I18N: Record<
         hintPan: string;
         titleScreenshot: string;
         titleRecord: string;
+        titleAudio: string;
         unsupported: string;
         temp: string;
         ph: string;
@@ -51,6 +52,7 @@ const I18N: Record<
         hintPan: "Sleep om te bewegen",
         titleScreenshot: "Screenshot",
         titleRecord: "Video opnemen",
+        titleAudio: "Geluid aan / uit (M)",
         unsupported:
             "Deze simulatie vraagt veel rekenkracht. Waarschijnlijk is dit apparaat al wat ouder en heeft het niet de laatste nieuwe technologie om de simulatie soepel te laten draaien. De video hierboven geeft ook een goede indruk.",
         temp: "Temperatuur",
@@ -65,6 +67,7 @@ const I18N: Record<
         hintPan: "Drag to pan",
         titleScreenshot: "Screenshot",
         titleRecord: "Record video",
+        titleAudio: "Sound on / off (M)",
         unsupported:
             "This simulation requires a lot of computing power. Possibly your device is a bit older and may not have the latest technology to run the simulation smoothly. The video above should give you a good impression.",
         temp: "Temperature",
@@ -79,6 +82,7 @@ const I18N: Record<
         hintPan: "Glisser pour déplacer",
         titleScreenshot: "Capture d'écran",
         titleRecord: "Enregistrer la vidéo",
+        titleAudio: "Son activé / désactivé (M)",
         unsupported:
             "Cette simulation demande beaucoup de puissance de calcul. Votre appareil est peut-être un peu ancien et ne dispose pas des dernières technologies pour faire tourner la simulation de manière fluide. La vidéo ci-dessus devrait vous donner une bonne impression.",
         temp: "Température",
@@ -146,14 +150,21 @@ const EMBED_CSS = `
 #ol-canvas-wrap {
     position: relative;
     width: 100%;
+    min-width: 0;
     aspect-ratio: 1 / 1;
     overflow: hidden;
     background: transparent;
 }
+/* Absoluut binnen de vierkante wrapper: de canvas heeft meer fysieke pixels dan
+   CSS-pixels (scherp op HiDPI), en mag met die intrinsieke grootte nooit de
+   layout oprekken (zoals eerder op telefoons gebeurde) */
 #ol-canvas {
     display: block;
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
+    max-width: none;
     object-fit: contain;
     touch-action: none;
     cursor: grab;
@@ -193,7 +204,7 @@ const EMBED_CSS = `
     pointer-events: none;
     user-select: none;
 }
-#ol-screenshot-btn, #ol-record-btn, #ol-pause-btn {
+#ol-screenshot-btn, #ol-record-btn, #ol-pause-btn, #ol-audio-btn {
     position: absolute;
     bottom: 6px;
     background: none;
@@ -214,16 +225,19 @@ const EMBED_CSS = `
 #ol-screenshot-btn { right: 6px; }
 #ol-record-btn     { right: 54px; }
 #ol-pause-btn      { left: 6px; }
-#ol-screenshot-btn .ol-material-icon, #ol-record-btn .ol-material-icon, #ol-pause-btn .ol-material-icon {
+#ol-audio-btn      { left: 54px; }
+#ol-screenshot-btn .ol-material-icon, #ol-record-btn .ol-material-icon, #ol-pause-btn .ol-material-icon, #ol-audio-btn .ol-material-icon {
     font-size: 32px;
     line-height: 1;
 }
-#ol-screenshot-btn:hover, #ol-record-btn:hover, #ol-pause-btn:hover { opacity: 1; }
-#ol-screenshot-btn:active, #ol-record-btn:active, #ol-pause-btn:active { transform: scale(0.88); }
+#ol-screenshot-btn:hover, #ol-record-btn:hover, #ol-pause-btn:hover, #ol-audio-btn:hover { opacity: 1; }
+#ol-screenshot-btn:active, #ol-record-btn:active, #ol-pause-btn:active, #ol-audio-btn:active { transform: scale(0.88); }
 #ol-record-btn.recording { color: var(--wp--preset--color--accent-3); opacity: 1; }
-#ol-screenshot-btn:focus, #ol-record-btn:focus, #ol-pause-btn:focus { outline: none; }
+#ol-screenshot-btn:focus, #ol-record-btn:focus, #ol-pause-btn:focus, #ol-audio-btn:focus { outline: none; }
 @media (max-width: 480px) {
     #ol-hint-zoom, #ol-hint-pan, #ol-screenshot-btn, #ol-record-btn, #ol-pause-btn { display: none; }
+    /* Geluid blijft ook op de telefoon bereikbaar, op de plek van de pauzeknop */
+    #ol-audio-btn { left: 6px; }
 }
 canvas#ol-canvas {
     background-color: #0004;
@@ -384,6 +398,7 @@ function buildDOM() {
             <div id="ol-hint-zoom">${t.hintZoom}</div>
             <div id="ol-hint-pan">${t.hintPan}</div>
             <button id="ol-pause-btn" title="Pause / Play (P)"><span class="ol-material-icon">pause</span></button>
+            <button id="ol-audio-btn" title="${t.titleAudio}"><span class="ol-material-icon">volume_off</span></button>
             <button id="ol-screenshot-btn" title="${t.titleScreenshot}"><span class="ol-material-icon">photo_camera</span></button>
             <button id="ol-record-btn" title="${t.titleRecord}"><span class="ol-material-icon">videocam</span></button>
             <div id="ol-screenshot-flash"></div>
@@ -473,6 +488,9 @@ class EmbedApp {
     private lastPinchMidX = 0;
     private lastPinchMidY = 0;
 
+    private audioOn = false;
+    private audioStarted = false;
+
     private mediaRecorder: MediaRecorder | null = null;
     private recordedChunks: Blob[] = [];
 
@@ -492,8 +510,23 @@ class EmbedApp {
             300,
             Math.min(Math.floor(containerWidth), CANVAS_WIDTH),
         );
-        this.canvas.width = canvasSize;
-        this.canvas.height = canvasSize;
+        // Render op fysieke pixels (devicePixelRatio), anders schaalt de browser
+        // de canvas op een HiDPI-scherm op en worden de deeltjes wazig. De wereld
+        // en het aantal deeltjes volgen de CSS-grootte (set_pixel_ratio hieronder).
+        // Begrensd op de 1080 pixels van de volledige versie. (Een tijdelijke
+        // begrenzing op 2× is weer weg: het vastlopen bij inzoomen op een iPhone
+        // kwam door de stats-readback en de bubbels, niet door de resolutie.)
+        // Testen: ?ol-dpr=1 (of 2, 3) in de URL.
+        const dprParam = parseFloat(new URLSearchParams(location.search).get("ol-dpr") ?? "");
+        const dpr = Number.isFinite(dprParam)
+            ? Math.max(1, dprParam)
+            : Math.max(1, window.devicePixelRatio || 1);
+        const renderSize = Math.max(
+            canvasSize,
+            Math.min(Math.round(canvasSize * dpr), CANVAS_WIDTH),
+        );
+        this.canvas.width = renderSize;
+        this.canvas.height = renderSize;
         this.virtualWorldWidth =
             canvasSize * (VIRTUAL_WORLD_WIDTH / CANVAS_WIDTH);
         this.virtualWorldHeight =
@@ -519,10 +552,22 @@ class EmbedApp {
             return;
         }
 
-        const wasmUrl = `${getScriptBase()}pkg/particle_life_wasm_bg.wasm?v=${Date.now()}`;
+        // Zelfde versie als deze bundel (zie embed-loader.ts), zodat JS en WASM
+        // altijd bij elkaar passen en de WASM in de cache mag blijven tot een deploy
+        const build = (window as any).__OL_BUILD__ ?? Date.now();
+        const wasmUrl = `${getScriptBase()}pkg/particle_life_wasm_bg.wasm?v=${build}`;
 
         try {
             await init({ module_or_path: wasmUrl });
+            // De AudioWorklet heeft dezelfde WASM nodig (de synth draait daar);
+            // zonder deze bytes start de worklet zonder synth en blijft het stil.
+            // Op de achtergrond: het beeld hoeft hier niet op te wachten.
+            fetch(wasmUrl)
+                .then((r) => r.arrayBuffer())
+                .then((bytes) => set_audio_wasm_module(bytes))
+                .catch((e) =>
+                    console.warn("Origin of Life: audio module failed to load:", e),
+                );
         } catch (e) {
             console.error("Origin of Life: WASM init failed:", e);
             this.showError(t.unsupported);
@@ -530,6 +575,9 @@ class EmbedApp {
         }
 
         this.engine = new ParticleLifeEngine();
+        this.engine.set_pixel_ratio(renderSize / canvasSize);
+        // audio-processor.js en pkg/ staan naast dit script, niet naast de pagina
+        this.engine.set_asset_base(getScriptBase());
 
         try {
             await this.engine.initialize_webgpu(this.canvas);
@@ -1014,12 +1062,39 @@ class EmbedApp {
         const btn = document.getElementById("ol-pause-btn");
         if (btn)
             btn.innerHTML = `<span class="ol-material-icon">${this.isPaused ? "play_arrow" : "pause"}</span>`;
+        this.applyAudioState();
+    }
+
+    // Geluid start pas na een klik (browsers staan geen audio zonder
+    // gebruikersactie toe); pauze en autopauze zetten het mee stil
+    private toggleAudio() {
+        this.audioOn = !this.audioOn;
+        const btn = document.getElementById("ol-audio-btn");
+        if (btn)
+            btn.innerHTML = `<span class="ol-material-icon">${this.audioOn ? "volume_up" : "volume_off"}</span>`;
+        this.applyAudioState();
+    }
+
+    private applyAudioState() {
+        if (!this.engine) return;
+        const audible = this.audioOn && !this.isPaused && !this.autopaused;
+        // Nog nooit aangezet: de audio-engine niet onnodig aanmaken
+        if (!audible && !this.audioStarted) return;
+        this.audioStarted = true;
+        try {
+            this.engine.set_audio_paused(!audible);
+        } catch (e) {
+            console.warn("Origin of Life: audio failed:", e);
+        }
     }
 
     private wireCapture() {
         document
             .getElementById("ol-pause-btn")
             ?.addEventListener("click", () => this.togglePause());
+        document
+            .getElementById("ol-audio-btn")
+            ?.addEventListener("click", () => this.toggleAudio());
         document
             .getElementById("ol-screenshot-btn")
             ?.addEventListener("click", () => this.captureScreenshot());
@@ -1035,6 +1110,7 @@ class EmbedApp {
             )
                 return;
             if (e.key === "p" || e.key === "P") this.togglePause();
+            if (e.key === "m" || e.key === "M") this.toggleAudio();
             if (e.key === "s" || e.key === "S") this.captureScreenshot();
             if (e.key === "v" || e.key === "V") this.toggleRecording();
         });
@@ -1094,6 +1170,26 @@ class EmbedApp {
         document.getElementById("ol-record-btn")?.classList.add("recording");
     }
 
+    // Eén keer per seconde de bliksemplanning van de GPU lezen, net als in
+    // main.ts: daarop timet de drone de donder en het geknetter, en een
+    // superbliksem zet de regels om. Zonder deze readback bleef de bliksem in
+    // de embed stil. check_super_lightning is async en houdt de engine vast
+    // zolang hij wacht, vandaar engineBusy (anders re-entrancy-panics in wasm).
+    private lastLightningCheck = 0;
+
+    private async checkLightning(now: number) {
+        if (!this.engine || this.engineBusy || now - this.lastLightningCheck < 1000) return;
+        this.lastLightningCheck = now;
+        this.engineBusy = true;
+        try {
+            await this.engine.check_super_lightning();
+        } catch (e) {
+            console.warn("Origin of Life: lightning readback failed:", e);
+        } finally {
+            this.engineBusy = false;
+        }
+    }
+
     private startLoop() {
         this.lastTime = performance.now();
 
@@ -1106,6 +1202,7 @@ class EmbedApp {
         const updateAutopause = () => {
             const wasPaused = this.autopaused;
             this.autopaused = tabHidden || windowHidden || scrolledOut;
+            if (this.autopaused !== wasPaused) this.applyAudioState();
             if (this.autopaused && !wasPaused && this.animationId !== null) {
                 cancelAnimationFrame(this.animationId);
                 this.animationId = null;
@@ -1161,6 +1258,7 @@ class EmbedApp {
                 } catch (e) {
                     console.error("Origin of Life simulation error:", e);
                 }
+                this.checkLightning(now);
             }
 
             this.animationId = requestAnimationFrame(animate);

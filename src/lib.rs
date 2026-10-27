@@ -119,6 +119,10 @@ pub struct ParticleLifeEngine {
     storm_tracker: sonification::StormTracker,
     blob_tracker: blobs::BlobTracker,
     eruption_scheduler: eruptions::EruptionScheduler,
+    /// Fysieke pixels per CSS-pixel van de canvas (zie set_pixel_ratio)
+    pixel_ratio: f32,
+    /// Map waar audio-processor.js staat (zie set_asset_base); None = naast de pagina
+    asset_base: Option<String>,
     /// Mengpaneel-gains; bewaard zodat ze ook gelden voor een later aangemaakte engine
     audio_mix: Option<Vec<f32>>,
     // Sonificatie
@@ -180,6 +184,8 @@ impl ParticleLifeEngine {
             storm_tracker: sonification::StormTracker::default(),
             blob_tracker: blobs::BlobTracker::default(),
             eruption_scheduler: eruptions::EruptionScheduler::default(),
+            pixel_ratio: 1.0,
+            asset_base: None,
             audio_mix: None,
             audio_engine: None, // Lazy: aangemaakt bij eerste set_audio_paused(false)
             sonification_state: sonification::SonificationState::default(),
@@ -400,7 +406,7 @@ impl ParticleLifeEngine {
     pub fn set_audio_paused(&mut self, paused: bool) {
         if !paused && self.audio_engine.is_none() {
             // Lazy init: aanmaken bij eerste klik (user-gesture context vereist)
-            match audio_engine_wasm::WasmAudioEngine::new() {
+            match audio_engine_wasm::WasmAudioEngine::new(self.asset_base.as_deref()) {
                 Ok(engine) => {
                     if let Some(ref mix) = self.audio_mix {
                         engine.set_mix(mix);
@@ -726,6 +732,22 @@ impl ParticleLifeEngine {
         Ok(())
     }
 
+    /// Vóór initialize_webgpu aanroepen: de canvas heeft `ratio` fysieke pixels per
+    /// CSS-pixel (devicePixelRatio). De wereld en het aantal deeltjes volgen de
+    /// CSS-grootte; alleen de renderresolutie gaat omhoog, zodat het beeld op
+    /// hoge-dichtheidsschermen scherp is in plaats van opgeschaald (wazig).
+    #[wasm_bindgen]
+    pub fn set_pixel_ratio(&mut self, ratio: f32) {
+        self.pixel_ratio = ratio.max(1.0);
+    }
+
+    /// Map (URL eindigend op "/") waar audio-processor.js en pkg/ staan, als die
+    /// niet naast de pagina staan (WordPress-embed).
+    #[wasm_bindgen]
+    pub fn set_asset_base(&mut self, base: String) {
+        self.asset_base = Some(base);
+    }
+
     #[wasm_bindgen]
     pub async fn initialize_webgpu(&mut self, canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
         let href = web_sys::window()
@@ -741,10 +763,13 @@ impl ParticleLifeEngine {
                 // Sync simulation params to actual canvas size (may differ from compile-time 1080)
                 self.simulation_params.canvas_render_width  = canvas_size as f32;
                 self.simulation_params.canvas_render_height = canvas_size as f32;
-                // Scale virtual world proportionally with canvas: ratio stays 3:1 (3240/1080)
-                // This keeps particle density, forces, and interaction radii all consistent
+                // Scale virtual world proportionally with the canvas in CSS pixels: ratio
+                // stays 3:1 (3240/1080). This keeps particle density, forces, and
+                // interaction radii all consistent; a higher pixel ratio only adds
+                // render resolution, not more world.
+                let css_size = (canvas_size as f32 / self.pixel_ratio).round();
                 let world_scale = VIRTUAL_WORLD_WIDTH / CANVAS_WIDTH;
-                let virtual_size = canvas_size as f32 * world_scale;
+                let virtual_size = css_size * world_scale;
                 self.simulation_params.virtual_world_width  = virtual_size;
                 self.simulation_params.virtual_world_height = virtual_size;
                 // Viewport center at new world center; viewport fills entire world at zoom=1
@@ -758,7 +783,7 @@ impl ParticleLifeEngine {
                 self.simulation_params.spatial_grid_cell_size = cell_size;
                 self.simulation_params.spatial_grid_width  = (virtual_size / cell_size).ceil() as u32;
                 self.simulation_params.spatial_grid_height = (virtual_size / cell_size).ceil() as u32;
-                let (new_max, new_min) = crate::config::scale_particle_counts(canvas_size);
+                let (new_max, new_min) = crate::config::scale_particle_counts(css_size as u32);
                 self.particle_system.set_particle_limits(new_max, new_min);
                 let initial_count = new_max.min(DEFAULT_NUM_PARTICLES);
                 self.particle_system.set_active_count(initial_count);

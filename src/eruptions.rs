@@ -16,6 +16,12 @@ use crate::sonification::temperature_norm;
 
 /// Maximaal aantal uitbarstingen waarvan tegelijk bubbels te zien zijn.
 pub const MAX_ERUPTIONS: usize = 4;
+/// Bellen per uitbarsting (hooguit). Moet gelijk blijven aan MAX_BUBBLES in
+/// bubbles.wgsl.
+pub const MAX_BUBBLES: usize = 88;
+/// Aantal vierkantjes dat de renderer tekent: per uitbarsting een gloed en
+/// MAX_BUBBLES bellen (zie bubbles.wgsl).
+pub const GPU_INSTANCES: u32 = (MAX_ERUPTIONS * (1 + MAX_BUBBLES)) as u32;
 /// Grootte van gpu_data(): drie vec4's per uitbarsting.
 pub const GPU_FLOATS_PER_ERUPTION: usize = 12;
 pub const GPU_FLOATS: usize = MAX_ERUPTIONS * GPU_FLOATS_PER_ERUPTION;
@@ -26,9 +32,13 @@ const SOURCE_RADIUS: f32 = 0.38;
 /// ...en niet hoger dan deze y (wereld-UV, y naar beneden): de onderste twee
 /// derde van het beeld.
 const SOURCE_MIN_Y: f32 = 1.0 / 3.0;
-/// Tijd (s) tussen uitbarstingen: willekeurig binnen dit bereik, gedeeld door
-/// (0.6 + 0.8 × warmte) — heet ~4–11 s, koud ~8–25 s.
-const SPACING: (f32, f32) = (5.0, 15.0);
+/// Tijd (s) tussen uitbarstingen: klokvormig verdeeld binnen dit bereik
+/// (bell_range met SPACING_SAMPLES), gedeeld door (0.6 + 0.8 × warmte) — heet
+/// gemiddeld ~40 s, koud ~90 s, nooit korter dan ~14 s.
+const SPACING: (f32, f32) = (20.0, 90.0);
+const SPACING_SAMPLES: u32 = 3;
+/// De eerste uitbarsting na het (opnieuw) beginnen van de diepzee.
+const FIRST: (f32, f32) = (5.0, 20.0);
 /// Hoe lang de laatste bubbels van een uitbarsting nog opstijgen (s). Moet
 /// gelijk blijven aan RISE_TIME in bubbles_frag.wgsl.
 pub const BUBBLE_RISE_TIME: f32 = 6.0;
@@ -119,12 +129,12 @@ impl EruptionScheduler {
 
         let warmth = temperature_norm(params);
         if self.next_time.is_none() {
-            self.next_time = Some(now + self.range(2.0, 6.0));
+            self.next_time = Some(now + self.bell_range(FIRST.0, FIRST.1, SPACING_SAMPLES));
         }
         if now < self.next_time.unwrap_or(now) {
             return None;
         }
-        self.next_time = Some(now + self.range(SPACING.0, SPACING.1) / (0.6 + 0.8 * warmth));
+        self.next_time = Some(now + self.bell_range(SPACING.0, SPACING.1, SPACING_SAMPLES) / (0.6 + 0.8 * warmth));
 
         // Willekeurige plek in de onderste twee derde, binnen de cirkel
         let (x, y) = loop {
@@ -177,7 +187,7 @@ impl EruptionScheduler {
         }
     }
 
-    /// Voor bubbles_frag.wgsl: per uitbarsting drie vec4's —
+    /// Voor bubbles.wgsl: per uitbarsting drie vec4's —
     /// (bron x, bron y, begin, grootte), (spuitduur, seed, hitte, actief) en
     /// (opkomen, aanhouden, uitdoven, helderheid) voor de gloed.
     pub fn gpu_data(&self) -> [f32; GPU_FLOATS] {
@@ -206,6 +216,15 @@ impl EruptionScheduler {
     fn range(&mut self, lo: f32, hi: f32) -> f32 {
         lo + (hi - lo) * self.unit()
     }
+
+    /// bellRandom() uit platformio/include/MathUtils.h: het gemiddelde van
+    /// `samples` uniforme trekkingen — 1 = uniform, 2 = driehoek, ≥3 steeds meer
+    /// een klokvorm rond het midden.
+    fn bell_range(&mut self, lo: f32, hi: f32, samples: u32) -> f32 {
+        let n = samples.max(1);
+        let t = (0..n).map(|_| self.unit()).sum::<f32>() / n as f32;
+        lo + (hi - lo) * t
+    }
 }
 
 #[cfg(test)]
@@ -232,7 +251,7 @@ mod tests {
     fn erupts_in_htv_from_the_lower_two_thirds() {
         let mut s = EruptionScheduler::default();
         let mut p = htv_params();
-        let eruptions = run(&mut s, &mut p, 300.0);
+        let eruptions = run(&mut s, &mut p, 1200.0);
         assert!(eruptions.len() >= 10, "te weinig uitbarstingen: {}", eruptions.len());
         for e in &eruptions {
             let (x, y) = e.source();
@@ -259,7 +278,7 @@ mod tests {
     fn drone_gets_the_latest_eruption() {
         let mut s = EruptionScheduler::default();
         let mut p = htv_params();
-        let last = *run(&mut s, &mut p, 60.0).last().unwrap();
+        let last = *run(&mut s, &mut p, 200.0).last().unwrap();
         let mut d = DroneParams::default();
         s.apply_to_drone(p.time, &mut d);
         assert_eq!(d.eruption_id, last.id as f32);

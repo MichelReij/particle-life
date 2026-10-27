@@ -122,7 +122,9 @@ const isProd = argv && argv.mode === "production";
 return {
     entry: {
         main: "./src/main.ts",
-        "particle-life-embed": "./src/embed.ts",
+        // Laadscript (stabiel) + de eigenlijke embed-bundel, zie embed-loader.ts
+        "particle-life-embed": "./src/embed-loader.ts",
+        "particle-life-embed-app": "./src/embed.ts",
         styles: "./src/styles/main.scss",
     },
     output: {

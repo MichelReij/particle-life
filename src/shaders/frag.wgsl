@@ -23,7 +23,8 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     let phase2 = hash * 15.7080 + in.velocity_angle * 1.3;
 
     // Organic shape: angular wobble makes particles amoeba-like instead of perfect circles
-    let angle = atan2(uv_centered.y, uv_centered.x);
+    // (atan2(0, 0) is niet gedefinieerd, zie vert.wgsl: het middelste pixel krijgt 0)
+    let angle = select(0.0, atan2(uv_centered.y, uv_centered.x), dot(uv_centered, uv_centered) > 1e-12);
     let wobble = 1.0 + 0.03 * sin(angle * 3.0 + phase1) + 0.015 * sin(angle * 5.0 + phase2);
     let effective_dist = dist / wobble;
 
@@ -54,7 +55,8 @@ fn main(in: VertexOutput) -> @location(0) vec4<f32> {
     let center_glow = (1.0 - normalized_dist) * 0.18;
 
     // Soft organic edge: full opacity in core, gentle fade in outer 20%
-    let alpha_factor = smoothstep(1.0, 0.9, normalized_dist);
+    // smoothstep met omgekeerde randen is in WGSL niet gedefinieerd: 1 - smoothstep
+    let alpha_factor = 1.0 - smoothstep(0.9, 1.0, normalized_dist);
 
     var rgb = in.particle_color.rgb;
     rgb = rgb * diffuse;

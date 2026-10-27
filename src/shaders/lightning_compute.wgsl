@@ -223,11 +223,15 @@ fn generate_bolt_segments(base_index: u32, seed_time: f32, seed_flash_id: u32, e
     let initial_angle = position_randoms[2] * 6.28318530718;
     // 0 to 2π
 
-    // Compensate for smaller virtual world on smaller canvases so bolt size stays constant in CSS pixels
-    let canvas_scale = 1080.0 / sim_params.canvas_render_width;
+    // Compensate for smaller virtual world on smaller canvases so bolt THICKNESS stays constant
+    // in CSS pixels (via the world size, which follows CSS pixels — the canvas may have more
+    // physical pixels). Lengths are NOT scaled: a bolt keeps the same size relative to the
+    // world, so in the small WordPress embed it no longer grows 2-3× too large and runs off
+    // the edge of the round screen (the full 1080 version is unchanged: scale 1 there).
+    let canvas_scale = 3240.0 / sim_params.virtual_world_width;
 
     // Vary initial length within specified range
-    let initial_length = (0.02 + position_randoms[3] * 0.01) * canvas_scale;
+    let initial_length = 0.02 + position_randoms[3] * 0.01;
     // 0.03-0.05 UV units (specified range)
 
     let first_end = vec2<f32>(start_pos.x + cos(initial_angle) * initial_length, start_pos.y + sin(initial_angle) * initial_length);
@@ -438,19 +442,19 @@ fn generate_bolt_segments(base_index: u32, seed_time: f32, seed_flash_id: u32, e
             var segment_length: f32;
             if (generation == 0u) {
                 // Main trunk: shorter segments (0.018-0.035 UV) - scale with zoom for more detail
-                segment_length = (0.015 + segment_randoms[2] * 0.015) * detail_scale * canvas_scale;
+                segment_length = (0.015 + segment_randoms[2] * 0.015) * detail_scale;
             }
             else if (generation == 1u) {
                 // Primary branches: medium length (0.032-0.05 UV) - scale with zoom
-                segment_length = (0.024 + segment_randoms[2] * 0.020) * detail_scale * canvas_scale;
+                segment_length = (0.024 + segment_randoms[2] * 0.020) * detail_scale;
             }
             else if (generation <= 7u) {
                 // Secondary+ branches: longest (0.032-0.06 UV) - scale with zoom
-                segment_length = (0.030 + segment_randoms[2] * 0.024) * detail_scale * canvas_scale;
+                segment_length = (0.030 + segment_randoms[2] * 0.024) * detail_scale;
             }
             else {
                 // Super lightning extra generations (8-9): even longer for wider spread - scale with zoom
-                segment_length = (0.032 + segment_randoms[2] * 0.025) * detail_scale * canvas_scale;
+                segment_length = (0.032 + segment_randoms[2] * 0.025) * detail_scale;
             }
 
             // Super lightning gets extra size boost for more dramatic effect

@@ -29,6 +29,10 @@ if [[ ! -f "$PUBLIC_DIR/main.js" ]]; then
     exit 1
 fi
 
+# Versie voor de embed (zie src/embed-loader.ts): nieuw bij elke deploy, zodat
+# bezoekers direct de bijpassende bundel en WASM krijgen
+echo "{\"v\":\"$(date +%Y%m%d%H%M%S)\"}" > "$PUBLIC_DIR/embed-version.json"
+
 echo "Deploying to ftp://$FTP_HOST$FTP_PATH ..."
 
 # Upload top-level files
@@ -42,7 +46,10 @@ put -O . $PUBLIC_DIR/styles.css
 put -O . $PUBLIC_DIR/styles.js
 put -O . $PUBLIC_DIR/joy.js
 put -O . $PUBLIC_DIR/particle-life-embed.js
+put -O . $PUBLIC_DIR/particle-life-embed-app.js
 put -O . $PUBLIC_DIR/particle-life-embed.html
+put -O . $PUBLIC_DIR/audio-processor.js
+put -O . $PUBLIC_DIR/embed-version.json
 LFTP
 
 # Mirror shaders/

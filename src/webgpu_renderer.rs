@@ -769,7 +769,7 @@ impl WebGpuRenderer {
             entries: &[
                 wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
-                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::FRAGMENT,
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
             ],
         });
@@ -840,7 +840,7 @@ impl WebGpuRenderer {
         let bg_frag         = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("BG Frag"),  source: wgpu::ShaderSource::Wgsl(include_str!("shaders/background_frag.wgsl").into()) });
         let grid_frag       = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Grid"),     source: wgpu::ShaderSource::Wgsl(include_str!("shaders/grid_frag.wgsl").into()) });
         let night_frag      = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Night"),    source: wgpu::ShaderSource::Wgsl(include_str!("shaders/night_frag.wgsl").into()) });
-        let bubbles_frag    = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Bubbles"),  source: wgpu::ShaderSource::Wgsl(include_str!("shaders/bubbles_frag.wgsl").into()) });
+        let bubbles_shader  = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Bubbles"),  source: wgpu::ShaderSource::Wgsl(include_str!("shaders/bubbles.wgsl").into()) });
         let fisheye_frag    = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Fisheye"),  source: wgpu::ShaderSource::Wgsl(include_str!("shaders/fisheye_frag.wgsl").into()) });
         let zoom_frag       = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Zoom"),     source: wgpu::ShaderSource::Wgsl(include_str!("shaders/zoom_frag.wgsl").into()) });
         let blur_h_frag     = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("BlurH"),   source: wgpu::ShaderSource::Wgsl(include_str!("shaders/blur_h.wgsl").into()) });
@@ -924,7 +924,14 @@ impl WebGpuRenderer {
 
         let background_render_pipeline = make_fullscreen_pipeline("Background", &pp_uniform_pl, &bg_frag,   None);
         let night_render_pipeline      = make_fullscreen_pipeline("Night",      &pp_uniform_pl, &night_frag, Some(alpha_blend));
-        let bubbles_render_pipeline    = make_fullscreen_pipeline("Bubbles",    &bubbles_pl,    &bubbles_frag, Some(alpha_blend));
+        // Bubbels: één vierkantje per bel of gloed (instanced), geen schermvullende pass
+        let bubbles_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Bubbles"), layout: Some(&bubbles_pl),
+            vertex: wgpu::VertexState { module: &bubbles_shader, entry_point: Some("vs_main"), buffers: &[], compilation_options: Default::default() },
+            fragment: Some(wgpu::FragmentState { module: &bubbles_shader, entry_point: Some("fs_main"), targets: &[Some(wgpu::ColorTargetState { format: surface_format, blend: Some(alpha_blend), write_mask: wgpu::ColorWrites::ALL })], compilation_options: Default::default() }),
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+            depth_stencil: None, multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false }, multiview: None, cache: None,
+        });
         let grid_render_pipeline       = make_fullscreen_pipeline("Grid",       &pp_uniform_pl, &grid_frag,  Some(alpha_blend));
         let fisheye_render_pipeline    = make_fullscreen_pipeline("Fisheye",    &pp_texture_pl, &fisheye_frag, None);
         let zoom_render_pipeline       = make_fullscreen_pipeline("Zoom",       &zoom_pl,       &zoom_frag, None);
@@ -1190,7 +1197,7 @@ impl WebGpuRenderer {
         // Bubbels van hydrothermale uitbarstingen (HTV), boven de deeltjes
         if self.eruptions_active {
             let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Bubbles"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &self.scene_texture_view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
-            p.set_pipeline(&self.bubbles_render_pipeline); p.set_bind_group(0, &self.bubbles_render_bind_group, &[]); p.draw(0..6, 0..1);
+            p.set_pipeline(&self.bubbles_render_pipeline); p.set_bind_group(0, &self.bubbles_render_bind_group, &[]); p.draw(0..6, 0..crate::eruptions::GPU_INSTANCES);
         }
 
         // Night overlay (WLP only; alpha=0 during day so pass is essentially free then)

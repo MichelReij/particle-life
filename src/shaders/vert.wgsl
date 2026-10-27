@@ -239,7 +239,11 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
     // UV: scale by wobble_margin so frag uv_centered covers ±(wobble_margin*0.5) — enough room for max wobble
     out.quad_uv = vec2<f32>(vertex_attrs.quad_pos.x * 0.5 * wobble_margin + 0.5, vertex_attrs.quad_pos.y * 0.5 * wobble_margin + 0.5);
     out.particle_id = f32(vertex_attrs.instance_idx);
-    out.velocity_angle = atan2(particle_attrs.particle_vel.y, particle_attrs.particle_vel.x);
+    // atan2(0, 0) is in WGSL niet gedefinieerd: Chrome geeft 0, maar Safari (WGSL →
+    // Metal) gaf NaN voor stilstaande deeltjes — een losse particle zonder krachten
+    // staat precies stil — en dan viel het lichaam weg en bleef alleen de halo over
+    let vel = particle_attrs.particle_vel;
+    out.velocity_angle = select(0.0, atan2(vel.y, vel.x), dot(vel, vel) > 1e-12);
     // Particle center in 0-1 canvas UV space (clip space → UV: (x+1)/2, (1-y)/2)
     out.particle_canvas_uv = vec2<f32>(
         (normalized_particle_pos.x + 1.0) * 0.5,
