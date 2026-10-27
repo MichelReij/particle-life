@@ -12,7 +12,6 @@
 
 use crate::dsp::DroneParams;
 use crate::simulation_params::SimulationParams;
-use crate::sonification::temperature_norm;
 
 /// Maximaal aantal uitbarstingen waarvan tegelijk bubbels te zien zijn.
 pub const MAX_ERUPTIONS: usize = 4;
@@ -33,9 +32,8 @@ const SOURCE_RADIUS: f32 = 0.38;
 /// derde van het beeld.
 const SOURCE_MIN_Y: f32 = 1.0 / 3.0;
 /// Tijd (s) tussen uitbarstingen: klokvormig verdeeld binnen dit bereik
-/// (bell_range met SPACING_SAMPLES), gedeeld door (0.6 + 0.8 × warmte) — heet
-/// gemiddeld ~40 s, koud ~90 s, nooit korter dan ~14 s.
-const SPACING: (f32, f32) = (20.0, 90.0);
+/// (bell_range met SPACING_SAMPLES), dus meestal rond de 25 s.
+const SPACING: (f32, f32) = (10.0, 40.0);
 const SPACING_SAMPLES: u32 = 3;
 /// De eerste uitbarsting na het (opnieuw) beginnen van de diepzee.
 const FIRST: (f32, f32) = (5.0, 20.0);
@@ -127,14 +125,13 @@ impl EruptionScheduler {
         }
         self.active.retain(|e| !e.finished(now) && e.start <= now);
 
-        let warmth = temperature_norm(params);
         if self.next_time.is_none() {
             self.next_time = Some(now + self.bell_range(FIRST.0, FIRST.1, SPACING_SAMPLES));
         }
         if now < self.next_time.unwrap_or(now) {
             return None;
         }
-        self.next_time = Some(now + self.bell_range(SPACING.0, SPACING.1, SPACING_SAMPLES) / (0.6 + 0.8 * warmth));
+        self.next_time = Some(now + self.bell_range(SPACING.0, SPACING.1, SPACING_SAMPLES));
 
         // Willekeurige plek in de onderste twee derde, binnen de cirkel
         let (x, y) = loop {
