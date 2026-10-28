@@ -12,14 +12,14 @@
 //   4. Elke frame: if let Some(stats) = stats_reader.poll_result() { sla op }
 //   5. latest_grid(): de dichtheidskaart van dezelfde meting, voor blobs::BlobTracker
 
-use crate::blobs::{DensityGrid, GRID_CELLS};
+use crate::blobs::{DensityGrid, GRID_BUFFER_LEN};
 use crate::sonification::{GpuGlobalStats, GpuTypeStats};
 use std::sync::{Arc, Mutex};
 
 /// 8 vec4 (7 per-type + 1 globaal) × 16 bytes = 128 bytes
 const STATS_BUFFER_SIZE: u64 = 8 * 4 * 4;
 /// Dichtheidskaart: per cel 4 × i32 (aantal, Σvx, Σvy, Σ|v|)
-const GRID_BUFFER_SIZE: u64 = (GRID_CELLS * 4 * 4) as u64;
+const GRID_BUFFER_SIZE: u64 = (GRID_BUFFER_LEN * 4) as u64;
 
 type StatsResult = ([GpuTypeStats; 7], GpuGlobalStats);
 

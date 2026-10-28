@@ -106,7 +106,8 @@ pub struct SonificationState {
     /// Huidig zoomniveau (kopie voor downstream gebruik)
     pub zoom: f32,
     /// Besturing van de ambient drone (dsp::DroneSynth): temperatuur altijd,
-    /// clusterstatistieken alleen boven 3× zoom (geschaald met gpu_blend)
+    /// chaos op elk zoomniveau (ChaosMeter), clusterstatistieken alleen boven 3× zoom
+    /// (geschaald met gpu_blend)
     pub drone: DroneParams,
 }
 
@@ -310,7 +311,8 @@ const DRONE_MIN_LEAD_COUNT: f32 = 5.0;
 
 /// Drone-besturing. Zonder GPU-stats (zoom ≤ 3) alleen temperatuur en hypothese — de drone
 /// gaat dan over de algemene toestand van de simulatie. Ingezoomd mengen de
-/// clusterwaarden geleidelijk in via gpu_blend.
+/// clusterwaarden geleidelijk in via gpu_blend. De chaos komt op elk zoomniveau uit
+/// ChaosMeter.
 fn drone_params(
     params: &SimulationParams,
     gpu_stats: Option<&[GpuTypeStats; 7]>,
@@ -344,7 +346,6 @@ fn drone_params(
         .max_by(|a, b| a.energy.total_cmp(&b.energy))
         .map_or(center, |s| s.centroid_x * 2.0 - 1.0);
 
-    p.chaos      = gpu_blend * energy * (1.0 - order);
     p.motion     = gpu_blend * energy;
     p.calm       = gpu_blend * order * (1.0 - energy);
     p.pan_center = gpu_blend * center.clamp(-1.0, 1.0);
@@ -465,4 +466,210 @@ pub fn mean_speed(stats: &[GpuTypeStats; 7]) -> f32 {
         return 0.0;
     }
     stats.iter().map(|s| s.energy * s.viewport_count).sum::<f32>() / total
+}
+
+// ─── Chaos ───────────────────────────────────────────────────────────────────
+
+/// Een cel hoort bij een klont als hij zoveel keer dichter is dan gemiddeld (zelfde
+/// maat als blobs::DENSE_FACTOR), en minstens zoveel deeltjes bevat.
+const CLUMP_FACTOR: f32 = 2.5;
+const CLUMP_MIN: u32 = 3;
+/// Een klont is groot als hij minstens dit deel van alle deeltjes in beeld bevat.
+/// Kleine clustertjes overal verspreid zijn geen orde maar versnippering.
+const BIG_CLUMP_SHARE: f32 = 0.03;
+/// Samenhang (gecorrigeerd voor toeval, zie measure): hieronder gaat elk deeltje zijn
+/// eigen kant op (chaos mogelijk), daarboven bewegen ze samen en zwijgt de chaos.
+/// Geijkt (ruwe samenhang, zoom 1): ordelijk 0.85–0.90; krioelende clustertjes
+/// 0.37–0.44; alle schuiven op maximaal 0.40–0.64.
+const CHAOS_COHERENT: (f32, f32) = (0.5, 0.75);
+/// Deel van de deeltjes in klonten (groot en klein samen): hieronder is er geen orde,
+/// daarboven zwijgt de chaos. Geijkt: ordelijk 69–72%; krioelende clustertjes 11–24%;
+/// alle schuiven op maximaal 21–38%.
+const CHAOS_CLUMPED: (f32, f32) = (0.42, 0.65);
+/// Gemiddelde snelheid van alles buiten de grote klonten (beeldbreedtes/s): alleen een
+/// drempel voor "er beweegt iets". Snelheid scheidt orde en chaos slecht: ordelijk
+/// 0.010–0.011, krioelende clustertjes 0.013–0.017, alle schuiven op maximaal 0.053–0.090.
+const CHAOS_SPEED: (f32, f32) = (0.003, 0.008);
+/// Verwachte |Σv| / Σ|v| van n deeltjes in willekeurige richtingen ≈ √(π/4) / √n.
+const RANDOM_ALIGNMENT: f32 = 0.886;
+/// Bij drift (hete diepzee) komt elk deeltje dat aan de ene kant verdwijnt stil aan de
+/// andere kant terug; die instroomstrook is dicht maar geen klont. Zoveel van de
+/// wereldbreedte vanaf die rand telt niet mee. Geijkt: met de strook meegeteld gaf
+/// grote chaos 63–71% "in klonten".
+const CHAOS_SPAWN_MARGIN: f32 = 0.08;
+/// Drift (world-units/s) waarboven de instroomrand meetelt — zelfde grens als compute.wgsl.
+const CHAOS_DRIFT_MIN: f32 = 0.1;
+/// Onder zoveel deeltjes in beeld zegt de verdeling te weinig.
+const CHAOS_MIN_PARTICLES: u32 = 60;
+/// Afvlakking van de chaoswaarde (s): korte uitschieters tellen niet.
+const CHAOS_SMOOTH: f32 = 1.0;
+const CHAOS_LOG_INTERVAL: f32 = 2.0;
+
+fn smoothstep(x: f32, (lo, hi): (f32, f32)) -> f32 {
+    let t = ((x - lo) / (hi - lo)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Algemene chaosmaat [0, 1] uit de dichtheidskaart, op elk zoomniveau: deeltjes die
+/// alle kanten op schieten zonder dat er orde ontstaat. Twee kenmerken:
+///   - samenhang: bewegen de deeltjes per cel dezelfde kant op (|Σv| / Σ|v|, min wat
+///     willekeurige richtingen al geven)? Het sterkste onderscheid in de echte
+///     simulatie: ordelijk ~0.9, chaos 0.4–0.6 (ruw)
+///   - in klonten: deel van de deeltjes in aaneengesloten dichte cellen, groot en klein
+///     samen (de verdeling over groot/klein staat alleen in de diagnoseregel)
+///   - snelheid: alleen als drempel voor "er beweegt iets"
+/// Ieder deeltje een eigen kant op, weinig in klonten, en beweging = chaos.
+/// (Een eerdere spreidingsmaat, gemiddelde²/(E[n²] − gemiddelde), zag losse dansende
+/// zwermen ten onrechte als klonterig.)
+#[derive(Debug, Clone, Default)]
+pub struct ChaosMeter {
+    last_seq: Option<u64>,
+    target:   f32,
+    value:    f32,
+    /// Deel van de deeltjes in grote klonten [0, 1]
+    ordered:  f32,
+    /// Deel van de deeltjes in kleine clustertjes [0, 1], ter diagnose
+    small:    f32,
+    /// Gemiddelde snelheid van de deeltjes buiten grote klonten (beeldbreedtes/s)
+    speed:    f32,
+    /// Deel van de deeltjes in de instroomstrook (niet meegeteld), ter diagnose
+    spawn:    f32,
+    /// Samenhang van de bewegingen per cel (|Σv| / Σ|v|), ruw en gecorrigeerd voor
+    /// wat willekeurige richtingen al zouden geven
+    coherence: f32,
+    coherence_norm: f32,
+    time:     f32,
+    last_log: f32,
+}
+
+impl ChaosMeter {
+    /// Elke frame aanroepen. `grid`: laatst teruggelezen dichtheidskaart (mag dezelfde
+    /// zijn als vorige keer).
+    pub fn update(&mut self, grid: Option<&crate::blobs::DensityGrid>, params: &SimulationParams, dt: f32, drone: &mut DroneParams) {
+        self.time += dt;
+        if let Some(g) = grid {
+            if self.last_seq != Some(g.seq) {
+                self.last_seq = Some(g.seq);
+                self.measure(g, params);
+            }
+        }
+        self.value += (self.target - self.value) * (dt / CHAOS_SMOOTH).min(1.0);
+        drone.chaos = self.value;
+
+        if self.time - self.last_log >= CHAOS_LOG_INTERVAL && self.last_seq.is_some() {
+            self.last_log = self.time;
+            crate::console_log!(
+                "🌪️ chaos {:.2} — samenhang {:.2} (gecorrigeerd {:.2}), in klonten {:.0}% (groot {:.0}%, klein {:.0}%), snelheid rest {:.3} beeld/s, instroomrand {:.0}%",
+                self.value, self.coherence, self.coherence_norm, (self.ordered + self.small) * 100.0,
+                self.ordered * 100.0, self.small * 100.0, self.speed, self.spawn * 100.0
+            );
+        }
+    }
+
+    fn measure(&mut self, g: &crate::blobs::DensityGrid, params: &SimulationParams) {
+        // Cellen van 45 world-units (2 × 2 kaartcellen), de maat waarop geijkt is
+        let coarse = g.coarsen(2);
+        let g = &coarse;
+        let viewport_w = params.viewport_width.max(1.0);
+
+        // Kolommen in de instroomstrook overslaan (rechts bij drift naar links, en andersom)
+        let world_w = params.virtual_world_width;
+        let margin = CHAOS_SPAWN_MARGIN * world_w;
+        let drift = params.drift_x_per_second;
+        let in_spawn = |col: usize| {
+            let x = g.x0 + col as i32;
+            let (x0, x1) = (x as f32 * g.cell, (x + 1) as f32 * g.cell);
+            if drift <= -CHAOS_DRIFT_MIN {
+                x1 > world_w - margin
+            } else if drift >= CHAOS_DRIFT_MIN {
+                x0 < margin
+            } else {
+                false
+            }
+        };
+        let spawn_cols: Vec<bool> = (0..g.nx).map(in_spawn).collect();
+        let counted = |i: usize| !spawn_cols[i % g.nx.max(1)];
+
+        let all: u32 = g.counts.iter().sum();
+        let (mut total, mut cells) = (0u32, 0u32);
+        for (i, &n) in g.counts.iter().enumerate() {
+            if counted(i) {
+                total += n;
+                cells += 1;
+            }
+        }
+        self.spawn = if all > 0 { (all - total) as f32 / all as f32 } else { 0.0 };
+        if total < CHAOS_MIN_PARTICLES || cells == 0 {
+            self.target = 0.0;
+            return;
+        }
+
+        // Dichte cellen (t.o.v. het wereldgemiddelde, zodat het niet van de zoom
+        // afhangt), samengevoegd tot klonten via de 8 buren (zoals blobs.rs)
+        let dense = g.dense_threshold(CLUMP_FACTOR, CLUMP_MIN);
+        let is_dense = |i: usize| counted(i) && g.counts[i] as f32 >= dense;
+        let mut seen = vec![false; g.counts.len()];
+        let mut big = vec![false; g.counts.len()];
+        let (mut in_big, mut in_small) = (0u32, 0u32);
+        let mut stack = Vec::new();
+        let mut members = Vec::new();
+        for start in 0..g.counts.len() {
+            if seen[start] || !is_dense(start) {
+                continue;
+            }
+            seen[start] = true;
+            stack.push(start);
+            members.clear();
+            let mut mass = 0u32;
+            while let Some(i) = stack.pop() {
+                members.push(i);
+                mass += g.counts[i];
+                for n in g.neighbours(i) {
+                    if !seen[n] && is_dense(n) {
+                        seen[n] = true;
+                        stack.push(n);
+                    }
+                }
+            }
+            if mass as f32 >= BIG_CLUMP_SHARE * total as f32 {
+                in_big += mass;
+                for &i in &members {
+                    big[i] = true;
+                }
+            } else {
+                in_small += mass;
+            }
+        }
+        self.ordered = in_big as f32 / total as f32;
+        self.small = in_small as f32 / total as f32;
+
+        let (mut rest, mut rest_speed) = (0u32, 0.0f32);
+        for i in 0..g.counts.len() {
+            if counted(i) && !big[i] {
+                rest += g.counts[i];
+                rest_speed += g.sum_speed[i];
+            }
+        }
+        self.speed = if rest > 0 { rest_speed / rest as f32 / viewport_w } else { 0.0 };
+
+        // Samenhang: bewegen de deeltjes in een cel dezelfde kant op? Weinig deeltjes per
+        // cel geven bij toeval al samenhang (in ijle gebieden meer dan in dichte); die
+        // toevalsbasis trekken we eraf
+        let (mut aligned, mut moving, mut chance) = (0.0f32, 0.0f32, 0.0f32);
+        for i in 0..g.counts.len() {
+            let n = g.counts[i];
+            if counted(i) && n >= 2 {
+                aligned += (g.sum_vx[i] * g.sum_vx[i] + g.sum_vy[i] * g.sum_vy[i]).sqrt();
+                moving += g.sum_speed[i];
+                chance += RANDOM_ALIGNMENT / (n as f32).sqrt() * g.sum_speed[i];
+            }
+        }
+        self.coherence = if moving > 0.0 { aligned / moving } else { 0.0 };
+        self.coherence_norm = if moving > chance { ((aligned - chance) / (moving - chance)).clamp(0.0, 1.0) } else { 0.0 };
+
+        // Elk teken van orde (samen bewegen, of in klonten zitten) dempt de chaos
+        self.target = (1.0 - smoothstep(self.coherence_norm, CHAOS_COHERENT))
+            * (1.0 - smoothstep(self.ordered + self.small, CHAOS_CLUMPED))
+            * smoothstep(self.speed, CHAOS_SPEED);
+    }
 }

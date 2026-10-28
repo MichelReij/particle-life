@@ -99,8 +99,8 @@ fn main() -> std::io::Result<()> {
 /// Klonten zoals BlobTracker ze aanlevert. Twee klonten liggen er de hele tijd (een
 /// grote links, een kleine rechts); om de beurt per interval: naderen (2 s) →
 /// samensmelten (een stem verdwijnt) → nazinderen (1.5 s); uiteenvallen (een stem
-/// verschijnt) → uiteendrijven (2.5 s); een onrustige klont die 3 s van links naar
-/// rechts beweegt.
+/// verschijnt) → uiteendrijven (2.5 s); een klont die in 1.5 s van links naar
+/// rechts langszoeft.
 fn blob_params(t: f32, interval: f32, base: DroneParams) -> DroneParams {
     if interval <= 0.0 {
         return base;
@@ -127,15 +127,18 @@ fn blob_params(t: f32, interval: f32, base: DroneParams) -> DroneParams {
         _ => {}
     }
     use particle_life_wasm::dsp::BlobVoice;
-    p.voices[0] = BlobVoice { id: 1.0, level: 0.9, pan: -0.5, size: 0.8, motion: 0.0, agitation: 0.2 };
-    p.voices[1] = BlobVoice { id: 2.0, level: 0.6, pan: 0.6, size: 0.3, motion: 0.0, agitation: 0.4 };
+    p.merge_voice = 1.0;
+    p.split_voice_a = 1.0;
+    p.split_voice_b = 10.0 + n;
+    p.voices[0] = BlobVoice { id: 1.0, level: 0.9, pan: -0.5, size: 0.8, motion: 0.0, rush: 0.0, agitation: 0.2 };
+    p.voices[1] = BlobVoice { id: 2.0, level: 0.6, pan: 0.6, size: 0.3, motion: 0.0, rush: 0.0, agitation: 0.4 };
     match kind {
         // Naderende klont die bij het samensmelten opgaat in klont 1
-        1 if since < 2.0 => p.voices[2] = BlobVoice { id: 10.0 + n, level: 0.6, pan: -0.1 - 0.2 * since, size: 0.4, motion: 0.4, agitation: 0.5 },
+        1 if since < 2.0 => p.voices[2] = BlobVoice { id: 10.0 + n, level: 0.6, pan: -0.1 - 0.2 * since, size: 0.4, motion: 0.4, rush: 0.0, agitation: 0.5 },
         // Afgesplitste klont die uiteendrijft
-        2 if since < 6.0 => p.voices[2] = BlobVoice { id: 10.0 + n, level: 0.5, pan: (-0.3 + 0.2 * since).min(0.9), size: 0.3, motion: (0.6 - 0.2 * since).max(0.0), agitation: 0.5 },
-        // Onrustige klont die van links naar rechts beweegt
-        0 if n > 0.0 && since < 3.0 => p.voices[2] = BlobVoice { id: 10.0 + n, level: 0.7, pan: -0.8 + since / 3.0 * 1.6, size: 0.5, motion: 0.8, agitation: 0.8 },
+        2 if since < 6.0 => p.voices[2] = BlobVoice { id: 10.0 + n, level: 0.5, pan: (-0.3 + 0.2 * since).min(0.9), size: 0.3, motion: (0.6 - 0.2 * since).max(0.0), rush: 0.0, agitation: 0.5 },
+        // Klont die in 1.5 s van links naar rechts langszoeft
+        0 if n > 0.0 && since < 1.5 => p.voices[2] = BlobVoice { id: 10.0 + n, level: 0.6, pan: -0.9 + since / 1.5 * 1.8, size: 0.5, motion: 1.0, rush: 0.9, agitation: 0.5 },
         _ => {}
     }
     p

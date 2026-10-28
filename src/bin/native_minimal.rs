@@ -74,6 +74,7 @@ struct MinimalNativeApp {
     last_lightning_bolt: Option<LightningBolt>,
     storm_tracker: particle_life_wasm::sonification::StormTracker,
     blob_tracker: particle_life_wasm::blobs::BlobTracker,
+    chaos_meter: particle_life_wasm::sonification::ChaosMeter,
     eruption_scheduler: particle_life_wasm::eruptions::EruptionScheduler,
     last_night_alpha_sent: f32,
     last_night_alpha_update: std::time::Instant,
@@ -128,6 +129,7 @@ impl Default for MinimalNativeApp {
             last_lightning_bolt: None,
             storm_tracker: Default::default(),
             blob_tracker: Default::default(),
+            chaos_meter: Default::default(),
             eruption_scheduler: Default::default(),
             last_night_alpha_sent: -1.0,
             last_night_alpha_update: std::time::Instant::now(),
@@ -355,15 +357,23 @@ impl ApplicationHandler for MinimalNativeApp {
                     &self.simulation_params,
                     &mut self.sonification_state.drone,
                 );
+                // Chaos: op elk zoomniveau, over wat er in beeld is
+                let latest_grid = self.stats_reader.as_ref().and_then(|s| s.latest_grid());
+                self.chaos_meter.update(
+                    latest_grid,
+                    &self.simulation_params,
+                    delta_time,
+                    &mut self.sonification_state.drone,
+                );
                 // Klont-gebeurtenissen: alleen ingezoomd (dezelfde grens als de GPU-statistieken)
                 let zoomed_in = self.simulation_params.current_zoom_level > 3.0;
-                let grid = self.stats_reader.as_ref().and_then(|s| s.latest_grid()).filter(|_| zoomed_in);
+                let grid = latest_grid.filter(|_| zoomed_in);
                 let speed = self.last_gpu_stats.as_ref()
                     .map_or(0.0, |(t, _)| particle_life_wasm::sonification::mean_speed(t));
                 let p = &self.simulation_params;
                 self.blob_tracker.update(
                     grid,
-                    (p.viewport_center_x, p.viewport_center_y, p.viewport_width),
+                    (p.viewport_center_x, p.viewport_center_y, p.viewport_width, p.viewport_height),
                     speed,
                     particle_life_wasm::blobs::event_blend(self.simulation_params.current_zoom_level),
                     delta_time,
@@ -429,8 +439,9 @@ impl ApplicationHandler for MinimalNativeApp {
                     }
                 }
 
-                // Stats dispatch (na render, bij zoom > 3)
-                if self.simulation_params.current_zoom_level > 3.0 {
+                // Stats dispatch (na render, op elk zoomniveau: de chaosmaat heeft de
+                // dichtheidskaart altijd nodig)
+                {
                     if let (Some(stats_reader), Some(renderer)) =
                         (&mut self.stats_reader, &mut self.renderer)
                     {

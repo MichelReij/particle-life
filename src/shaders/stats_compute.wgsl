@@ -16,11 +16,17 @@
 // cluster_count  : aantal niet-lege cellen in 8×8 viewport-grid (benadering #clusters)
 // avg_cluster_size: total_viewport_count / cluster_count
 //
-// Tweede ingang `grid_main` (één thread per particle): dichtheidskaart van de viewport
-// voor het herkennen en volgen van klonten (blobs.rs). Per cel van een GRID_DIM×GRID_DIM
-// raster: aantal particles, de som van hun snelheden en de som van hun snelheidsgrootte
-// (vaste komma, × VEL_SCALE), als vier atomaire i32's. De buffer wordt vóór elke
-// dispatch op nul gezet.
+// Tweede ingang `grid_main` (één thread per particle): dichtheidskaart voor het
+// herkennen en volgen van klonten (blobs.rs) en de chaosmeting. De cellen liggen vast in
+// de wereld (WORLD_CELLS × WORLD_CELLS over de hele wereld), zodat cellen en particles
+// op elk zoomniveau even groot zijn ten opzichte van elkaar: ingezoomd zijn er gewoon
+// minder cellen in beeld. Alleen de cellen die (deels) in de viewport liggen worden
+// geteld. Kop (GRID_HEADER i32's): eerste cel in beeld (x0, y0, in wereldcellen),
+// aantal cellen in beeld (nx, ny), het aantal actieve particles in de hele wereld en
+// de celgrootte (f32-bits).
+// Daarna per cel: aantal particles, de som van hun snelheden en de som van hun
+// snelheidsgrootte (vaste komma, × VEL_SCALE), als vier atomaire i32's. De buffer wordt
+// vóór elke dispatch op nul gezet.
 
 struct Particle {
     pos:              vec2<f32>,
@@ -91,8 +97,11 @@ struct SimParams {
 @group(0) @binding(2) var<storage, read_write> stats_out:  array<vec4<f32>, 8>;
 @group(0) @binding(3) var<storage, read_write> grid:       array<atomic<i32>>;
 
-// Moet gelijk blijven aan blobs::GRID_DIM en blobs::VEL_SCALE
-const GRID_DIM:  u32 = 24u;
+// Moeten gelijk blijven aan blobs::WORLD_CELLS, blobs::GRID_MAX, blobs::GRID_HEADER en
+// blobs::VEL_SCALE
+const WORLD_CELLS: f32 = 144.0;
+const GRID_MAX:    i32 = 146;
+const GRID_HEADER: u32 = 8u;
 const VEL_SCALE: f32 = 16.0;
 const VEL_CLAMP: f32 = 4000.0;
 
@@ -262,19 +271,31 @@ fn main(
 @compute @workgroup_size(64)
 fn grid_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
+    // Welke wereldcellen in beeld liggen (voor elke thread hetzelfde)
+    let cell = sim_params.virtual_world_width / WORLD_CELLS;
+    let vp_left = sim_params.viewport_center_x - sim_params.viewport_width  * 0.5;
+    let vp_top  = sim_params.viewport_center_y - sim_params.viewport_height * 0.5;
+    let x0 = i32(floor(vp_left / cell));
+    let y0 = i32(floor(vp_top / cell));
+    let nx = min(i32(ceil((vp_left + sim_params.viewport_width)  / cell)) - x0, GRID_MAX);
+    let ny = min(i32(ceil((vp_top  + sim_params.viewport_height) / cell)) - y0, GRID_MAX);
+    if idx == 0u {
+        atomicStore(&grid[0], x0);
+        atomicStore(&grid[1], y0);
+        atomicStore(&grid[2], nx);
+        atomicStore(&grid[3], ny);
+        atomicStore(&grid[5], bitcast<i32>(cell));
+    }
     if idx >= sim_params.num_particles { return; }
     let p = particles[idx];
     if p.is_active != 1u { return; }
+    atomicAdd(&grid[4], 1);
 
-    let vp_left = sim_params.viewport_center_x - sim_params.viewport_width  * 0.5;
-    let vp_top  = sim_params.viewport_center_y - sim_params.viewport_height * 0.5;
-    let nx = (p.pos.x - vp_left) / max(sim_params.viewport_width,  1.0);
-    let ny = (p.pos.y - vp_top)  / max(sim_params.viewport_height, 1.0);
-    if nx < 0.0 || nx >= 1.0 || ny < 0.0 || ny >= 1.0 { return; }
+    let cx = i32(floor(p.pos.x / cell)) - x0;
+    let cy = i32(floor(p.pos.y / cell)) - y0;
+    if cx < 0 || cy < 0 || cx >= nx || cy >= ny { return; }
 
-    let cx = min(u32(nx * f32(GRID_DIM)), GRID_DIM - 1u);
-    let cy = min(u32(ny * f32(GRID_DIM)), GRID_DIM - 1u);
-    let base = (cy * GRID_DIM + cx) * 4u;
+    let base = GRID_HEADER + u32(cy * nx + cx) * 4u;
     let v = clamp(p.vel, vec2<f32>(-VEL_CLAMP), vec2<f32>(VEL_CLAMP));
     atomicAdd(&grid[base], 1);
     atomicAdd(&grid[base + 1u], i32(v.x * VEL_SCALE));

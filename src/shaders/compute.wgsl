@@ -673,6 +673,29 @@ fn bell_random(seed: u32, n: u32) -> f32 {
     return sum / f32(n);
 }
 
+// Seconds over which forces fade in after a respawn (see main).
+const SPAWN_RAMP: f32 = 2.0;
+// Random initial speed of a respawned particle (world units/s), so newcomers fan out
+// instead of entering as one block.
+const SPAWN_JITTER_SPEED: f32 = 40.0;
+
+// Respawn position on the inflow edge (left when drifting right, otherwise right),
+// spread evenly over the height. A bell-shaped spread used to concentrate newcomers
+// at mid-height, exactly where the edge is most visible.
+fn inflow_position(seed: u32) -> vec2<f32> {
+    var x = sim_params.virtual_world_width - 1.0;
+    if (sim_params.drift_x_per_second > EPSILON) {
+        x = 0.0;
+    }
+    return vec2<f32>(x, random_float(hash(seed + 11u)) * sim_params.virtual_world_height);
+}
+
+fn inflow_velocity(seed: u32) -> vec2<f32> {
+    let angle = random_float(hash(seed + 23u)) * 6.28318530718;
+    let speed = random_float(hash(seed + 37u)) * SPAWN_JITTER_SPEED;
+    return vec2<f32>(cos(angle), sin(angle)) * speed;
+}
+
 // === Hypothesis-aware particle type/size reroll on respawn ===
 //
 // Mirrors particle_system.rs's PARTICLE_TYPE_WEIGHTS/PARTICLE_TYPE_SIZE_MULTIPLIERS
@@ -817,7 +840,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // teleport these particles straight to the respawn edge instead of trying to
     // accelerate them out through a singular force field.
     if (isInsideLightningCore(particle_p.pos, sim_params.time)) {
-        particle_p.vel = vec2<f32>(0.0, 0.0);
         particle_p.spawn_time = sim_params.time;
 
         let type_seed = hash(global_id.x * 61u + u32(sim_params.time * 1000.0) + particle_p.ptype * 43u);
@@ -827,13 +849,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         particle_p.target_size = new_size;
         particle_p.size = new_size;
 
-        if (sim_params.drift_x_per_second > EPSILON) {
-            particle_p.pos.x = 0.0;
-        } else {
-            particle_p.pos.x = sim_params.virtual_world_width - 1.0;
-        }
-        let bell_seed = hash(global_id.x * 103u + u32(sim_params.time * 1000.0) + particle_p.ptype * 59u);
-        particle_p.pos.y = bell_random(bell_seed, 2u) * sim_params.virtual_world_height;
+        let spawn_seed = hash(global_id.x * 103u + u32(sim_params.time * 1000.0) + particle_p.ptype * 59u);
+        particle_p.pos = inflow_position(spawn_seed);
+        particle_p.vel = inflow_velocity(spawn_seed);
 
         particles_out[p_idx] = particle_p;
         return;
@@ -1006,16 +1024,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let anti_stick_force = calculate_anti_sticking_force(particle_p.pos);
     total_force = total_force + anti_stick_force;
 
+    // Spawn ramp: forces fade in over SPAWN_RAMP seconds after a respawn (quadratic,
+    // so the first moments stay gentle and there is no "fast leftward shot" from the
+    // crowded edge). This replaced a 2 s velocity freeze, which made every newcomer
+    // move in lockstep with the drift as a rigid curtain that piled up along the
+    // spawn edge. spawn_time == -1.0 means initial particle (exempt).
+    if (particle_p.spawn_time >= 0.0) {
+        let ramp = clamp((sim_params.time - particle_p.spawn_time) / SPAWN_RAMP, 0.0, 1.0);
+        total_force = total_force * ramp * ramp;
+    }
+
     // Update velocity
     particle_p.vel = particle_p.vel + total_force * sim_params.force_scale * sim_params.delta_time;
     // Apply friction
     particle_p.vel = particle_p.vel * (1.0 - sim_params.friction);
-
-    // Spawn damping: freeze velocity for 2s after respawn so particles drift in at drift speed
-    // only, without force-based acceleration. spawn_time == -1.0 means initial particle (exempt).
-    if (particle_p.spawn_time >= 0.0 && (sim_params.time - particle_p.spawn_time) < 2.0) {
-        particle_p.vel = vec2<f32>(0.0, 0.0);
-    }
 
     // Update position
     particle_p.pos = particle_p.pos + particle_p.vel * sim_params.delta_time;
@@ -1081,17 +1103,20 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     else if (sim_params.boundary_mode == 2u) {
-        // Disappear and respawn with better distribution
-        let is_out_of_bounds = particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width || particle_p.pos.y < 0.0 || particle_p.pos.y >= sim_params.virtual_world_height;
+        // Respawn on the inflow edge when leaving the world horizontally; wrap
+        // vertically. Top/bottom exits used to respawn on the inflow edge too, and in
+        // chaotic states (particles hitting the top/bottom all the time) that fed a
+        // dense band of newcomers along that edge. Wrapping keeps their velocity and
+        // still brings them in from an edge, not out of nowhere (the neighbour search
+        // already wraps in this mode).
+        if (particle_p.pos.y < 0.0) {
+            particle_p.pos.y = particle_p.pos.y + sim_params.virtual_world_height;
+        }
+        if (particle_p.pos.y >= sim_params.virtual_world_height) {
+            particle_p.pos.y = particle_p.pos.y - sim_params.virtual_world_height;
+        }
 
-        // Additional respawn condition for particles stuck near Y edges
-        let y_margin = 5.0;
-        let is_near_y_edge = particle_p.pos.y < y_margin || particle_p.pos.y > (sim_params.virtual_world_height - y_margin);
-
-        if (is_out_of_bounds || is_near_y_edge) {
-            // Spawn with zero velocity — particles integrate naturally into the flow.
-            particle_p.vel = vec2<f32>(0.0, 0.0);
-
+        if (particle_p.pos.x < 0.0 || particle_p.pos.x >= sim_params.virtual_world_width) {
             // Reroll type + size for this respawn, from the current hypothesis's
             // weight table (see weighted_type_pick above) — only newly-(re)spawning
             // particles ever pick up WLP's exclusive 8-10 types; already-visible
@@ -1103,111 +1128,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             particle_p.target_size = new_size;
             particle_p.size = new_size;
 
-            if (is_near_y_edge) {
-                // Particles near Y edges get clustered Y positioning for more natural distribution
-                let y_seed = hash(global_id.x * 13u + u32(sim_params.time * 1000.0) + particle_p.ptype * 17u);
-                let cluster_seed = hash(global_id.x * 29u + u32(sim_params.time * 500.0) + particle_p.ptype * 31u);
-
-                // Create slow-moving cluster centers that drift over time
-                let cluster_time_factor = sim_params.time * 0.1;
-                // Slow cluster movement
-                let num_clusters = 3.0;
-                // 3 main cluster zones
-
-                // Generate cluster center positions using sine waves for smooth movement
-                var cluster_centers: array<f32, 3>;
-                cluster_centers[0] = 0.2 + 0.15 * sin(cluster_time_factor * 0.7 + f32(particle_p.ptype) * 0.5);
-                cluster_centers[1] = 0.5 + 0.1 * sin(cluster_time_factor * 0.9 + f32(particle_p.ptype) * 0.7);
-                cluster_centers[2] = 0.8 + 0.15 * sin(cluster_time_factor * 0.5 + f32(particle_p.ptype) * 0.3);
-
-                // Choose a cluster based on particle properties and some randomness
-                let cluster_choice = random_float(cluster_seed);
-                var chosen_cluster_y: f32;
-                var cluster_strength: f32;
-
-                if (cluster_choice < 0.35) {
-                    // Cluster 1: ~35% chance
-                    chosen_cluster_y = cluster_centers[0];
-                    cluster_strength = 0.08;
-                    // Moderate clustering
-                }
-                else if (cluster_choice < 0.7) {
-                    // Cluster 2: ~35% chance
-                    chosen_cluster_y = cluster_centers[1];
-                    cluster_strength = 0.06;
-                    // Tighter clustering
-                }
-                else {
-                    // Cluster 3: ~30% chance
-                    chosen_cluster_y = cluster_centers[2];
-                    cluster_strength = 0.1;
-                    // Looser clustering
-                }
-
-                // Add some randomness around the cluster center using Gaussian-like distribution
-                let random1 = random_float(y_seed);
-                let random2 = random_float(hash(y_seed + 1u));
-
-                // Box-Muller-like transformation for more natural distribution
-                let gaussian_like = sqrt(- 2.0 * log(max(random1, 0.0001))) * cos(6.28318530718 * random2);
-                let cluster_offset = gaussian_like * cluster_strength;
-
-                // Apply cluster positioning
-                let clustered_y = chosen_cluster_y + cluster_offset;
-
-                // Apply edge avoidance and bounds
-                let edge_avoidance_margin = 50.0;
-                // 50 units from top/bottom
-                let safe_height = sim_params.virtual_world_height - 2.0 * edge_avoidance_margin;
-                let normalized_y = clamp(clustered_y, 0.0, 1.0);
-
-                particle_p.pos.y = edge_avoidance_margin + normalized_y * safe_height;
-            }
-            else {
-                // Keep existing Y position for normal X-boundary respawns
-                // Only clamp Y to valid bounds if somehow out of range
-                particle_p.pos.y = clamp(particle_p.pos.y, 0.0, sim_params.virtual_world_height);
-            }
-
-            // Add subtle randomization to Y-coordinates in the middle range (0.3-0.7UV)
-            // to reduce 1-to-1 predictability between disappearing and spawning particles
-            let normalized_y_pos = particle_p.pos.y / sim_params.virtual_world_height;
-            if (normalized_y_pos >= 0.3 && normalized_y_pos <= 0.7) {
-                // Generate random offset between -0.02UV and +0.02UV
-                let y_random_seed = hash(hash(global_id.x) + u32(sim_params.time * 1000.0) + 12345u);
-                let y_random_offset = (random_float(y_random_seed) - 0.5) * 2.0 * 0.02;
-                // -0.02 to +0.02 in normalized coords
-                let y_offset_world = y_random_offset * sim_params.virtual_world_height;
-                // Convert to world units
-
-                // Apply offset while keeping particle within bounds
-                particle_p.pos.y = clamp(particle_p.pos.y + y_offset_world, 0.0, sim_params.virtual_world_height);
-            }
-
-            // Every respawn — whether triggered by actually leaving the world or
-            // just drifting near a Y edge — must land on the spawn edge (right,
-            // or left when drift_x_per_second reverses the flow direction), never
-            // at the particle's old X. Previously only the "actually out of bounds
-            // in X" case did this; a particle that merely drifted near the top/
-            // bottom edge kept its old (possibly mid-screen) X while only getting
-            // a new Y, which looked like it materialised out of nowhere in the
-            // middle of the screen. spawn_time is set unconditionally too, so the
-            // 2s spawn-velocity-freeze (see above) always applies and prevents
-            // the "fast leftward shot" the old X-preservation was working around.
+            let spawn_seed = hash(global_id.x * 97u + u32(sim_params.time * 1000.0) + particle_p.ptype * 53u);
+            particle_p.pos = inflow_position(spawn_seed);
+            particle_p.vel = inflow_velocity(spawn_seed);
             particle_p.spawn_time = sim_params.time;
-            if (sim_params.drift_x_per_second > EPSILON) {
-                particle_p.pos.x = 0.0;
-            }
-            else {
-                particle_p.pos.x = sim_params.virtual_world_width - 1.0;
-                if (!is_near_y_edge) {
-                    // Y-edge respawns already got a clustered Y position above;
-                    // only randomize Y here for a "pure" X-boundary exit.
-                    let bell_seed = hash(global_id.x * 97u + u32(sim_params.time * 1000.0) + particle_p.ptype * 53u);
-                    particle_p.pos.y = bell_random(bell_seed, 2u) * sim_params.virtual_world_height;
-                }
-            }
-
         }
     }
 

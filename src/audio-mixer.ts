@@ -15,7 +15,8 @@ const CHANNELS: { key: string; label: string; title: string }[] = [
     { key: "lightning", label: "Lightning", title: "Crack and crackle" },
     { key: "sonar", label: "Sonar", title: "Sonar pings with echo (hydrothermal vents only)" },
     { key: "vents", label: "Vents", title: "Rumbling vents with occasional eruptions and bubbles (hydrothermal vents only)" },
-    { key: "events", label: "Events", title: "Zoomed in: every visible clump as its own sound, plus bubbling while clumps merge or split" },
+    { key: "events", label: "Events", title: "Zoomed in: every visible clump as its own sound, fast clumps rushing past, a thud and bloom when clumps merge, fizzing when they split" },
+    { key: "chaos", label: "Chaos", title: "When particles shoot in all directions without order: crackling, churning noise, a dissonant undertone" },
     { key: "reverb", label: "Reverb", title: "Reverb over all layers" },
     { key: "master", label: "Master", title: "Overall level" },
 ];

@@ -118,6 +118,7 @@ pub struct ParticleLifeEngine {
     last_seen_flash_id: u32,
     storm_tracker: sonification::StormTracker,
     blob_tracker: blobs::BlobTracker,
+    chaos_meter: sonification::ChaosMeter,
     eruption_scheduler: eruptions::EruptionScheduler,
     /// Fysieke pixels per CSS-pixel van de canvas (zie set_pixel_ratio)
     pixel_ratio: f32,
@@ -183,6 +184,7 @@ impl ParticleLifeEngine {
             last_seen_flash_id: 0,
             storm_tracker: sonification::StormTracker::default(),
             blob_tracker: blobs::BlobTracker::default(),
+            chaos_meter: sonification::ChaosMeter::default(),
             eruption_scheduler: eruptions::EruptionScheduler::default(),
             pixel_ratio: 1.0,
             asset_base: None,
@@ -374,14 +376,22 @@ impl ParticleLifeEngine {
         );
         let bolt = self.renderer.as_ref().and_then(|r| r.get_cached_lightning_bolt());
         self.storm_tracker.update(bolt.as_ref(), &self.simulation_params, &mut self.sonification_state.drone);
+        // Chaos: op elk zoomniveau, over wat er in beeld is
+        let latest_grid = self.stats_reader.as_ref().and_then(|s| s.latest_grid());
+        self.chaos_meter.update(
+            latest_grid,
+            &self.simulation_params,
+            delta_time,
+            &mut self.sonification_state.drone,
+        );
         // Klont-gebeurtenissen: alleen ingezoomd (dezelfde grens als de GPU-statistieken)
         let zoomed_in = self.simulation_params.current_zoom_level > 3.0;
-        let grid = self.stats_reader.as_ref().and_then(|s| s.latest_grid()).filter(|_| zoomed_in);
+        let grid = latest_grid.filter(|_| zoomed_in);
         let speed = self.last_gpu_stats.as_ref().map_or(0.0, |(t, _)| sonification::mean_speed(t));
         let p = &self.simulation_params;
         self.blob_tracker.update(
             grid,
-            (p.viewport_center_x, p.viewport_center_y, p.viewport_width),
+            (p.viewport_center_x, p.viewport_center_y, p.viewport_width, p.viewport_height),
             speed,
             blobs::event_blend(self.simulation_params.current_zoom_level),
             delta_time,
@@ -872,8 +882,9 @@ impl ParticleLifeEngine {
             self.render_to_canvas("canvas")?;
         }
 
-        // Stats dispatch (na render, bij zoom > 3)
-        if self.simulation_params.current_zoom_level > 3.0 {
+        // Stats dispatch (na render, op elk zoomniveau: de chaosmaat heeft de
+        // dichtheidskaart altijd nodig)
+        {
             if let (Some(ref mut sr), Some(ref renderer)) =
                 (&mut self.stats_reader, &self.renderer)
             {
