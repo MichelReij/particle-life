@@ -1,7 +1,7 @@
 // Copyright © 2025 - 2026 Michel Reij | Bewogen Kunst | Moving Art
 // Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
 
-// src/dsp.rs
+// drone-synth/src/lib.rs (in particle-life als `dsp`; ook gebruikt door de Milgram)
 // Ambient drone in C-mineur pentatonisch (C Eb F G Bb), opgebouwd uit funDSP-bouwstenen.
 //
 // Lagen:
@@ -52,6 +52,9 @@
 // naderen en samensmelten, uiteenvallen en uiteendrijven.
 
 use fundsp::prelude32::*;
+
+#[cfg(feature = "worklet")]
+mod worklet;
 
 pub const SAMPLE_RATE: u32   = 44100;
 pub const BLOCK_SIZE:  usize = 512;
@@ -398,6 +401,9 @@ pub mod mix {
     /// bliksem in samples (1 = uit, max 16)
     pub const LIGHTNING_HOLD: usize = 14;
     pub const HOLD_MAX:   f32   = 16.0;
+    /// Onder deze (afgevlakte) gain wordt een laag niet gerenderd: de Milgram zet de
+    /// meeste lagen op 0 en hoeft ze dan ook niet door te rekenen
+    pub const AUDIBLE:    f32   = 1e-4;
 }
 
 /// Thread-safe handle om de parameters en de mix van een draaiende DroneSynth te zetten.
@@ -3190,7 +3196,7 @@ impl DroneSynth {
         // Kou: stiller, minder druppels en een zachter stroompje
         let rate = (0.25 + 3.0 * warmth) * (0.2 + 1.6 * burst * burst) * (1.0 + 3.0 * p.motion)
             * (1.0 - COLD_QUIET * p.cold);
-        if self.rng.unit() < rate * dt {
+        if self.mix[mix::DROPLETS] > mix::AUDIBLE && self.rng.unit() < rate * dt {
             self.spawn_drop();
         }
         self.murmur_amp.set_value((0.25 + 0.75 * warmth * burst + 0.5 * p.motion) * (1.0 - 0.8 * COLD_QUIET * p.cold));
@@ -3314,10 +3320,12 @@ impl DroneSynth {
         dl += wl * 0.011;  dr += wr * 0.011;
         sl += wl * 0.0285; sr += wr * 0.0285;
 
-        let (ml, mr) = self.murmur.get_stereo();
-        let (ml, mr) = (ml * mx[mix::STREAM], mr * mx[mix::STREAM]);
-        dl += ml * 0.02; dr += mr * 0.02;
-        sl += ml * 0.03; sr += mr * 0.03;
+        if mx[mix::STREAM] > mix::AUDIBLE {
+            let (ml, mr) = self.murmur.get_stereo();
+            let (ml, mr) = (ml * mx[mix::STREAM], mr * mx[mix::STREAM]);
+            dl += ml * 0.02; dr += mr * 0.02;
+            sl += ml * 0.03; sr += mr * 0.03;
+        }
 
         // Branding: alleen renderen als de getijdenpoel-hypothese (deels) actief is
         let surface = self.smooth.surface;
@@ -3351,7 +3359,7 @@ impl DroneSynth {
 
         // Sonar: alleen in de diepzee, met veel galm (onderwaterruimte)
         let depth = 1.0 - surface;
-        if depth > 0.001 && self.sonar.active() {
+        if depth > 0.001 && mx[mix::SONAR] > mix::AUDIBLE && self.sonar.active() {
             let (ol, or) = self.sonar.render();
             let a = depth * SONAR_LEVEL * mx[mix::SONAR];
             dl += ol * a; dr += or * a;
@@ -3359,7 +3367,7 @@ impl DroneSynth {
         }
 
         // Hydrothermale bronnen: alleen in de diepzee
-        if depth > 0.001 {
+        if depth > 0.001 && mx[mix::VENTS] > mix::AUDIBLE {
             let ((vl, vr), (bl, br)) = self.vent.render();
             let a = depth * VENT_LEVEL * mx[mix::VENTS];
             dl += vl * a; dr += vr * a;
@@ -3382,7 +3390,7 @@ impl DroneSynth {
         }
 
         // Chaos: vrij droog en dichtbij, zodat het niet in de ruimte oplost
-        if self.turmoil.active() {
+        if mx[mix::CHAOS] > mix::AUDIBLE && self.turmoil.active() {
             let (cl, cr) = self.turmoil.render();
             let a = CHAOS_LEVEL * mx[mix::CHAOS];
             dl += cl * a; dr += cr * a;

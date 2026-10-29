@@ -4,7 +4,7 @@
 //! Hydrothermale uitbarstingen (alleen diepzee / HTV).
 //!
 //! De simulatie is de klok: hier wordt elke uitbarsting gepland, en dezelfde
-//! gebeurtenis stuurt het vents-geluid (dsp.rs), de opstijgende bubbels op het
+//! gebeurtenis stuurt het vents-geluid (drone-synth), de opstijgende bubbels op het
 //! scherm (bubbles_frag.wgsl) en de oranjerode lava op de neopixel-ring (via het
 //! EruptionPacket naar de liaison-ESP32). Uitbarstingen komen alleen uit de
 //! onderste twee derde van het beeld — de bubbels stijgen daarvandaan omhoog.

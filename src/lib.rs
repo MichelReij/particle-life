@@ -30,8 +30,9 @@ mod webgpu_renderer;
 #[cfg(not(target_arch = "wasm32"))]
 mod esp32_communication;
 
-// Ambient drone (DroneSynth) — gedeeld tussen native en de WASM-AudioWorklet
-pub mod dsp;
+// Ambient drone (DroneSynth) — gedeeld tussen native en de WASM-AudioWorklet;
+// losse crate zodat de Milgram dezelfde klank kan gebruiken
+pub use drone_synth as dsp;
 
 // Sonificatie: simulatietoestand → DroneParams — gedeeld tussen native en WASM
 pub mod sonification;

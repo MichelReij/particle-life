@@ -34,7 +34,6 @@ rust/particle-life/
 │   ├── simulation_params.rs    # Central parameter struct (shared)
 │   ├── particle_system.rs      # CPU-side particle state
 │   ├── webgpu_renderer.rs      # Render pipeline
-│   ├── dsp.rs                  # Ambient drone synthesizer (native + web AudioWorklet)
 │   ├── sonification.rs         # Simulation state → drone parameters
 │   ├── stats_reader.rs         # GPU readback of simulation statistics
 │   ├── audio_engine.rs         # Native audio output (rodio)
@@ -54,7 +53,7 @@ The zoom slider runs from 1x to 12x. The mapping is **exponential** (`zoom = 12^
 
 ## Sonification
 
-The simulation is continuously sonified via an ambient drone (`src/dsp.rs`): bowed cellos, a theremin, a deep brainwave pad, water droplets, and hypothesis-specific layers (surf and thunder for the warm little ponds; sonar and hydrothermal vents for the deep sea). The statistics below steer it when zoomed in.
+The simulation is continuously sonified via an ambient drone (`drone-synth/`, a separate crate also used by the Milgram): bowed cellos, a theremin, a deep brainwave pad, water droplets, and hypothesis-specific layers (surf and thunder for the warm little ponds; sonar and hydrothermal vents for the deep sea). The statistics below steer it when zoomed in.
 
 ### Simulation statistics (GPU readback)
 

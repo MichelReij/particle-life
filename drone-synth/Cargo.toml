@@ -1,0 +1,26 @@
+[package]
+name = "drone-synth"
+version = "0.1.0"
+edition = "2021"
+
+# Alleen de ambient drone (cello's, theremin, pad, ...), zonder simulatie of wgpu.
+# particle-life gebruikt hem als `dsp`; de Milgram draait de worklet-build:
+#   wasm-pack build --target web --release -- --features worklet
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# AudioWorklet-exports (worklet_synth_*) voor een losse WASM-build
+worklet = ["dep:wasm-bindgen"]
+
+[dependencies]
+fundsp = { version = "0.23", default-features = false, features = ["std"] }
+wasm-bindgen = { version = "0.2.100", optional = true }
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

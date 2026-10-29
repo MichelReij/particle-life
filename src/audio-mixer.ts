@@ -2,7 +2,7 @@
 // Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
 
 // Mengpaneel voor de ambient drone: één fader per klankbron.
-// Volgorde moet gelijk blijven aan dsp::mix in src/dsp.rs.
+// Volgorde moet gelijk blijven aan dsp::mix in drone-synth/src/lib.rs.
 
 const CHANNELS: { key: string; label: string; title: string }[] = [
     { key: "cellos", label: "Cellos", title: "Bowed cellos" },

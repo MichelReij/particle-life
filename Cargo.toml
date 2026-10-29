@@ -18,7 +18,7 @@ futures = "0.3"
 rand = { version = "0.8", features = ["small_rng"] }
 palette = { version = "0.7", default-features = false, features = ["std"] }
 raw-window-handle = "0.6"
-fundsp = { version = "0.23", default-features = false, features = ["std"] }
+drone-synth = { path = "drone-synth" }
 
 # Platform-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]

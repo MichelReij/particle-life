@@ -22,7 +22,6 @@ src/
   shader_constants.rs      # Shader constants
   config.rs                # Configuration constants
   esp32_communication.rs   # ESP32 serial comm (native only)
-  dsp.rs                   # Ambient drone (DroneSynth) — native + WASM-AudioWorklet
   audio_engine.rs          # Native audio-uitvoer van de drone via rodio
   sonification.rs          # Simulatie → DroneParams (+ StormTracker voor onweer)
   stats_reader.rs          # GPU readback for particle-type statistics (native only)
@@ -71,8 +70,10 @@ cargo build --release     # Release native binary
 
 ### Audio: ambient drone
 
-Native en web spelen dezelfde zelf gesynthetiseerde ambient drone (`src/dsp.rs`,
-`DroneSynth`), aangestuurd vanuit de simulatie (`src/sonification.rs`). Native via rodio
+Native en web spelen dezelfde zelf gesynthetiseerde ambient drone (`drone-synth/src/lib.rs`,
+`DroneSynth`; een eigen crate die in particle-life als `dsp` beschikbaar is, zodat de Milgram
+dezelfde klank kan draaien — daar via `Milgram/scripts/sync-drone.sh` als losse WASM met
+feature `worklet`), aangestuurd vanuit de simulatie (`src/sonification.rs`). Native via rodio
 (`src/audio_engine.rs`), web via een AudioWorklet (`src/audio_engine_wasm.rs`,
 `src/audio_worklet_exports.rs`, `public/audio-processor.js`). Het mengpaneel staat in de
 web-UI (`src/audio-mixer.ts`). Offline renderen voor metingen:
@@ -167,7 +168,7 @@ LightningBolt ────┘                       ↓  DroneParams (temperatuu
                                    dsp::DroneSynth → stereo
 ```
 
-### Lagen (src/dsp.rs)
+### Lagen (drone-synth/src/lib.rs)
 
 | Laag | Wanneer | Kern |
 |---|---|---|
