@@ -258,6 +258,11 @@ pub struct WebGpuRenderer {
     vignette_pipeline: wgpu::RenderPipeline,
     vignette_bind_group: wgpu::BindGroup,
 
+    // Positie-indicator midden-onder (zie shaders/position_indicator.wgsl)
+    position_indicator_pipeline: wgpu::RenderPipeline,
+    position_indicator_bind_group: wgpu::BindGroup,
+    position_indicator_buffer: wgpu::Buffer,
+
     // Corner copyright overlay (PNG textures uploaded from JS)
     corner_overlay_pipeline: Option<wgpu::RenderPipeline>,
     // [topleft, bottomleft, bottomright]: (bind_group, img_w, img_h, uniform_buffer)
@@ -1014,6 +1019,19 @@ impl WebGpuRenderer {
         let pp2_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("PP2 PL"), bind_group_layouts: &[&pp2_bgl], push_constant_ranges: &[] });
         let blur_h_pipeline   = make_fullscreen_pipeline("BlurH",   &pp1_pl, &blur_h_frag,   None);
         let vignette_pipeline = make_fullscreen_pipeline("Vignette", &pp2_pl, &vignette_frag, None);
+
+        let position_indicator_frag = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("Position Indicator"), source: wgpu::ShaderSource::Wgsl(include_str!("shaders/position_indicator.wgsl").into()) });
+        let position_indicator_pipeline = make_fullscreen_pipeline("Position Indicator", &pp_uniform_pl, &position_indicator_frag, Some(alpha_blend));
+        let position_indicator_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Position Indicator Uniforms"),
+            size: 32,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let position_indicator_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Position Indicator BG"), layout: &post_processing_uniform_bgl,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: position_indicator_buffer.as_entire_binding() }],
+        });
         let blur_h_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("BlurH BG"), layout: &pp1_bgl,
             entries: &[
@@ -1047,6 +1065,9 @@ impl WebGpuRenderer {
             blur_h_bind_group,
             vignette_pipeline,
             vignette_bind_group,
+            position_indicator_pipeline,
+            position_indicator_bind_group,
+            position_indicator_buffer,
             corner_overlay_pipeline: None,
             corner_overlays: Vec::new(),
             surface_format,
@@ -1232,6 +1253,12 @@ impl WebGpuRenderer {
         { let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Vignette"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
           p.set_pipeline(&self.vignette_pipeline); p.set_bind_group(0, &self.vignette_bind_group, &[]); p.draw(0..6, 0..1); }
 
+        // Positie-indicator midden-onder: waar in de wereld je nu kijkt
+        if self.update_position_indicator(simulation_params) {
+            let mut p = encoder.begin_render_pass(&wgpu::RenderPassDescriptor { label: Some("Position Indicator"), color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })], depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None });
+            p.set_pipeline(&self.position_indicator_pipeline); p.set_bind_group(0, &self.position_indicator_bind_group, &[]); p.draw(0..6, 0..1);
+        }
+
         // Fullscreen mask overlay (circle mask PNG, covers corners)
         if let Some(pipeline) = &self.corner_overlay_pipeline {
             let canvas = simulation_params.canvas_render_width;
@@ -1277,6 +1304,34 @@ impl WebGpuRenderer {
 
         self.current_buffer_index = 1 - self.current_buffer_index;
         Ok(())
+    }
+
+    /// Schrijft de uniforms van de positie-indicator; false als hij onzichtbaar is
+    /// (volledig uitgezoomd: dan zie je de hele wereld al).
+    fn update_position_indicator(&self, simulation_params: &SimulationParams) -> bool {
+        // Grootte en plek (deel van de canvasbreedte), en tussen welke zoomniveaus hij
+        // invloeit
+        const SIZE: f32 = 0.09;
+        const CENTER_Y: f32 = 0.92;
+        const FADE_IN: (f32, f32) = (1.05, 1.4);
+
+        let sp = simulation_params;
+        let zoom = sp.virtual_world_width / sp.viewport_width;
+        let alpha = ((zoom - FADE_IN.0) / (FADE_IN.1 - FADE_IN.0)).clamp(0.0, 1.0);
+        if alpha <= 0.0 {
+            return false;
+        }
+        let (cw, ch) = (sp.canvas_render_width, sp.canvas_render_height);
+        let center_x = sp.virtual_world_offset_x + sp.viewport_width / 2.0;
+        let center_y = sp.virtual_world_offset_y + sp.viewport_height / 2.0;
+        let uniforms = [
+            cw / 2.0, ch * CENTER_Y, cw * SIZE / 2.0, alpha,
+            2.0 * center_x / sp.virtual_world_width - 1.0,
+            2.0 * center_y / sp.virtual_world_height - 1.0,
+            1.0 / zoom, 0.0,
+        ];
+        self.queue.write_buffer(&self.position_indicator_buffer, 0, bytemuck::cast_slice(&uniforms));
+        true
     }
 
     pub fn update_zoom_uniforms(&mut self, simulation_params: &SimulationParams) {
