@@ -67,8 +67,10 @@ fn main() -> std::io::Result<()> {
         if i % 4410 == 0 {
             let x = i as f32 / frames as f32;
             let cluster = (2.0 * x - 1.0).max(0.0);
+            let temperature = t_start + (t_end - t_start) * x;
             synth.set_params(&DroneParams {
-                temperature: t_start + (t_end - t_start) * x,
+                temperature,
+                cold:        cold(temperature),
                 chaos:       chaos * cluster,
                 motion:      motion * cluster,
                 calm:        calm * cluster,
@@ -94,6 +96,13 @@ fn main() -> std::io::Result<()> {
         seconds / started.elapsed().as_secs_f32(),
     );
     Ok(())
+}
+
+/// Kou zoals sonification::cold_level, voor de diepzee (3–160 °C).
+fn cold(temperature: f32) -> f32 {
+    let celsius = 3.0 + 157.0 * temperature;
+    let x = ((25.0 - celsius) / 22.0).clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
 }
 
 /// Klonten zoals BlobTracker ze aanlevert. Twee klonten liggen er de hele tijd (een

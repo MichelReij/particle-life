@@ -27,6 +27,12 @@
 //   calm   → langere, zachtere theremin-frasen
 //   pan    → cello's rond het zwaartepunt, theremin volgt het beweeglijkste type
 //
+// Kou (onder 25 °C, vol bij 3 °C; het water bevriest nooit, dus geen ijs): helder,
+// ijl en stil in plaats van broos. Cello's en theremin zonder vibrato en minder
+// rasp, een kale en open pad, af en toe een ijle hoge toon (ColdGlints), meer en
+// langere galm, en meer stilte (minder druppels, langere rustpauzes). Boven de
+// getijdenpoel (WLP) giert dan de wind (ColdWind).
+//
 // In de getijdenpoel-hypothese (WLP) komt er branding bij: golven die aanzwellen,
 // breken en terugtrekken, met een periode die losjes het tempo volgt.
 //
@@ -186,6 +192,10 @@ pub struct DroneParams {
     pub merge_voice: f32,
     pub split_voice_a: f32,
     pub split_voice_b: f32,
+    /// Kou [0, 1]: 0 vanaf COLD_FROM °C (sonification.rs), 1 bij de laagste
+    /// temperatuur (3 °C) → kale pad zonder vibrato, ijle hoge tonen, meer galm en
+    /// stilte. Geen ijs: het water bevriest nooit
+    pub cold: f32,
     /// De grootste zichtbare klonten, elk met een eigen stem (alleen ingezoomd)
     pub voices: [BlobVoice; BLOB_VOICES],
 }
@@ -239,7 +249,7 @@ impl Default for DroneParams {
             converge: 0.0, converge_pan: 0.0, diverge: 0.0, diverge_pan: 0.0,
             eruption_id: 0.0, eruption_age: 10.0, eruption_strength: 0.0, eruption_pan: 0.0,
             eruption_hold: 0.0, eruption_release: 0.0,
-            merge_voice: 0.0, split_voice_a: 0.0, split_voice_b: 0.0,
+            merge_voice: 0.0, split_voice_a: 0.0, split_voice_b: 0.0, cold: 0.0,
             voices: [BlobVoice::default(); BLOB_VOICES],
         }
     }
@@ -247,7 +257,7 @@ impl Default for DroneParams {
 
 impl DroneParams {
     /// Losse waarden vóór de klont-stemmen.
-    const SCALARS: usize = 37;
+    const SCALARS: usize = 38;
     pub const LEN: usize = Self::SCALARS + BLOB_VOICES * BlobVoice::FIELDS;
 
     /// Volgorde zoals verstuurd naar de AudioWorklet.
@@ -261,7 +271,7 @@ impl DroneParams {
             self.converge, self.converge_pan, self.diverge, self.diverge_pan,
             self.eruption_id, self.eruption_age, self.eruption_strength, self.eruption_pan,
             self.eruption_hold, self.eruption_release,
-            self.merge_voice, self.split_voice_a, self.split_voice_b,
+            self.merge_voice, self.split_voice_a, self.split_voice_b, self.cold,
         ];
         let mut a = [0.0f32; Self::LEN];
         a[..Self::SCALARS].copy_from_slice(&scalars);
@@ -311,6 +321,7 @@ impl DroneParams {
             merge_voice:       v[34],
             split_voice_a:     v[35],
             split_voice_b:     v[36],
+            cold:              v[37],
             voices: std::array::from_fn(|i| {
                 let c = &v[Self::SCALARS + i * BlobVoice::FIELDS..][..BlobVoice::FIELDS];
                 BlobVoice { id: c[0], level: c[1], pan: c[2], size: c[3], motion: c[4], rush: c[5], agitation: c[6] }
@@ -357,6 +368,7 @@ impl DroneParams {
             merge_voice:       self.merge_voice,
             split_voice_a:     self.split_voice_a,
             split_voice_b:     self.split_voice_b,
+            cold:              self.cold.clamp(0.0, 1.0),
             voices:         self.voices.map(|v| v.clamped()),
         }
     }
@@ -460,6 +472,8 @@ struct Cello {
     grit:       Shared,
     /// Relatieve toonhoogte-afwijking door onvast strijken (chaos)
     wobble:     Shared,
+    /// Hoeveel vibrato en boog-jitter er nog is (1 = normaal, kou → stil)
+    steady:     Shared,
     notes:      &'static [i32],
     stroke_pos: f32,
     stroke_len: f32,
@@ -468,6 +482,7 @@ struct Cello {
     /// Stereopositie ten opzichte van het zwaartepunt van de deeltjes
     pan_offset: f32,
     chaos:      f32,
+    cold:       f32,
     /// Willekeurige doelen [-1, 1] voor haperende boogdruk en toonhoogte
     flutter:    f32,
     drift:      f32,
@@ -482,11 +497,12 @@ impl Cello {
         let drive = shared(CELLO_DRIVE);
         let grit  = shared(CELLO_GRIT);
         let wobble = shared(0.0);
+        let steady = shared(1.0);
 
         // Licht zwevende toonhoogte: trage vibrato + onregelmatige boog-jitter,
         // bij chaos aangevuld met grillig verstemmen (wobble)
         let pitch = (var(&freq) >> follow(0.3))
-            * (1.0 + 0.003 * sine_hz(4.7) + 0.002 * (noise() >> lowpole_hz(6.0))
+            * (1.0 + (var(&steady) >> follow(1.0)) * (0.003 * sine_hz(4.7) + 0.002 * (noise() >> lowpole_hz(6.0)))
                 + (var(&wobble) >> follow(0.06)));
         // Strijkruis: amplitude-ruis op de zaagtand geeft de korrel van hars op snaar.
         // soft_saw heeft minder scherpe boventonen dan een kale zaagtand.
@@ -510,23 +526,28 @@ impl Cello {
             drive,
             grit,
             wobble,
+            steady,
             notes,
             stroke_pos: phase * base_len,
             stroke_len: base_len,
             base_len,
             pan_offset,
             chaos: 0.0,
+            cold: 0.0,
             flutter: 0.0,
             drift: 0.0,
             rest: 0.0,
         }
     }
 
-    /// Chaos in de simulatie = harder, ruwer en onvaster strijken.
-    fn set_chaos(&mut self, chaos: f32) {
+    /// Chaos in de simulatie = harder, ruwer en onvaster strijken. Kou = stil
+    /// liggende toon (geen vibrato) en minder rasp.
+    fn set_state(&mut self, chaos: f32, cold: f32) {
         self.chaos = chaos;
-        self.drive.set_value(CELLO_DRIVE * (1.0 + 3.0 * chaos));
-        self.grit.set_value(CELLO_GRIT + 1.0 * chaos);
+        self.cold = cold;
+        self.drive.set_value(CELLO_DRIVE * (1.0 + 3.0 * chaos) * (1.0 - COLD_CELLO_DRIVE * cold));
+        self.grit.set_value((CELLO_GRIT + 1.0 * chaos) * (1.0 - 0.6 * cold));
+        self.steady.set_value(1.0 - COLD_STILL * cold);
     }
 
     /// Stereopositie: rond het zwaartepunt, met minder spreiding naarmate dat
@@ -550,7 +571,7 @@ impl Cello {
             self.stroke_len = self.base_len * jitter * (1.0 - 0.5 * chaos) / tempo;
             // Adempauze: regelmatig even niet strijken (minder bij chaos), zodat de
             // cello's geen onafgebroken drone vormen
-            if rng.unit() < 0.45 * (1.0 - chaos) {
+            if rng.unit() < (0.45 + COLD_REST * self.cold) * (1.0 - chaos) {
                 self.rest = self.stroke_len * rng.range(0.4, 1.2);
             }
             // Grondtoon blijft vaker liggen dan dat hij beweegt — tenzij het chaotisch is
@@ -623,14 +644,19 @@ impl Theremin {
 
     /// `calm`: stabiele clusters rekken noten en rusten op en maken de frasen zachter.
     /// `chaos`: grote sprongen, korte noten, wijde en snelle vibrato.
-    fn control(&mut self, dt: f32, tempo: f32, warmth: f32, calm: f32, chaos: f32, rng: &mut Rng) {
+    /// `cold`: geen vibrato, langere rust tussen de frasen.
+    fn control(&mut self, dt: f32, tempo: f32, warmth: f32, calm: f32, chaos: f32, cold: f32, rng: &mut Rng) {
         self.timer -= dt;
         self.since_note += dt;
         self.pan_phase = (self.pan_phase + dt * 0.03 * tempo * TAU) % TAU;
         self.vib_rate.set_value(4.6 + 1.6 * warmth + 2.5 * chaos);
 
         // Vertraagde vibrato: pas 0.4 s na een nieuwe noot invallen
-        let depth = if self.amp.value() > 0.0 && self.since_note > 0.4 { 0.0055 * (1.0 + 2.0 * chaos) } else { 0.0 };
+        let depth = if self.amp.value() > 0.0 && self.since_note > 0.4 {
+            0.0055 * (1.0 + 2.0 * chaos) * (1.0 - COLD_STILL * cold)
+        } else {
+            0.0
+        };
         self.vib_depth.set_value(depth);
 
         if self.timer > 0.0 {
@@ -644,7 +670,8 @@ impl Theremin {
             } else {
                 // Einde van een frase → rust
                 self.amp.set_value(0.0);
-                self.timer = rng.range(4.0, 11.0) * (1.0 + 0.5 * calm) * (1.0 - 0.5 * chaos) / tempo;
+                self.timer = rng.range(4.0, 11.0) * (1.0 + 0.5 * calm) * (1.0 - 0.5 * chaos)
+                    * (1.0 + COLD_REST * 3.0 * cold) / tempo;
                 return;
             }
         }
@@ -734,6 +761,8 @@ struct PadTone {
     target:  f32,
     wait:    f32,
     fade:    f32,
+    /// Kou [0, 1]: geen verzadiging, iets helderder filter
+    cold:    f32,
 }
 
 impl PadTone {
@@ -764,6 +793,7 @@ impl PadTone {
             target: base,
             wait: 0.0,
             fade: 1.0,
+            cold: 0.0,
         }
     }
 
@@ -796,7 +826,8 @@ impl PadTone {
         self.freq_r.set_value(self.base * sour + beat_hz * 0.5);
         // Donker: het filter volgt de toonhoogte (~3.5× de grondtoon, dus alleen de
         // eerste paar boventonen) en ademt daar heel langzaam ±25% omheen
-        let cutoff = self.base * 3.5 * 1.25f32.powf(self.bright_phase.sin());
+        // Bij kou iets helderder: kaal en doorzichtig in plaats van donzig
+        let cutoff = self.base * 3.5 * 1.25f32.powf(self.bright_phase.sin()) * (1.0 + COLD_PAD_BRIGHT * self.cold);
         self.lp_coef = 1.0 - (-TAU * cutoff / self.sample_rate).exp();
         // Volume ademt traag en beperkt (~8 dB), zoals in het voorbeeld; zacht
         // in- en uitfaden (sin²) bij een akkoordwissel
@@ -816,8 +847,9 @@ impl PadTone {
         // Kanalen deels samenvoegen: breed maar niet uit elkaar vallend (L/R-correlatie
         // ~0.7, zoals in het voorbeeld)
         let (l, r) = (0.85 * l + 0.35 * r, 0.85 * r + 0.35 * l);
-        // Zachte verzadiging voor wat warmte
-        ((1.1 * l).tanh(), (1.1 * r).tanh())
+        // Zachte verzadiging voor wat warmte; bij kou zuiver
+        let w = 1.0 - self.cold;
+        (w * (1.1 * l).tanh() + self.cold * l, w * (1.1 * r).tanh() + self.cold * r)
     }
 }
 
@@ -1979,18 +2011,35 @@ const RUSH_TONE:        f32 = 1.5;
 /// Borrelen zolang klonten naderen of uiteendrijven (bewust bescheiden: dat gebeurt
 /// vaak, en het moment van samensmelten of uiteenvallen moet erbovenuit komen)
 const EVENT_BUBBLE_RATE:  f32 = 25.0;
-/// Het moment zelf: een opborreling van zoveel bellen over EVENT_BURST_TIME s, een
-/// "gloep" van een paar dikke bellen en een golf klotsend water die nadeint
+/// Het moment van uiteenvallen: een opborreling van zoveel bellen over EVENT_BURST_TIME s
+/// en een golf klotsend water die nadeint
 const EVENT_BURST:        f32 = 70.0;
 const EVENT_BURST_TIME:   f32 = 0.8;
 const EVENT_WAVE_DECAY:   f32 = 1.5;
-/// Gloep: begintoon (Hz, groot → laag), hoe ver en hoe snel hij omhoog buigt (snel:
-/// een trage stijging klonk eerder als een laser), wegsterven (s) en sterkte. Een
-/// doffe ruisdreun klonk als "poenk" en paste niet.
-const GLOOP_FREQ:   (f32, f32) = (300.0, 170.0);
-const GLOOP_BEND:   f32 = 1.55;
-const GLOOP_GLIDE:  f32 = 0.035;
-const GLOOP_DECAY:  f32 = 0.2;
+/// Plop: het "druppel"-recept uit het floep-lab (gekozen door de gebruiker; eerdere
+/// pogingen klonken als "poenk", "boing", gruis, misthoorn en zeekoeien). Een korte
+/// hoge toon die vanaf PLOP_START halve tonen lager snel naar zijn noot glijdt, een
+/// korte buik die zachter wordt, en dan in de staart PLOP_JUMP halve tonen omhoog
+/// schiet terwijl hij wegvalt.
+/// Noot (Hz: kleine klont E5, grote G4; de vorm telt, de toonhoogte mag variëren), duur, aanzet, staart (s), glijtijden (s), volume aan het eind van de
+/// buik, vorm van de staart (< 1: valt laat weg), octaaf erbij
+const PLOP_FREQ:        (f32, f32) = (659.3, 392.0);
+const PLOP_START:       f32 = 2.0;
+const PLOP_GLIDE:       f32 = 0.006;
+const PLOP_JUMP:        f32 = 19.0;
+const PLOP_JUMP_GLIDE:  f32 = 0.012;
+const PLOP_LENGTH:      f32 = 0.12;
+const PLOP_ATTACK:      f32 = 0.002;
+const PLOP_TAIL:        f32 = 0.06;
+const PLOP_BODY_END:    f32 = 0.8;
+const PLOP_CURVE:       f32 = 0.8;
+const PLOP_OCTAVE:      f32 = 0.05;
+/// Samensmelten duurt seconden: eerst opborrelen (zoveel bellen in zoveel s), dan
+/// de plop (na MERGE_PLOP_AT s), dan nog langer nabubbelen dat geleidelijk uitdunt.
+/// Uiteenvallen: de plop meteen, met bruisen en de opborreling (EVENT_BURST).
+const MERGE_BUBBLES_BEFORE: (f32, f32) = (45.0, 0.45);
+const MERGE_PLOP_AT:        f32 = 0.45;
+const MERGE_BUBBLES_AFTER:  (f32, f32) = (80.0, 2.0);
 const GLOOP_GAIN:   f32 = 3.0;
 const MAX_GLOOPS:   usize = 4;
 /// Bruisen bij uiteenvallen: zoveel fijne belletjes in FIZZ_TIME s
@@ -2040,39 +2089,39 @@ struct VoiceState {
     wake:      [Bandpass; 2],
 }
 
-/// Eén gloep: een ronde toon (grondtoon + wat octaaf) die in de eerste tientallen
-/// milliseconden een stukje omhoog buigt en dan wegsterft, met een zachte aanzet.
+/// Eén plop (zie PLOP_*).
 #[derive(Clone, Copy, Default)]
 struct Gloop {
     active: bool,
     /// Samples wachten voor hij begint
     wait:   u32,
+    /// Seconden sinds het begin
+    t:      f32,
     phase:  f32,
     freq:   f32,
-    target: f32,
-    glide:  f32,
+    /// Noot van de buik (Hz)
+    note:   f32,
     amp:    f32,
-    decay:  f32,
-    rise:   f32,
-    rise_coef: f32,
+    glide:  f32,
+    jump_glide: f32,
     gains:  (f32, f32),
 }
 
 impl Gloop {
-    fn new(freq: f32, strength: f32, pan: f32, delay: f32, sample_rate: f32) -> Self {
-        let (l, r) = pan_gains(pan);
+    /// `size` [0, 1]: groot = lager.
+    fn new(size: f32, strength: f32, pan: f32, delay: f32, rng: &mut Rng, sample_rate: f32) -> Self {
+        let note = PLOP_FREQ.0 * (PLOP_FREQ.1 / PLOP_FREQ.0).powf(size.clamp(0.0, 1.0)) * rng.range(0.97, 1.03);
         Self {
             active: true,
             wait:   (delay * sample_rate) as u32,
+            t:      0.0,
             phase:  0.0,
-            freq,
-            target: freq * GLOOP_BEND,
-            glide:  1.0 - (-1.0 / (GLOOP_GLIDE * sample_rate)).exp(),
+            freq:   note * 2f32.powf(-PLOP_START / 12.0),
+            note,
             amp:    strength * GLOOP_GAIN,
-            decay:  (-1.0 / (GLOOP_DECAY * sample_rate)).exp(),
-            rise:   1.0,
-            rise_coef: (-1.0 / (0.004 * sample_rate)).exp(),
-            gains:  (l, r),
+            glide:  1.0 - (-1.0 / (PLOP_GLIDE * sample_rate)).exp(),
+            jump_glide: 1.0 - (-1.0 / (PLOP_JUMP_GLIDE * sample_rate)).exp(),
+            gains:  pan_gains(pan),
         }
     }
 
@@ -2082,17 +2131,41 @@ impl Gloop {
             self.wait -= 1;
             return (0.0, 0.0);
         }
-        self.freq += (self.target - self.freq) * self.glide;
-        self.phase = (self.phase + self.freq * dt) % 1.0;
-        self.amp *= self.decay;
-        self.rise *= self.rise_coef;
-        let a = self.phase * TAU;
-        let s = (a.sin() + 0.3 * (2.0 * a).sin()) * self.amp * (1.0 - self.rise);
-        if self.amp < 1e-4 {
+        if self.t >= PLOP_LENGTH {
             self.active = false;
+            return (0.0, 0.0);
         }
+        let body = PLOP_LENGTH - PLOP_TAIL;
+        let (target, glide, mut env) = if self.t < body {
+            (self.note, self.glide, 1.0 + (PLOP_BODY_END - 1.0) * self.t / body)
+        } else {
+            let y = (PLOP_LENGTH - self.t) / PLOP_TAIL;
+            let fall = (y * std::f32::consts::FRAC_PI_2).sin().powf(2.0 * PLOP_CURVE);
+            (self.note * 2f32.powf(PLOP_JUMP / 12.0), self.jump_glide, PLOP_BODY_END * fall)
+        };
+        if self.t < PLOP_ATTACK {
+            env *= (self.t / PLOP_ATTACK * std::f32::consts::FRAC_PI_2).sin().powi(2);
+        }
+        self.t += dt;
+        self.freq += (target - self.freq) * glide;
+        self.phase = (self.phase + self.freq * dt) % 1.0;
+        let a = self.phase * TAU;
+        let s = (a.sin() + PLOP_OCTAVE * (2.0 * a).sin()) / (1.0 + 0.5 * PLOP_OCTAVE) * env * self.amp;
         (s * self.gains.0, s * self.gains.1)
     }
+}
+
+/// Een reeks bellen: na `wait` s zoveel (`left`) in `time` s, steeds dunner.
+#[derive(Clone, Copy, Default)]
+struct Burst {
+    left:    f32,
+    total:   f32,
+    pan:     f32,
+    wait:    f32,
+    time:    f32,
+    elapsed: f32,
+    /// Steeds dichter (aanzwellen naar de plop) in plaats van steeds dunner
+    grow:    bool,
 }
 
 struct Happenings {
@@ -2109,7 +2182,8 @@ struct Happenings {
     converge:    (f32, f32),
     diverge:     (f32, f32),
     /// Opborreling: nog te maken bellen, en waar
-    burst:       (f32, f32),
+    /// Opborrelingen: voor de plop, erna, of bij uiteenvallen
+    bursts:      [Burst; 3],
     /// Bruisen bij uiteenvallen: nog te maken belletjes, en waar
     fizz:        (f32, f32),
     /// Gloeps op het moment van samensmelten of uiteenvallen
@@ -2141,7 +2215,7 @@ impl Happenings {
             blooms: [(0.0, 0.0, 0.0); 3],
             converge: (0.0, 0.0),
             diverge: (0.0, 0.0),
-            burst: (0.0, 0.0),
+            bursts: [Burst::default(); 3],
             fizz: (0.0, 0.0),
             gloops: [Gloop::default(); MAX_GLOOPS],
             slosh: [Bandpass::default(); 2],
@@ -2287,9 +2361,9 @@ impl Happenings {
         if self.last_merge != Some(p.merge_id) {
             if self.last_merge.is_some() && p.merge_age < 0.5 && p.merge_strength > 0.01 {
                 let (s, pan) = (p.merge_strength, p.merge_pan);
-                // Een gloep op de plek van de nieuwe klont, groot = lager
+                // Opborrelen, een plop op de plek van de nieuwe klont, nabubbelen
                 let size = self.voice_size(p.merge_voice).unwrap_or((s - 0.7) / 0.3);
-                self.moment(s, pan, &[(pan, size, 0.0)]);
+                self.moment(s, pan, true, size, MERGE_PLOP_AT);
                 self.duck.0 = self.duck.0.max(s * DUCK_DEPTH);
                 self.bloom(p.merge_voice, s);
                 self.swell = (self.swell.0.max(s), 0.0);
@@ -2301,13 +2375,12 @@ impl Happenings {
         if self.last_split != Some(p.split_id) {
             if self.last_split.is_some() && p.split_age < 0.5 && p.split_strength > 0.01 {
                 let (s, pan) = (p.split_strength, p.split_pan);
-                // Scheuren: fijn bruisen, dan twee kleinere gloeps kort na elkaar die
-                // elk een kant op gaan
+                // Scheuren: fijn bruisen, een plop en een opborreling
                 self.fizz = (FIZZ_BUBBLES * s, pan);
                 self.duck.0 = self.duck.0.max(0.8 * s * DUCK_DEPTH);
-                let size_a = self.voice_size(p.split_voice_a).unwrap_or(0.5) * 0.7;
-                let size_b = self.voice_size(p.split_voice_b).unwrap_or(0.3) * 0.7;
-                self.moment(s, pan, &[(pan - 0.35, size_a, 0.05), (pan + 0.35, size_b, 0.16)]);
+                let size_a = self.voice_size(p.split_voice_a).unwrap_or(0.5);
+                let size_b = self.voice_size(p.split_voice_b).unwrap_or(0.3);
+                self.moment(s, pan, false, 0.5 * (size_a + size_b), 0.0);
                 self.bloom(p.split_voice_a, 0.8 * s);
                 self.bloom(p.split_voice_b, 0.8 * s);
                 self.swell = (self.swell.0.max(0.6 * s), 0.0);
@@ -2338,9 +2411,21 @@ impl Happenings {
                 self.bubbles.spawn(&mut self.rng, pan, 0.25, (0.4 + 0.6 * act).min(1.0));
             }
         }
-        if self.burst.0 >= 1.0 && self.rng.unit() < EVENT_BURST / EVENT_BURST_TIME * dt {
-            self.burst.0 -= 1.0;
-            self.bubbles.spawn(&mut self.rng, self.burst.1, 0.3, 1.0);
+        for b in self.bursts.iter_mut().filter(|b| b.left >= 1.0) {
+            if b.wait > 0.0 {
+                b.wait -= dt;
+                continue;
+            }
+            b.elapsed += dt;
+            let x = (b.elapsed / b.time).min(1.0);
+            let rate = 2.0 * b.total / b.time * if b.grow { x } else { 1.0 - x };
+            if self.rng.unit() < rate * dt {
+                b.left -= 1.0;
+                self.bubbles.spawn(&mut self.rng, b.pan, 0.3, 1.0);
+            }
+            if x >= 1.0 {
+                b.left = 0.0;
+            }
         }
         let fizz_rate = FIZZ_BUBBLES / FIZZ_TIME * dt;
         let mut n = fizz_rate.floor() + if self.rng.unit() < fizz_rate.fract() { 1.0 } else { 0.0 };
@@ -2371,17 +2456,24 @@ impl Happenings {
         }
     }
 
-    /// Het moment van samensmelten of uiteenvallen: gloeps (plek, grootte 0..1,
-    /// vertraging in s), een opborreling en een golf klotsend water rond `pan`.
-    fn moment(&mut self, strength: f32, pan: f32, gloops: &[(f32, f32, f32)]) {
-        for &(at, size, delay) in gloops {
-            let freq = GLOOP_FREQ.0 * (GLOOP_FREQ.1 / GLOOP_FREQ.0).powf(size.clamp(0.0, 1.0))
-                * self.rng.range(0.95, 1.05);
-            if let Some(g) = self.gloops.iter_mut().find(|g| !g.active) {
-                *g = Gloop::new(freq, strength, at.clamp(-1.0, 1.0), delay, self.sample_rate);
+    /// Het moment van samensmelten of uiteenvallen: een plop (grootte 0..1) na `delay` s,
+    /// bellen en een golf klotsend water rond `pan`.
+    fn moment(&mut self, strength: f32, pan: f32, merge: bool, size: f32, delay: f32) {
+        if let Some(g) = self.gloops.iter_mut().find(|g| !g.active) {
+            *g = Gloop::new(size, strength, pan.clamp(-1.0, 1.0), delay, &mut self.rng, self.sample_rate);
+        }
+        let burst = |(n, time): (f32, f32), wait: f32, grow: bool|
+            Burst { left: n * strength, total: n * strength, pan, wait, time, elapsed: 0.0, grow };
+        let new = if merge {
+            [burst(MERGE_BUBBLES_BEFORE, 0.0, true), burst(MERGE_BUBBLES_AFTER, MERGE_PLOP_AT + 0.5 * PLOP_LENGTH, false)]
+        } else {
+            [burst((EVENT_BURST, EVENT_BURST_TIME), 0.0, false), Burst::default()]
+        };
+        for b in new.into_iter().filter(|b| b.left >= 1.0) {
+            if let Some(slot) = self.bursts.iter_mut().find(|s| s.left < 1.0) {
+                *slot = b;
             }
         }
-        self.burst = (self.burst.0 + EVENT_BURST * strength, pan);
         self.wave = (self.wave.0.max(strength), pan);
     }
 
@@ -2402,7 +2494,7 @@ impl Happenings {
 
     fn active(&self) -> bool {
         self.voices.iter().any(|v| v.live) || self.converge.0 > 1e-3 || self.diverge.0 > 1e-3
-            || self.burst.0 >= 1.0 || self.fizz.0 >= 1.0 || self.gloops.iter().any(|g| g.active) || self.duck.1 > 1e-3
+            || self.bursts.iter().any(|b| b.left >= 1.0) || self.fizz.0 >= 1.0 || self.gloops.iter().any(|g| g.active) || self.duck.1 > 1e-3
             || self.wave.0 > 1e-3 || self.bubbles.active()
     }
 
@@ -2452,6 +2544,227 @@ impl Happenings {
             let (nl, nr) = (self.rng.range(-1.0, 1.0), self.rng.range(-1.0, 1.0));
             l += self.slosh[0].process(nl) * a * gl;
             r += self.slosh[1].process(nr) * a * gr;
+        }
+        (l, r)
+    }
+}
+
+// ─── Kou ─────────────────────────────────────────────────────────────────────
+//
+// Koud water (tot 3 °C, het bevriest nooit) klinkt helder, ijl en stil: zie de
+// kop van dit bestand. Hier de sterktes, en de ijle hoge tonen.
+
+/// Hoeveel vibrato en boog-jitter er bij volle kou verdwijnt
+const COLD_STILL: f32 = 0.85;
+/// Minder rasp op de cello's bij volle kou (deel van de drive)
+const COLD_CELLO_DRIVE: f32 = 0.3;
+/// Extra kans op een adempauze van de cello's; de theremin rust tot (1 + 3×) zo lang
+const COLD_REST: f32 = 0.25;
+/// Pad bij volle kou: filter zoveel helderder, en per stem deze gain (grondtoon iets
+/// dunner, middelste blijft, bovenste grotendeels weg → open en kaal)
+const COLD_PAD_BRIGHT: f32 = 0.6;
+const COLD_PAD_WEIGHTS: [f32; 3] = [0.75, 1.0, 0.3];
+/// Minder druppels en stroming bij volle kou (deel)
+const COLD_QUIET: f32 = 0.65;
+/// Galm bij volle kou: zoveel luider, en zoveel van de uitgang terug de hal in.
+/// Gemeten (ruisstoot, −60 dB): zonder 10.5 s, 0.1 → 12.5 s, 0.2 → 23.5 s; vanaf
+/// ~0.27 houdt de galm zichzelf in stand en loopt hij op (0.3 zat vol in de limiter)
+const COLD_REVERB_GAIN: f32 = 0.5;
+const COLD_REVERB_FEEDBACK: f32 = 0.15;
+
+/// Ijle hoge tonen: gemiddeld zoveel per seconde bij volle kou, in pentatonische
+/// treden C6 .. Eb7, aanzwellen / aanhouden / wegsterven (s, bereik)
+const GLINT_RATE: f32 = 0.14;
+const GLINT_DEGREES: (i32, i32) = (20, 26);
+const GLINT_ATTACK: (f32, f32) = (1.5, 3.5);
+const GLINT_HOLD: (f32, f32) = (1.0, 4.0);
+const GLINT_RELEASE: (f32, f32) = (4.0, 8.0);
+/// Bewust zacht: luider gingen de hoge tonen irriteren
+const GLINT_LEVEL: f32 = 0.008;
+const MAX_GLINTS: usize = 4;
+
+/// Gierende wind boven de getijdenpoel bij kou: ruisen (midden van de band, Hz, bij
+/// een zwakke → sterke vlaag), fluittonen die met de vlaag stijgen (Hz, en hoe
+/// smal), duur van een vlaag (s, bereik) en sterkte
+const WIND_BAND: (f32, f32) = (450.0, 2200.0);
+const WIND_WHISTLE: (f32, f32) = (480.0, 1150.0);
+const WIND_WHISTLE_Q: f32 = 12.0;
+const WIND_GUST_TIME: (f32, f32) = (1.5, 5.0);
+const WIND_LEVEL: f32 = 0.2;
+
+/// Dun, hoog gierende wind in vlagen, met twee resonante fluittonen erin die
+/// meestijgen met de kracht van de vlaag. Weinig laag: koude wind snijdt.
+struct ColdWind {
+    rng:     Rng,
+    sample_rate: f32,
+    /// Kracht van de vlaag (huidig, doel), hoe snel hij erheen gaat (s) en tijd tot
+    /// de volgende
+    gust:    (f32, f32),
+    follow:  f32,
+    timer:   f32,
+    /// Trage zwerving van de toonhoogte en van de plek in het stereobeeld
+    drift:   f32,
+    level:   f32,
+    band:    [Bandpass; 2],
+    whistle: [[Bandpass; 2]; 2],
+    /// Sterkte van ruisen en fluiten (control-rate)
+    amp:     (f32, f32),
+    gains:   (f32, f32),
+}
+
+impl ColdWind {
+    fn new(sample_rate: f32, seed: u64) -> Self {
+        Self {
+            rng: Rng(0x7F4A_7C15 ^ seed as u32),
+            sample_rate,
+            gust: (0.3, 0.3),
+            follow: 1.5,
+            timer: 0.0,
+            drift: 0.0,
+            level: 0.0,
+            band: [Bandpass::default(); 2],
+            whistle: [[Bandpass::default(); 2]; 2],
+            amp: (0.0, 0.0),
+            gains: (0.7, 0.7),
+        }
+    }
+
+    /// `level`: kou × getijdenpoel [0, 1].
+    fn control(&mut self, dt: f32, level: f32) {
+        self.level = level;
+        if level < 1e-3 {
+            self.amp = (0.0, 0.0);
+            return;
+        }
+        self.timer -= dt;
+        if self.timer <= 0.0 {
+            self.timer = self.rng.range(WIND_GUST_TIME.0, WIND_GUST_TIME.1);
+            self.gust.1 = self.rng.unit().powf(1.5) * 0.9 + 0.1;
+            self.follow = self.rng.range(0.8, 2.5);
+        }
+        self.gust.0 += (self.gust.1 - self.gust.0) * (dt / self.follow).min(1.0);
+        self.drift = (self.drift + dt * 0.05 * TAU) % TAU;
+        let g = self.gust.0;
+        let sr = self.sample_rate;
+        let band = WIND_BAND.0 * (WIND_BAND.1 / WIND_BAND.0).powf(g);
+        let pitch = WIND_WHISTLE.0 * (WIND_WHISTLE.1 / WIND_WHISTLE.0).powf(g)
+            * (1.0 + 0.04 * (self.drift * 3.0).sin());
+        for (c, bp) in self.band.iter_mut().enumerate() {
+            bp.set(band * (1.0 + 0.1 * c as f32), 0.9, sr);
+        }
+        // Twee fluittonen, geen zuiver interval: het moet gieren, niet zingen
+        for (w, ratio) in self.whistle.iter_mut().zip([1.0, 1.37]) {
+            for (c, bp) in w.iter_mut().enumerate() {
+                bp.set(pitch * ratio * (1.0 + 0.006 * c as f32), WIND_WHISTLE_Q, sr);
+            }
+        }
+        // Fluiten pas bij een flinke vlaag
+        self.amp = (level * (0.2 + 0.8 * g), level * g * g);
+        self.gains = pan_gains(0.6 * self.drift.sin());
+    }
+
+    fn active(&self) -> bool {
+        self.level >= 1e-3
+    }
+
+    #[inline]
+    fn render(&mut self) -> (f32, f32) {
+        let (nl, nr) = (self.rng.range(-1.0, 1.0), self.rng.range(-1.0, 1.0));
+        let mut out = [0.0f32; 2];
+        for (c, n) in [nl, nr].into_iter().enumerate() {
+            let rush = self.band[c].process(n);
+            let whistle = self.whistle[0][c].process(n) + 0.6 * self.whistle[1][c].process(n);
+            out[c] = rush * self.amp.0 + whistle * 4.0 * self.amp.1;
+        }
+        (out[0] * self.gains.0, out[1] * self.gains.1)
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct Glint {
+    active: bool,
+    phase:  f32,
+    freq:   f32,
+    /// Tijd sinds het begin, en de drie fases van de envelop (s)
+    t:      f32,
+    attack: f32,
+    hold:   f32,
+    release: f32,
+    amp:    f32,
+    /// Huidige envelop (control-rate) en de stap per sample ernaartoe
+    env:    f32,
+    step:   f32,
+    gains:  (f32, f32),
+}
+
+/// Losse, pure hoge tonen zonder aanslag die lang blijven hangen, verspreid over het
+/// stereobeeld. Glazig, maar zonder het tinkelen van ijs.
+struct ColdGlints {
+    rng:    Rng,
+    sample_rate: f32,
+    glints: [Glint; MAX_GLINTS],
+}
+
+impl ColdGlints {
+    fn new(sample_rate: f32, seed: u64) -> Self {
+        Self { rng: Rng(0x5BD1_E995 ^ seed as u32), sample_rate, glints: [Glint::default(); MAX_GLINTS] }
+    }
+
+    fn control(&mut self, dt: f32, cold: f32) {
+        if self.rng.unit() < GLINT_RATE * cold * dt {
+            let degree = GLINT_DEGREES.0
+                + (self.rng.next_u32() % (GLINT_DEGREES.1 - GLINT_DEGREES.0 + 1) as u32) as i32;
+            let freq = degree_hz(degree);
+            // Niet twee keer dezelfde toon tegelijk (zou zweven)
+            if !self.glints.iter().any(|g| g.active && (g.freq - freq).abs() < 1.0) {
+                if let Some(g) = self.glints.iter_mut().find(|g| !g.active) {
+                    *g = Glint {
+                        active:  true,
+                        freq,
+                        attack:  self.rng.range(GLINT_ATTACK.0, GLINT_ATTACK.1),
+                        hold:    self.rng.range(GLINT_HOLD.0, GLINT_HOLD.1),
+                        release: self.rng.range(GLINT_RELEASE.0, GLINT_RELEASE.1),
+                        amp:     self.rng.range(0.5, 1.0) * (0.4 + 0.6 * cold),
+                        gains:   pan_gains(self.rng.range(-0.8, 0.8)),
+                        ..Glint::default()
+                    };
+                }
+            }
+        }
+        let samples = CONTROL_INTERVAL as f32;
+        for g in self.glints.iter_mut().filter(|g| g.active) {
+            g.t += dt;
+            let x = if g.t < g.attack {
+                (g.t / g.attack * std::f32::consts::FRAC_PI_2).sin().powi(2)
+            } else if g.t < g.attack + g.hold {
+                1.0
+            } else {
+                let r = (g.t - g.attack - g.hold) / g.release;
+                if r >= 1.0 {
+                    g.active = false;
+                    g.env = 0.0;
+                    continue;
+                }
+                (r * std::f32::consts::FRAC_PI_2).cos().powi(2)
+            };
+            g.step = (x * g.amp - g.env) / samples;
+        }
+    }
+
+    fn active(&self) -> bool {
+        self.glints.iter().any(|g| g.active)
+    }
+
+    #[inline]
+    fn render(&mut self) -> (f32, f32) {
+        let (mut l, mut r) = (0.0, 0.0);
+        let dt = 1.0 / self.sample_rate;
+        for g in self.glints.iter_mut().filter(|g| g.active) {
+            g.env += g.step;
+            g.phase = (g.phase + g.freq * dt) % 1.0;
+            let s = (g.phase * TAU).sin() * g.env;
+            l += s * g.gains.0;
+            r += s * g.gains.1;
         }
         (l, r)
     }
@@ -2678,6 +2991,10 @@ pub struct DroneSynth {
     pad_sour: [(f32, f32); 3],
     pad_sour_timer: f32,
     reverb:   Box<dyn AudioUnit>,
+    /// Vorige uitgang van de galm, deels teruggevoerd bij kou (langere staart)
+    reverb_tail: (f32, f32),
+    glints:   ColdGlints,
+    wind:     ColdWind,
 
     /// Doelwaarden, schrijfbaar vanuit andere threads
     handle: DroneHandle,
@@ -2735,6 +3052,9 @@ impl DroneSynth {
                 sample_rate,
                 83,
             ),
+            reverb_tail: (0.0, 0.0),
+            glints: ColdGlints::new(sample_rate, 211),
+            wind: ColdWind::new(sample_rate, 223),
             handle: DroneHandle::new(&DroneParams::default()),
             smooth: DroneParams::default(),
             burst_phase: 0.0,
@@ -2786,6 +3106,7 @@ impl DroneSynth {
         let (k_slow, k_fast) = ((dt / 4.0).min(1.0), (dt / 1.5).min(1.0));
         let s = &mut self.smooth;
         s.temperature += (target.temperature - s.temperature) * k_slow;
+        s.cold        += (target.cold        - s.cold)        * k_slow;
         s.chaos       += (target.chaos       - s.chaos)       * k_fast;
         s.motion      += (target.motion      - s.motion)      * k_fast;
         s.calm        += (target.calm        - s.calm)        * k_fast;
@@ -2837,12 +3158,12 @@ impl DroneSynth {
         let warmth = p.temperature;
 
         for (i, cello) in self.cellos.iter_mut().enumerate() {
-            cello.set_chaos(p.chaos);
+            cello.set_state(p.chaos, p.cold);
             cello.control(dt, tempo, &mut self.rng);
             self.cello_gains[i] = pan_gains(cello.pan(p.pan_center));
         }
 
-        self.theremin.control(dt, tempo, warmth, p.calm, p.chaos, &mut self.rng);
+        self.theremin.control(dt, tempo, warmth, p.calm, p.chaos, p.cold, &mut self.rng);
         self.theremin_gain = pan_gains(self.theremin.pan(p.pan_lead));
 
         // Binaurale zweving: delta (2 Hz) bij koud tot alfa (9 Hz) bij heet
@@ -2870,6 +3191,7 @@ impl DroneSynth {
         for (i, tone) in self.pad.iter_mut().enumerate() {
             let s = &mut self.pad_sour[i];
             s.0 += (s.1 - s.0) * k_sour;
+            tone.cold = p.cold;
             self.pad_amp[i] = tone.control(dt, tempo, beat_hz, 2.0f32.powf(s.0 / 1200.0));
         }
 
@@ -2877,11 +3199,15 @@ impl DroneSynth {
         self.burst_phase = (self.burst_phase + dt * 0.07 * tempo * TAU) % TAU;
         let burst = 0.5 + 0.5 * self.burst_phase.sin();
         // Beweeglijke deeltjes geven tot 4× zoveel druppels en een voller stroompje
-        let rate = (0.25 + 3.0 * warmth) * (0.2 + 1.6 * burst * burst) * (1.0 + 3.0 * p.motion);
+        // Kou: stiller, minder druppels en een zachter stroompje
+        let rate = (0.25 + 3.0 * warmth) * (0.2 + 1.6 * burst * burst) * (1.0 + 3.0 * p.motion)
+            * (1.0 - COLD_QUIET * p.cold);
         if self.rng.unit() < rate * dt {
             self.spawn_drop();
         }
-        self.murmur_amp.set_value(0.25 + 0.75 * warmth * burst + 0.5 * p.motion);
+        self.murmur_amp.set_value((0.25 + 0.75 * warmth * burst + 0.5 * p.motion) * (1.0 - 0.8 * COLD_QUIET * p.cold));
+        self.glints.control(dt, p.cold);
+        self.wind.control(dt, p.cold * p.surface);
 
         if p.surface > 0.001 {
             self.surf.control(dt, tempo, &mut self.rng);
@@ -2976,13 +3302,23 @@ impl DroneSynth {
         dl += t * gl; dr += t * gr;
         sl += t * gl * 0.9; sr += t * gr * 0.9;
 
+        let cold = self.smooth.cold;
         for (i, tone) in self.pad.iter_mut().enumerate() {
             let (pl, pr) = tone.render();
-            // Zwelt even mee aan bij een klont-gebeurtenis
-            let a = self.pad_amp[i] * PAD_WEIGHTS[i] * 0.16 * mx[mix::BRAINWAVES]
+            // Zwelt even mee aan bij een klont-gebeurtenis. Bij kou kaler en opener:
+            // de grondtoon wat dunner en de bovenste akkoordtoon grotendeels weg
+            let a = self.pad_amp[i] * PAD_WEIGHTS[i] * COLD_PAD_WEIGHTS[i].powf(cold) * 0.16 * mx[mix::BRAINWAVES]
                 * (1.0 + 0.6 * self.happenings.swell());
             dl += pl * a; dr += pr * a;
             sl += pl * a * 0.6; sr += pr * a * 0.6;
+        }
+
+        // Ijle hoge tonen bij kou: weinig direct, vooral galm
+        if self.glints.active() {
+            let (gl, gr) = self.glints.render();
+            let a = GLINT_LEVEL * mx[mix::BRAINWAVES];
+            dl += gl * a * 0.5; dr += gr * a * 0.5;
+            sl += gl * a; sr += gr * a;
         }
 
         let (wl, wr) = self.render_drops();
@@ -3003,6 +3339,14 @@ impl DroneSynth {
             let a = surface * SURF_LEVEL * std::f32::consts::SQRT_2 * mx[mix::SURF];
             dl += bl * gl * a; dr += br * gr * a;
             sl += bl * gl * a * 0.25; sr += br * gr * a * 0.25;
+        }
+
+        // Gierende wind boven de getijdenpoel bij kou (onder de branding-fader)
+        if self.wind.active() {
+            let (wl, wr) = self.wind.render();
+            let a = WIND_LEVEL * mx[mix::SURF];
+            dl += wl * a; dr += wr * a;
+            sl += wl * a * 0.3; sr += wr * a * 0.3;
         }
 
         // Onweer: alleen renderen tijdens donderwolk of nagalm van een inslag
@@ -3057,9 +3401,13 @@ impl DroneSynth {
             sl += cl * a * 0.3; sr += cr * a * 0.3;
         }
 
-        let (rl, rr) = self.reverb.filter_stereo(sl, sr);
-        // De galm zwelt even aan bij een klont-gebeurtenis
-        let reverb = mx[mix::REVERB] * (1.0 + 0.8 * self.happenings.swell());
+        // Kou: een deel van de galm gaat opnieuw de hal in — een langere staart, en
+        // door de highpass vóór de hal bij elke ronde helderder
+        let fb = COLD_REVERB_FEEDBACK * cold;
+        let (rl, rr) = self.reverb.filter_stereo(sl + self.reverb_tail.0 * fb, sr + self.reverb_tail.1 * fb);
+        self.reverb_tail = (rl, rr);
+        // De galm zwelt even aan bij een klont-gebeurtenis, en is bij kou ruimer
+        let reverb = mx[mix::REVERB] * (1.0 + 0.8 * self.happenings.swell()) * (1.0 + COLD_REVERB_GAIN * cold);
         let (rl, rr) = (rl * reverb, rr * reverb);
 
         let g = self.fade_in * mx[mix::MASTER];

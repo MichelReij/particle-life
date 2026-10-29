@@ -320,6 +320,7 @@ fn drone_params(
 ) -> DroneParams {
     let mut p = DroneParams {
         temperature: temperature_norm(params),
+        cold:        cold_level(params),
         surface:     if params.is_wlp { 1.0 } else { 0.0 },
         // Zichtbare duisternis: de theremin zwijgt pas helemaal als het hele scherm
         // donker is, en klinkt weer zodra er ergens licht terugkomt
@@ -361,6 +362,22 @@ pub fn temperature_norm(params: &SimulationParams) -> f32 {
         (crate::life_params_gen::htv::SLIDER1_MIN, crate::life_params_gen::htv::SLIDER1_MAX)
     };
     ((params.temperature_level - min) / (max - min)).clamp(0.0, 1.0)
+}
+
+/// Vanaf deze temperatuur (°C) en kouder klinkt het geluid koud; vol bij de laagste
+/// temperatuur van de machine (3 °C, het water bevriest nooit).
+const COLD_FROM: f32 = 25.0;
+
+/// Kou [0, 1] voor de drone, in graden en niet in schuifstand: de schuif loopt per
+/// hypothese tot een andere maximumtemperatuur.
+pub fn cold_level(params: &SimulationParams) -> f32 {
+    let min = if params.is_wlp {
+        crate::life_params_gen::wlp::SLIDER1_MIN
+    } else {
+        crate::life_params_gen::htv::SLIDER1_MIN
+    };
+    let x = ((COLD_FROM - params.temperature_level) / (COLD_FROM - min)).clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
 }
 
 // ─── Onweer ──────────────────────────────────────────────────────────────────
