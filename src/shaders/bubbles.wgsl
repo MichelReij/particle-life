@@ -84,6 +84,15 @@ const RISE_TIME: f32 = 6.0;
 // Hoe ver bellen hooguit van de bron wegwaaieren (wereld-UV)
 const MAX_SPREAD: f32 = 0.22;
 const BUBBLE_COLOR: vec3<f32> = vec3<f32>(0.95, 0.98, 1.0);
+// Donkere band binnen de rand: licht van achter de bel buigt weg (breking)
+const BUBBLE_SHADE: vec3<f32> = vec3<f32>(0.02, 0.05, 0.09);
+// Richting van het licht (van boven, linksboven in beeld; y wijst naar beneden)
+const LIGHT_DIR: vec2<f32> = vec2<f32>(-0.55, -0.83);
+// Bellen komen in trosjes van zoveel tegelijk vrij
+const CLUSTER: u32 = 3u;
+// Straal van de kleinste en grootste bel (wereld-UV)
+const R_MIN: f32 = 0.0018;
+const R_MAX: f32 = 0.013;
 // Lava-kleuren van de ring (LAVA_RED/YELLOW/LIGHTYELLOW in NeoPixelDriver.h)
 const LAVA_RED: vec3<f32> = vec3<f32>(1.0, 0.098, 0.0);
 const LAVA_YELLOW: vec3<f32> = vec3<f32>(1.0, 0.47, 0.0);
@@ -114,7 +123,7 @@ struct VertexOut {
     @location(0) local: vec2<f32>,
     // Gloed: (0, straal, dekking, hitte). Bel: (1, straal, pixel, oplossen)
     @location(1) @interpolate(flat) p0: vec4<f32>,
-    // Bel: (dekking door in- en uitfaden, -, -, -)
+    // Bel: (dekking door in- en uitfaden, fase van het trillen, vervorming, stand)
     @location(2) @interpolate(flat) p1: vec4<f32>,
 }
 
@@ -188,8 +197,11 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
         }
         let seed = u32(b.y * 65536.0);
         let h = seed * 131u + k * 7u;
+        // Trosje: de bellen ervan komen kort na elkaar vrij en stijgen ongeveer
+        // dezelfde kant op, als een snoer achter elkaar aan
+        let hc = seed * 131u + (k / CLUSTER) * 7u + 100003u;
         // Geboren zolang de straal spuit, iets vaker aan het begin
-        let birth = emit * pow(hash(h), 1.3);
+        let birth = emit * pow(hash(hc), 1.3) + 0.15 * hash(h + 9u);
         let age = t - birth;
         // Levensduur sterk wisselend: veel bellen kort, een deel haalt de
         // volle RISE_TIME
@@ -197,8 +209,10 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
         if age < 0.0 || age > life {
             return hidden();
         }
-        // Veel kleine en weinig grote bellen; grote stijgen sneller
-        let r0 = mix(0.0022, 0.009, pow(hash(h + 2u), 2.0)) * mix(0.8, 1.2, size);
+        // Veel kleine en een enkele grote bel; grote stijgen sneller
+        let r0 = mix(R_MIN, R_MAX, pow(hash(h + 2u), 3.2)) * mix(0.8, 1.2, size);
+        // 0 = klein (bolrond, stijgt recht), 1 = groot (vervormt en slingert)
+        let big = smoothstep(0.0035, 0.011, r0);
         // Langzaam naar boven: ze stijgen vooral naar de kijker toe
         let speed = 0.02 + 2.5 * r0;
         // Snel groter tijdens het stijgen: ze komen naar je toe (en de druk
@@ -207,20 +221,31 @@ fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
         // Naar de kijker toe stijgen = in perspectief van de bron af
         // waaieren, steeds sneller naarmate de bel dichterbij komt; plus een
         // langzame drift naar boven en wat schommelen
-        let dir_a = hash(h + 3u) * 6.283;
+        let dir_a = hash(hc + 3u) * 6.283 + (hash(h + 3u) - 0.5) * 0.6;
         let spread = mix(0.15, 1.0, hash(h + 6u)) * MAX_SPREAD * 0.5
             * (age / RISE_TIME) * (1.0 + age / RISE_TIME);
-        let wobble = sin(age * mix(2.5, 5.5, hash(h + 4u)) + hash(h + 5u) * 6.283)
-            * 0.003 * (1.0 + 0.3 * age);
+        // Zigzaggen of spiraalsgewijs slingeren: kleine bellen nauwelijks, grote
+        // in een wijdere en tragere baan; elke bel met een eigen richting
+        let swing_w = mix(6.0, 2.6, big) * mix(0.8, 1.2, hash(h + 4u));
+        let swing_ph = age * swing_w + hash(h + 5u) * 6.283;
+        let swing_r = mix(0.0006, 0.007, big) * (0.5 + 0.5 * min(age, 1.0));
+        let flat_spiral = mix(0.15, 1.0, hash(h + 10u)); // 0.15: zigzag, 1: spiraal
+        let swing_a = hash(h + 11u) * 6.283;
+        let sw = vec2<f32>(cos(swing_ph), flat_spiral * sin(swing_ph)) * swing_r;
+        let wobble = vec2<f32>(sw.x * cos(swing_a) - sw.y * sin(swing_a),
+                               sw.x * sin(swing_a) + sw.y * cos(swing_a));
         center = src + vec2<f32>(cos(dir_a), sin(dir_a)) * spread
-            + vec2<f32>(wobble, -speed * age);
+            + wobble + vec2<f32>(0.0, -speed * age);
         // Pas in het laatste stukje van haar leven vervaagt een bel terwijl ze
         // uitdooft — een luchtbel in water knapt niet, ze lost geleidelijk op
         let dissolve = smoothstep(0.8 * life, life, age);
         let fade = smoothstep(0.0, 0.25, age) * (1.0 - smoothstep(0.75 * life, life, age));
-        half = radius * (1.0 + 0.5 * dissolve) + 2.0 * px;
+        // Grote bellen zijn nooit rond: afgeplat en trillend van vorm
+        let deform = mix(0.015, 0.12, big) * mix(0.7, 1.3, hash(h + 12u));
+        let tremble = age * mix(16.0, 7.0, big) + hash(h + 13u) * 6.283;
+        half = radius * (1.0 + 0.5 * dissolve) * (1.0 + 1.5 * deform) + 2.0 * px;
         out.p0 = vec4<f32>(1.0, radius, px, dissolve);
-        out.p1 = vec4<f32>(fade, 0.0, 0.0, 0.0);
+        out.p1 = vec4<f32>(fade, tremble, deform, hash(h + 14u) * 6.283);
     }
 
     // Hoek van het vierkantje (twee driehoeken)
@@ -246,16 +271,47 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
     let radius = in.p0.y;
     let px = in.p0.z;
+    let tremble = in.p1.y;
+    let deform = in.p1.z;
     let d = length(in.local);
-    // Scherp begrensd (vervaging maakt er rook of mist van): een vage kern, een
-    // dunne iets lichtere rand en een klein lichtpuntje. Rand en zachte
+    let dir = in.local / max(d, 1e-9);
+    let th = atan2(in.local.y, in.local.x);
+    // Omtrek: afgeplat (2e mode, schommelend) en een onregelmatige 3e mode,
+    // beide trillend in de tijd
+    let edge = radius * (1.0
+        + deform * (0.6 + 0.4 * sin(tremble)) * cos(2.0 * (th - in.p1.w))
+        + 0.35 * deform * sin(1.37 * tremble) * cos(3.0 * th + 0.7 * tremble));
+    // q: 0 in het midden, 1 op de rand
+    let q = d / edge;
+    // Scherp begrensd (vervaging maakt er rook of mist van). Rand en zachte
     // overgang in schermpixels, niet in verhouding tot de bel: ingezoomd wordt
     // de bel groter maar blijft de rand dun
-    let aa = px + radius * 0.5 * in.p0.w;
-    let disk = 1.0 - smoothstep(radius - aa, radius, d);
-    // (randen op volgorde houden: smoothstep met omgekeerde randen is ongedefinieerd)
-    let rim = disk * smoothstep(radius - 2.0 * px - aa, radius - 0.5 * aa, d);
-    let spot = 1.0 - smoothstep(radius * 0.08, radius * 0.25, length(in.local + vec2<f32>(radius * 0.35, radius * 0.35)));
-    let ba = clamp(0.08 * disk + 0.3 * rim + 0.35 * spot * disk, 0.0, 0.45) * in.p1.x;
-    return vec4<f32>(BUBBLE_COLOR, ba);
+    let aa = (px + radius * 0.5 * in.p0.w) / edge;
+    let disk = 1.0 - smoothstep(1.0 - aa, 1.0, q);
+    let lit = dot(dir, LIGHT_DIR); // -1 van het licht af .. 1 naar het licht toe
+    // Lichte rand (totale reflectie), aan de kant van het licht feller en dikker;
+    // de dikte in schermpixels, zodat hij ingezoomd even dun en scherp blijft
+    let rim_w = 2.0 * px / edge * (1.0 + 0.6 * max(lit, 0.0));
+    let rim = disk * smoothstep(1.0 - rim_w - aa, 1.0 - 0.3 * rim_w, q) * (0.6 + 0.4 * lit);
+    // Donkere band net binnen de rand, vooral aan de kant van het licht af
+    let shade = disk * smoothstep(0.55, 0.85, q) * (1.0 - smoothstep(0.85, 1.0 - 0.5 * rim_w, q))
+        * (0.55 - 0.45 * lit);
+    // Lichtvlek: een sikkeltje langs de rand aan de kant van het licht, en een
+    // zwak tegenlicht aan de overkant (het licht dat door de bel heen breekt).
+    // Grootte in verhouding tot de bel, de rand ervan in schermpixels: ingezoomd
+    // blijven ze scherp. (De donkere band is een geleidelijke schaduw en mag
+    // meeschalen.)
+    let tangent = vec2<f32>(-LIGHT_DIR.y, LIGHT_DIR.x);
+    let rel = in.local / edge - LIGHT_DIR * 0.55;
+    let crescent = 1.0 - smoothstep(0.13 - 1.4 * aa, 0.13,
+        length(vec2<f32>(dot(rel, tangent) * 0.45, dot(rel, LIGHT_DIR) * 1.4)));
+    let counter = 1.0 - smoothstep(0.1 - aa, 0.1, length(in.local / edge + LIGHT_DIR * 0.62));
+    let bright = clamp(0.03 * disk + 0.38 * rim + 0.55 * crescent * disk + 0.18 * counter * disk, 0.0, 0.6);
+    let dark = 0.16 * shade;
+    let fade = in.p1.x * (1.0 - 0.6 * in.p0.w);
+    let ba = (bright + dark) * fade;
+    if ba <= 0.0 {
+        discard;
+    }
+    return vec4<f32>((BUBBLE_COLOR * bright + BUBBLE_SHADE * dark) / (bright + dark), ba);
 }
