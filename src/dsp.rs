@@ -1980,17 +1980,16 @@ impl Vent {
 //     sterft weg
 // Daarbovenop wat er tússen klonten gebeurt: klotsend water zolang ze naderen of
 // uiteendrijven, en het moment zelf:
-//   - samensmelten: een "gloep" (een ronde, vloeibare toon die snel een stukje omhoog
-//     buigt, als een dikke bel die bovenkomt) en een opborreling; de nieuwe klont bloeit
-//     op (zijn toon zwelt aan en wordt voller) en galm en pad zwellen mee, de pad gaat
-//     naar een nieuw akkoord
-//   - uiteenvallen: een kort bruisen van fijne belletjes (scheuren), twee kleinere
-//     gloeps kort na elkaar die elk een kant op gaan, en beide brokken bloeien op
+//   - samensmelten: een plop (een korte druppel, zie PLOP_*) en daarna veel bellen; de
+//     nieuwe klont bloeit op (zijn toon zwelt aan en wordt voller) en galm en pad zwellen
+//     mee, de pad gaat naar een nieuw akkoord
+//   - uiteenvallen: een plop, een kort bruisen van fijne belletjes (scheuren) en een
+//     opborreling, en beide brokken bloeien op
 //   - bij beide wijkt de rest van het geluid even (ducking), zodat het moment opvalt
 
 /// Klont-stemmen: toon, zoeven en borrelen
 const VOICE_TONE_GAIN:   f32 = 0.05;
-const VOICE_SWISH_GAIN:  f32 = 0.25;
+const VOICE_SWISH_GAIN:  f32 = 0.12;
 const VOICE_BUBBLE_RATE: f32 = 30.0;
 /// Toonhoogte van een stem in pentatonische treden: grootste klont .. kleinste
 const VOICE_DEGREES: (i32, i32) = (5, 14);
@@ -2002,10 +2001,11 @@ const VOICE_FADE_OUT: f32 = 1.2;
 const BLOOM_GAIN:  f32 = 6.0;
 const BLOOM_RISE:  f32 = 0.12;
 const BLOOM_DECAY: f32 = 2.5;
-/// Vaart: zoevende ruisvlaag, kielzog-rommel, spoor belletjes, helderder toon
-const RUSH_WHOOSH_GAIN: f32 = 2.0;
+/// Vaart: zoevende ruisvlaag, kielzog-rommel, spoor belletjes, helderder toon (het
+/// ruisen mocht zachter: 2.0 en 7.0 waren te veel bij samensmeltende klonten)
+const RUSH_WHOOSH_GAIN: f32 = 1.0;
 const RUSH_WHOOSH_FREQ: (f32, f32) = (350.0, 2200.0);
-const RUSH_WAKE_GAIN:   f32 = 7.0;
+const RUSH_WAKE_GAIN:   f32 = 3.5;
 const RUSH_BUBBLE_RATE: f32 = 35.0;
 const RUSH_TONE:        f32 = 1.5;
 /// Borrelen zolang klonten naderen of uiteendrijven (bewust bescheiden: dat gebeurt
@@ -2034,13 +2034,13 @@ const PLOP_TAIL:        f32 = 0.06;
 const PLOP_BODY_END:    f32 = 0.8;
 const PLOP_CURVE:       f32 = 0.8;
 const PLOP_OCTAVE:      f32 = 0.05;
-/// Samensmelten duurt seconden: eerst opborrelen (zoveel bellen in zoveel s), dan
-/// de plop (na MERGE_PLOP_AT s), dan nog langer nabubbelen dat geleidelijk uitdunt.
+/// Samensmelten duurt seconden: meteen de plop, en vrijwel tegelijk veel bellen
+/// die geleidelijk uitdunnen (zoveel in zoveel s, na zoveel s).
 /// Uiteenvallen: de plop meteen, met bruisen en de opborreling (EVENT_BURST).
-const MERGE_BUBBLES_BEFORE: (f32, f32) = (45.0, 0.45);
-const MERGE_PLOP_AT:        f32 = 0.45;
-const MERGE_BUBBLES_AFTER:  (f32, f32) = (80.0, 2.0);
-const GLOOP_GAIN:   f32 = 3.0;
+const MERGE_BUBBLES:    (f32, f32) = (110.0, 2.5);
+const MERGE_BUBBLES_AT: f32 = 0.04;
+/// Sterkte van de plop (4.5 overstuurde de versterker)
+const GLOOP_GAIN:   f32 = 1.8;
 const MAX_GLOOPS:   usize = 4;
 /// Bruisen bij uiteenvallen: zoveel fijne belletjes in FIZZ_TIME s
 const FIZZ_BUBBLES: f32 = 30.0;
@@ -2052,7 +2052,7 @@ const DUCK_RECOVER: f32 = 0.9;
 /// Afstandsfilter van de bellen (Hz)
 const EVENT_BUBBLE_LP:    f32 = 1500.0;
 const EVENT_BUBBLE_GAIN:  f32 = 2.2;
-const EVENT_SLOSH_GAIN:   f32 = 1.0;
+const EVENT_SLOSH_GAIN:   f32 = 0.5;
 
 /// Geluid van één klont-stem.
 #[derive(Clone, Copy, Default)]
@@ -2093,8 +2093,6 @@ struct VoiceState {
 #[derive(Clone, Copy, Default)]
 struct Gloop {
     active: bool,
-    /// Samples wachten voor hij begint
-    wait:   u32,
     /// Seconden sinds het begin
     t:      f32,
     phase:  f32,
@@ -2109,11 +2107,10 @@ struct Gloop {
 
 impl Gloop {
     /// `size` [0, 1]: groot = lager.
-    fn new(size: f32, strength: f32, pan: f32, delay: f32, rng: &mut Rng, sample_rate: f32) -> Self {
+    fn new(size: f32, strength: f32, pan: f32, rng: &mut Rng, sample_rate: f32) -> Self {
         let note = PLOP_FREQ.0 * (PLOP_FREQ.1 / PLOP_FREQ.0).powf(size.clamp(0.0, 1.0)) * rng.range(0.97, 1.03);
         Self {
             active: true,
-            wait:   (delay * sample_rate) as u32,
             t:      0.0,
             phase:  0.0,
             freq:   note * 2f32.powf(-PLOP_START / 12.0),
@@ -2127,10 +2124,6 @@ impl Gloop {
 
     #[inline]
     fn render(&mut self, dt: f32) -> (f32, f32) {
-        if self.wait > 0 {
-            self.wait -= 1;
-            return (0.0, 0.0);
-        }
         if self.t >= PLOP_LENGTH {
             self.active = false;
             return (0.0, 0.0);
@@ -2164,8 +2157,6 @@ struct Burst {
     wait:    f32,
     time:    f32,
     elapsed: f32,
-    /// Steeds dichter (aanzwellen naar de plop) in plaats van steeds dunner
-    grow:    bool,
 }
 
 struct Happenings {
@@ -2361,9 +2352,9 @@ impl Happenings {
         if self.last_merge != Some(p.merge_id) {
             if self.last_merge.is_some() && p.merge_age < 0.5 && p.merge_strength > 0.01 {
                 let (s, pan) = (p.merge_strength, p.merge_pan);
-                // Opborrelen, een plop op de plek van de nieuwe klont, nabubbelen
+                // Een plop op de plek van de nieuwe klont, dan veel bellen
                 let size = self.voice_size(p.merge_voice).unwrap_or((s - 0.7) / 0.3);
-                self.moment(s, pan, true, size, MERGE_PLOP_AT);
+                self.moment(s, pan, true, size);
                 self.duck.0 = self.duck.0.max(s * DUCK_DEPTH);
                 self.bloom(p.merge_voice, s);
                 self.swell = (self.swell.0.max(s), 0.0);
@@ -2380,7 +2371,7 @@ impl Happenings {
                 self.duck.0 = self.duck.0.max(0.8 * s * DUCK_DEPTH);
                 let size_a = self.voice_size(p.split_voice_a).unwrap_or(0.5);
                 let size_b = self.voice_size(p.split_voice_b).unwrap_or(0.3);
-                self.moment(s, pan, false, 0.5 * (size_a + size_b), 0.0);
+                self.moment(s, pan, false, 0.5 * (size_a + size_b));
                 self.bloom(p.split_voice_a, 0.8 * s);
                 self.bloom(p.split_voice_b, 0.8 * s);
                 self.swell = (self.swell.0.max(0.6 * s), 0.0);
@@ -2418,7 +2409,7 @@ impl Happenings {
             }
             b.elapsed += dt;
             let x = (b.elapsed / b.time).min(1.0);
-            let rate = 2.0 * b.total / b.time * if b.grow { x } else { 1.0 - x };
+            let rate = 2.0 * b.total / b.time * (1.0 - x);
             if self.rng.unit() < rate * dt {
                 b.left -= 1.0;
                 self.bubbles.spawn(&mut self.rng, b.pan, 0.3, 1.0);
@@ -2456,23 +2447,19 @@ impl Happenings {
         }
     }
 
-    /// Het moment van samensmelten of uiteenvallen: een plop (grootte 0..1) na `delay` s,
-    /// bellen en een golf klotsend water rond `pan`.
-    fn moment(&mut self, strength: f32, pan: f32, merge: bool, size: f32, delay: f32) {
+    /// Het moment van samensmelten of uiteenvallen: een plop (grootte 0..1), bellen en
+    /// een golf klotsend water rond `pan`.
+    fn moment(&mut self, strength: f32, pan: f32, merge: bool, size: f32) {
         if let Some(g) = self.gloops.iter_mut().find(|g| !g.active) {
-            *g = Gloop::new(size, strength, pan.clamp(-1.0, 1.0), delay, &mut self.rng, self.sample_rate);
+            *g = Gloop::new(size, strength, pan.clamp(-1.0, 1.0), &mut self.rng, self.sample_rate);
         }
-        let burst = |(n, time): (f32, f32), wait: f32, grow: bool|
-            Burst { left: n * strength, total: n * strength, pan, wait, time, elapsed: 0.0, grow };
-        let new = if merge {
-            [burst(MERGE_BUBBLES_BEFORE, 0.0, true), burst(MERGE_BUBBLES_AFTER, MERGE_PLOP_AT + 0.5 * PLOP_LENGTH, false)]
+        let ((n, time), wait) = if merge {
+            (MERGE_BUBBLES, MERGE_BUBBLES_AT)
         } else {
-            [burst((EVENT_BURST, EVENT_BURST_TIME), 0.0, false), Burst::default()]
+            ((EVENT_BURST, EVENT_BURST_TIME), 0.0)
         };
-        for b in new.into_iter().filter(|b| b.left >= 1.0) {
-            if let Some(slot) = self.bursts.iter_mut().find(|s| s.left < 1.0) {
-                *slot = b;
-            }
+        if let Some(slot) = self.bursts.iter_mut().find(|s| s.left < 1.0) {
+            *slot = Burst { left: n * strength, total: n * strength, pan, wait, time, elapsed: 0.0 };
         }
         self.wave = (self.wave.0.max(strength), pan);
     }
@@ -2792,7 +2779,8 @@ const TICK_RATE: f32 = 220.0;
 const TICK_FREQ: (f32, f32) = (700.0, 6000.0);
 /// Uitsterftijd van een tikje (s): kort en droog
 const TICK_DECAY: (f32, f32) = (0.0006, 0.004);
-const TICK_GAIN: f32 = 5.0;
+/// Sterkte van de tikjes (5.0 was 12 dB te hard)
+const TICK_GAIN: f32 = 1.25;
 const TURBULENCE_GAIN: f32 = 0.35;
 /// Tonen van de spanning (Hz): Db2, F#2 en G2 een tikje te laag
 const TENSION_FREQS: [f32; 3] = [69.3, 92.5, 97.0];
