@@ -277,11 +277,16 @@ fn calculate_edge_damping_factor(pos: vec2<f32>) -> f32 {
     let world_width = sim_params.virtual_world_width;
     let world_height = sim_params.virtual_world_height;
 
-    // Calculate distance from each edge
-    let dist_left = pos.x;
-    let dist_right = world_width - pos.x;
-    let dist_top = pos.y;
-    let dist_bottom = world_height - pos.y;
+    // Calculate distance from each edge. Randen die wrappen zijn geen rand: boven en
+    // onder wrappen in modus 0 en 2, links en rechts alleen in modus 0. Dempen daar
+    // liet deeltjes langs boven- en onderkant stilvallen en samenklonteren.
+    let far = 1.0e9;
+    let wraps_x = sim_params.boundary_mode == 0u;
+    let wraps_y = sim_params.boundary_mode != 1u;
+    let dist_left = select(pos.x, far, wraps_x);
+    let dist_right = select(world_width - pos.x, far, wraps_x);
+    let dist_top = select(pos.y, far, wraps_y);
+    let dist_bottom = select(world_height - pos.y, far, wraps_y);
 
     // ASYMMETRIC DAMPING: Only apply forces away from exit side to prevent accumulation
     var min_edge_dist: f32;
@@ -390,9 +395,10 @@ fn calculate_lenia_density(particle_pos: vec2<f32>, type_idx: u32, p_idx: u32) -
     let kernel_sigma = kernel_radius * 0.15;
 
     let p_cell = world_pos_to_grid_cell(particle_pos);
-    // Lenia wrapt buren-zoektocht alleen in boundary_mode 0 — zelfde voorwaarde als de
-    // bestaande diff-wrap hieronder.
-    let wrap = sim_params.boundary_mode == 0u;
+    // Buren-zoektocht wrapt in elke modus die boven/onder wrapt (0 en 2), net als de
+    // hoofdlus; anders zag een deeltje vlak bij boven- of onderkant maar de halve
+    // dichtheid en trok Lenia het naar de rand.
+    let wrap = sim_params.boundary_mode != 1u;
 
     for (var dy: i32 = -GRID_SEARCH_RADIUS; dy <= GRID_SEARCH_RADIUS; dy = dy + 1) {
         for (var dx: i32 = -GRID_SEARCH_RADIUS; dx <= GRID_SEARCH_RADIUS; dx = dx + 1) {
@@ -890,9 +896,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     // Particle-particle interactions via GPU uniform-grid buckets (zie binding 6-8 +
     // spatial_grid_build.wgsl). Doorzoekt alleen de buurcellen i.p.v. alle deeltjes.
     let p_cell = world_pos_to_grid_cell(particle_p.pos);
-    // Hoofdlus wrapt buren-zoektocht alleen in boundary_mode 2 — zelfde voorwaarde als
-    // de bestaande diff-wrap hieronder.
-    let main_wrap = sim_params.boundary_mode == 2u;
+    // Buren-zoektocht wrapt in elke modus die boven/onder wrapt (0 en 2) — zelfde
+    // voorwaarde als de diff-wrap hieronder en in calculate_lenia_density.
+    let main_wrap = sim_params.boundary_mode != 1u;
 
     for (var dy: i32 = -GRID_SEARCH_RADIUS; dy <= GRID_SEARCH_RADIUS; dy = dy + 1) {
         for (var dx: i32 = -GRID_SEARCH_RADIUS; dx <= GRID_SEARCH_RADIUS; dx = dx + 1) {

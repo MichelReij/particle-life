@@ -22,7 +22,6 @@ struct IndicatorUniforms {
 
 const WORLD_COLOR: vec3<f32> = vec3<f32>(0.02, 0.04, 0.06);
 const WORLD_ALPHA: f32 = 0.5;
-const RIM_ALPHA: f32 = 0.22;
 const VIEW_COLOR: vec3<f32> = vec3<f32>(0.85, 0.93, 0.96);
 const VIEW_ALPHA: f32 = 0.45;
 // Kleinste straal van de beeldcirkel (px), zodat hij ver ingezoomd zichtbaar blijft
@@ -45,11 +44,9 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     if (u.alpha <= 0.0 || d > u.radius + 1.0) {
         discard;
     }
-    // Wereld: gevulde schijf met een dun lichter randje (1 px anti-aliasing)
+    // Wereld: gevulde schijf (1 px anti-aliasing)
     let world = 1.0 - smoothstep(u.radius - 1.0, u.radius, d);
-    let rim = world * (1.0 - smoothstep(0.0, 1.0, abs(d - (u.radius - 1.0))));
     var col = over(vec4<f32>(0.0), WORLD_COLOR, WORLD_ALPHA * world);
-    col = over(col, VIEW_COLOR, RIM_ALPHA * rim);
 
     // Beeld
     let vc = u.center + u.view * u.radius;

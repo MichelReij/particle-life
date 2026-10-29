@@ -2566,8 +2566,8 @@ const GLINT_DEGREES: (i32, i32) = (20, 26);
 const GLINT_ATTACK: (f32, f32) = (1.5, 3.5);
 const GLINT_HOLD: (f32, f32) = (1.0, 4.0);
 const GLINT_RELEASE: (f32, f32) = (4.0, 8.0);
-/// Bewust zacht: luider gingen de hoge tonen irriteren
-const GLINT_LEVEL: f32 = 0.008;
+/// Bewust zacht: luider gingen de hoge tonen irriteren (0.008 nog 5 dB te hard)
+const GLINT_LEVEL: f32 = 0.0045;
 const MAX_GLINTS: usize = 4;
 
 /// Gierende wind boven de getijdenpoel bij kou: ruisen (midden van de band, Hz, bij

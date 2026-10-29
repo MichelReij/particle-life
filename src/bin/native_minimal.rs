@@ -603,15 +603,22 @@ impl MinimalNativeApp {
     }
 
     fn update_smart_lightning_detection(&mut self) {
-        let renderer = match &mut self.renderer { Some(r) => r, None => return };
+        let renderer = match &self.renderer { Some(r) => r, None => return };
         let now = std::time::Instant::now();
 
-        if now < self.next_poll_time { return; }
-        if now.duration_since(self.last_lightning_poll).as_millis() < 100 { return; }
-        self.last_lightning_poll = now;
+        // Een eerder gestarte readback ophalen (blokkeert niet), en zo nodig een
+        // nieuwe starten: hooguit elke 100 ms, en alleen als het bijna tijd is
+        let result = renderer.poll_lightning_readback();
+        if now >= self.next_poll_time
+            && now.duration_since(self.last_lightning_poll).as_millis() >= 100
+            && renderer.start_lightning_readback()
+        {
+            self.last_lightning_poll = now;
+        }
 
-        match pollster::block_on(renderer.read_lightning_bolt_data()) {
-            Ok(bolt) => {
+        match result {
+            None => {}
+            Some(Ok(bolt)) => {
                 self.last_lightning_bolt = Some(bolt);
 
                 // Actual-fire detection: drives the interaction-rules "snap"
@@ -713,7 +720,7 @@ impl MinimalNativeApp {
                     }
                 }
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 self.next_poll_time = now + std::time::Duration::from_millis(500);
                 console_log!("❌ Lightning lezen mislukt: {:?}", e);
             }

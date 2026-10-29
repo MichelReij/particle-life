@@ -185,6 +185,10 @@ pub struct WebGpuRenderer {
     interaction_rules_buffer: wgpu::Buffer,
     lightning_segments_buffer: wgpu::Buffer,
     lightning_bolt_buffer: wgpu::Buffer,
+    /// Vaste terugleesbuffer voor de bliksemstatus en de stand van de readback
+    /// (LIGHTNING_READBACK_*), zie start_lightning_readback
+    lightning_staging: wgpu::Buffer,
+    lightning_readback: std::sync::Arc<std::sync::atomic::AtomicU8>,
     position_reroll_buffer: wgpu::Buffer,
     next_position_reroll_generation: u32,
     last_position_reroll_trigger_time: f32,
@@ -269,6 +273,12 @@ pub struct WebGpuRenderer {
     corner_overlays: Vec<(wgpu::BindGroup, u32, u32, wgpu::Buffer)>,
     surface_format: wgpu::TextureFormat,
 }
+
+/// Stand van de bliksem-readback (WebGpuRenderer::lightning_readback)
+const LIGHTNING_READBACK_IDLE:    u8 = 0;
+const LIGHTNING_READBACK_PENDING: u8 = 1;
+const LIGHTNING_READBACK_READY:   u8 = 2;
+const LIGHTNING_READBACK_FAILED:  u8 = 3;
 
 impl WebGpuRenderer {
     /// Initialize WebGPU renderer - WASM version with canvas
@@ -444,6 +454,13 @@ impl WebGpuRenderer {
             label: Some("Lightning Bolt Buffer"),
             size: 60, // matches LightningBolt (15 x 4-byte fields)
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+
+        let lightning_staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Lightning Staging"),
+            size: std::mem::size_of::<LightningBolt>() as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
 
@@ -1080,6 +1097,8 @@ impl WebGpuRenderer {
             interaction_rules_buffer,
             lightning_segments_buffer,
             lightning_bolt_buffer,
+            lightning_staging,
+            lightning_readback: std::sync::Arc::new(std::sync::atomic::AtomicU8::new(LIGHTNING_READBACK_IDLE)),
             position_reroll_buffer,
             next_position_reroll_generation: 1,
             last_position_reroll_trigger_time: f32::NEG_INFINITY,
@@ -1416,6 +1435,52 @@ impl WebGpuRenderer {
                     p.transition_start = 0.0;
                 }
             }
+        }
+    }
+
+    /// Start een niet-blokkerende readback van de bliksemstatus (native). Geeft false
+    /// als er nog een loopt. Het resultaat komt via poll_lightning_readback, meestal
+    /// een paar frames later — anders dan read_lightning_bolt_data, dat met
+    /// poll(Wait) de CPU liet wachten tot de GPU al zijn werk af had.
+    pub fn start_lightning_readback(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        if self.lightning_readback.load(Ordering::Acquire) != LIGHTNING_READBACK_IDLE {
+            return false;
+        }
+        let size = std::mem::size_of::<LightningBolt>() as u64;
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lightning Copy") });
+        encoder.copy_buffer_to_buffer(&self.lightning_bolt_buffer, 0, &self.lightning_staging, 0, size);
+        self.queue.submit(std::iter::once(encoder.finish()));
+        self.lightning_readback.store(LIGHTNING_READBACK_PENDING, Ordering::Release);
+        let state = std::sync::Arc::clone(&self.lightning_readback);
+        self.lightning_staging.slice(..).map_async(wgpu::MapMode::Read, move |r| {
+            let next = if r.is_ok() { LIGHTNING_READBACK_READY } else { LIGHTNING_READBACK_FAILED };
+            state.store(next, Ordering::Release);
+        });
+        true
+    }
+
+    /// Haalt het resultaat van start_lightning_readback op als het er is; blokkeert
+    /// niet. Elk frame aanroepen: de niet-wachtende poll laat ook de andere
+    /// readbacks (StatsReader) afronden.
+    pub fn poll_lightning_readback(&self) -> Option<Result<LightningBolt, RendererError>> {
+        use std::sync::atomic::Ordering;
+        let _ = self.device.poll(wgpu::PollType::Poll);
+        match self.lightning_readback.load(Ordering::Acquire) {
+            LIGHTNING_READBACK_READY => {
+                let slice = self.lightning_staging.slice(..);
+                let data = slice.get_mapped_range();
+                let bolt = *bytemuck::from_bytes::<LightningBolt>(&data[..std::mem::size_of::<LightningBolt>()]);
+                drop(data);
+                self.lightning_staging.unmap();
+                self.lightning_readback.store(LIGHTNING_READBACK_IDLE, Ordering::Release);
+                Some(Ok(bolt))
+            }
+            LIGHTNING_READBACK_FAILED => {
+                self.lightning_readback.store(LIGHTNING_READBACK_IDLE, Ordering::Release);
+                Some(Err(renderer_error("Map failed", "")))
+            }
+            _ => None,
         }
     }
 
