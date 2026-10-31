@@ -2583,7 +2583,8 @@ const WIND_BAND: (f32, f32) = (450.0, 2200.0);
 const WIND_WHISTLE: (f32, f32) = (480.0, 1150.0);
 const WIND_WHISTLE_Q: f32 = 12.0;
 const WIND_GUST_TIME: (f32, f32) = (1.5, 5.0);
-const WIND_LEVEL: f32 = 0.2;
+/// Mengniveau van de gierende wind (−5 dB t.o.v. de eerdere 0.2).
+const WIND_LEVEL: f32 = 0.112;
 
 /// Dun, hoog gierende wind in vlagen, met twee resonante fluittonen erin die
 /// meestijgen met de kracht van de vlaag. Weinig laag: koude wind snijdt.
@@ -2950,8 +2951,8 @@ impl Turmoil {
 
 // ─── DroneSynth ──────────────────────────────────────────────────────────────
 
-/// Mengniveau van de branding (−5 dB t.o.v. de eerdere 0.22).
-const SURF_LEVEL: f32 = 0.124;
+/// Mengniveau van de branding (−10 dB t.o.v. de eerdere 0.22).
+const SURF_LEVEL: f32 = 0.0697;
 /// Mengniveau van de klont-gebeurtenissen (−10 dB; op 1.0 waren ze veel te hard).
 const EVENTS_LEVEL: f32 = 0.316;
 /// Mengniveau van het onweer.
