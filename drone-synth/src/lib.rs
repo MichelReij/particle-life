@@ -1006,7 +1006,8 @@ const LIGHTNING_BIAS:  f32 = 0.4;
 /// mengpaneel (mix::LIGHTNING_HOLD); dit is de standaard.
 const LIGHTNING_HOLD_DEFAULT: u32 = 4;
 /// Mengniveau van knal + geknetter ten opzichte van de donder.
-const LIGHTNING_GAIN:  f32 = 2.2;
+/// 2026-11-12: 2.2 → 1.24 (−5 dB), stak te ver boven de muziek uit.
+const LIGHTNING_GAIN:  f32 = 1.24;
 /// Terugkaatsingen van de knal tegen het landschap: (vertraging in s, sterkte).
 /// Oneven echo's komen van de andere kant terug. De vertragingen worden per
 /// inslag met een factor 0.8–1.3 geschaald (ander "landschap").
