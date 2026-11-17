@@ -37,15 +37,8 @@ class App {
     private isRecording = false;
     private isAudioOn = false;
     private isPaused = false;
-    // Guard against wasm-bindgen re-entrancy: async check_super_lightning holds a
-    // &mut self borrow for the GPU readback; all other &mut self calls must be
-    // deferred until it completes.
-    private engineBusy = false;
-    // Mengpaneel-gains die nog naar de engine moeten — pas versturen als de
-    // engine niet bezig is (zie engineBusy)
+    // Mengpaneel-gains die nog naar de engine moeten: hooguit één keer per frame
     private pendingMix: Float32Array | null = null;
-    // Audio-pauzestand die nog naar de engine moet (zie applyAudioState)
-    private pendingAudioPaused: boolean | null = null;
 
     async init() {
         console.log("🔧 App.init() called");
@@ -197,37 +190,37 @@ class App {
         setParameterUpdateCallbacks({
             updateDriftAndBackground: (value: number) => {
                 // Update drift parameter in the engine
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.update_parameter("driftXPerSecond", value);
                 }
             },
             updateBackgroundColor: (r: number, g: number, b: number) => {
                 // Update background color parameters in the engine
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.update_background_color(r, g, b);
                 }
             },
             updateBackgroundColorFromTemperature: (temp: number) => {
                 // Update all temperature-related parameters using comprehensive method
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_temperature(temp);
                 }
             },
             updateSimulationParameter: (paramName: string, value: number) => {
                 // Update any simulation parameter
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.update_parameter(paramName, value);
                 }
             },
             updateBooleanParameter: (paramName: string, value: boolean) => {
                 // Update any boolean simulation parameter
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.update_boolean_parameter(paramName, value);
                 }
             },
             getParameter: (paramName: string) => {
                 // Get any simulation parameter value
-                if (!this.engine || this.engineBusy) return 0;
+                if (!this.engine) return 0;
 
                 switch (paramName) {
                     case "driftXPerSecond":
@@ -265,7 +258,7 @@ class App {
             },
             getBooleanParameter: (paramName: string) => {
                 // Get any boolean simulation parameter value
-                if (!this.engine || this.engineBusy) return false;
+                if (!this.engine) return false;
 
                 switch (paramName) {
                     case "flatForce":
@@ -278,19 +271,19 @@ class App {
                 }
             },
             updateZoom: (level: number, centerX?: number, centerY?: number) => {
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_zoom(level, centerX, centerY);
                 }
             },
             updateParticleCount: (pressure: number) => {
                 // Update particle count based on pressure
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_particle_count_from_pressure(pressure);
                 }
             },
             // Comprehensive parameter methods that handle all effects internally in Rust
             setTemperature: (temp: number) => {
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_temperature(temp);
                     // Update rule-evolution speed based on temperature
                     // 3°C → 1800s (30 min), 160°C → 180s (3 min), linear
@@ -300,30 +293,35 @@ class App {
                 }
             },
             setPressure: (pressure: number) => {
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_pressure(pressure);
                     // Also update particle count
                     this.engine.set_particle_count_from_pressure(pressure);
                 }
             },
             setPH: (ph: number) => {
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_ph(ph);
                 }
             },
             setUV: (uv: number) => {
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_uv(uv);
                 }
             },
             setElectricalActivity: (electrical: number) => {
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_electrical_activity(electrical);
                 }
             },
             setParticleOpacity: (opacity: number) => {
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_particle_opacity(opacity);
+                }
+            },
+            setScreenBrightness: (brightness: number) => {
+                if (this.engine) {
+                    this.engine.set_screen_brightness(brightness);
                 }
             },
             setTypeColor: (
@@ -332,7 +330,7 @@ class App {
                 g: number,
                 b: number,
             ) => {
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_type_color(typeIdx, r, g, b);
                 }
             },
@@ -343,7 +341,7 @@ class App {
                 return null;
             },
             setZoom: (level: number, centerX?: number, centerY?: number) => {
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_zoom(level, centerX, centerY);
                 }
             },
@@ -352,7 +350,7 @@ class App {
             },
             // Rule regeneration
             regenerateRules: () => {
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.regenerate_interaction_rules();
                     console.log("🎲 Interaction rules regenerated via UI");
                 } else if (!this.engine) {
@@ -471,21 +469,14 @@ class App {
 
                 // Update FPS display
                 this.updateFPSDisplay();
-
-                // Check lightning status (once per second to avoid spam)
-                this.checkLightningStatus();
             }
 
-            if (this.pendingMix && this.engine && !this.engineBusy) {
+            if (this.pendingMix && this.engine) {
                 this.engine.set_audio_mix(this.pendingMix);
                 this.pendingMix = null;
             }
-            if (this.pendingAudioPaused !== null && this.engine && !this.engineBusy) {
-                this.engine.set_audio_paused(this.pendingAudioPaused);
-                this.pendingAudioPaused = null;
-            }
 
-            if (!this.isPaused && this.engine && !this.engineBusy) {
+            if (!this.isPaused && this.engine) {
                 try {
                     // Apply relative joystick panning before the simulation step
                     updateJoystickPan(deltaTime);
@@ -572,17 +563,10 @@ class App {
         this.setAudioPaused(!this.isAudioOn || this.isPaused);
     }
 
-    // Direct aan de engine doorgeven (binnen de klik, nodig voor het starten van
-    // de AudioContext); alleen uitstellen naar de animatielus als de engine bezig
-    // is met de bliksem-readback (zie engineBusy).
+    // Direct aan de engine doorgeven: binnen de klik, nodig voor het starten van
+    // de AudioContext
     private setAudioPaused(paused: boolean) {
-        if (!this.engine) return;
-        if (this.engineBusy) {
-            this.pendingAudioPaused = paused;
-        } else {
-            this.pendingAudioPaused = null;
-            this.engine.set_audio_paused(paused);
-        }
+        this.engine?.set_audio_paused(paused);
     }
 
     private toggleAudio() {
@@ -764,47 +748,8 @@ class App {
         return this.engine;
     }
 
-    private lastElectricalActivity = 0;
-    private lastLightningCheck = 0;
     private currentTemperature = 20; // default matches HTML slider
 
-    private async checkLightningStatus() {
-        if (!this.engine || this.engineBusy) return;
-        try {
-            const currentTime = performance.now();
-            const currentElectricalActivity =
-                this.engine.get_electrical_activity();
-
-            // Track electrical activity changes
-            if (
-                Math.abs(
-                    currentElectricalActivity - this.lastElectricalActivity,
-                ) > 0.1
-            ) {
-                this.lastElectricalActivity = currentElectricalActivity;
-            }
-
-            // Check for super-lightning events (async GPU readback).
-            // Lock the engine for the duration to prevent wasm re-entrancy panics:
-            // check_super_lightning is async &mut self and holds the borrow during await.
-            if (currentTime - this.lastLightningCheck > 1000) {
-                this.lastLightningCheck = currentTime;
-                this.engineBusy = true;
-                try {
-                    const isSuper = await this.engine.check_super_lightning();
-                    if (isSuper) {
-                        console.log(
-                            "⚡ Super-lightning detected! Rules snapped (handled in Rust).",
-                        );
-                    }
-                } finally {
-                    this.engineBusy = false;
-                }
-            }
-        } catch (error) {
-            this.engineBusy = false; // ensure lock is released on unexpected error
-        }
-    }
 }
 
 function checkBrowserSupport(): { supported: boolean; missing: string[] } {

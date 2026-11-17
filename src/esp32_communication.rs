@@ -147,6 +147,8 @@ pub struct ESP32SharedState {
     pub last_sent_night_alpha: f32,                // Track last sent value to avoid redundant sends
     pub last_night_send_time: Instant,             // For periodic night heartbeat
     pub last_time_send: Option<Instant>,           // Tijdpakket: direct na verbinden, daarna elke minuut
+    pub incoming_tunnel: Vec<Vec<u8>>,             // ESP-NOW-pakketten via de liaison (tunnelframes)
+    pub outgoing_tunnel: Vec<Vec<u8>>,             // pakketten die de liaison moet uitzenden
 }
 
 impl Default for ESP32SharedState {
@@ -161,8 +163,37 @@ impl Default for ESP32SharedState {
             last_sent_night_alpha: -1.0, // force first send
             last_night_send_time: Instant::now(),
             last_time_send: None,
+            incoming_tunnel: Vec::new(),
+            outgoing_tunnel: Vec::new(),
         }
     }
+}
+
+// ─── Tunnel: ESP-NOW-pakketten tussen de liaison en de simulatie ─────────────
+// De liaison geeft ESP-NOW-pakketten met een msgType in 0x4F10..0x4F1F ongewijzigd
+// door (instellingen, zie settings_protocol.rs), en zendt wat de simulatie zo
+// terugstuurt uit. Zelfde frame in beide richtingen (ESP32_UART_Protocol.h):
+//   [0xA5] [lengte u8, 1..250] [pakket] [som u8: lengte + alle pakketbytes, mod 256] [0x5A]
+const TUNNEL_START: u8 = 0xA5;
+const TUNNEL_END: u8 = 0x5A;
+const TUNNEL_MAX_LEN: usize = 250;
+const TUNNEL_INCOMING_MAX: usize = 32; // wachtrij naar de hoofdlus
+
+fn tunnel_checksum(packet: &[u8]) -> u8 {
+    packet.iter().fold(packet.len() as u8, |sum, &b| sum.wrapping_add(b))
+}
+
+fn encode_tunnel_frame(packet: &[u8]) -> Option<Vec<u8>> {
+    if packet.is_empty() || packet.len() > TUNNEL_MAX_LEN {
+        return None;
+    }
+    let mut frame = Vec::with_capacity(packet.len() + 4);
+    frame.push(TUNNEL_START);
+    frame.push(packet.len() as u8);
+    frame.extend_from_slice(packet);
+    frame.push(tunnel_checksum(packet));
+    frame.push(TUNNEL_END);
+    Some(frame)
 }
 
 // ESP32 Communication Manager
@@ -280,6 +311,21 @@ impl ESP32Manager {
         }
     }
 
+    /// ESP-NOW-pakketten die de liaison sinds de vorige aanroep doorgaf (tunnel)
+    pub fn take_tunnel_packets(&self) -> Vec<Vec<u8>> {
+        match self.shared_state.lock() {
+            Ok(mut state) => std::mem::take(&mut state.incoming_tunnel),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Pakket (vanaf de msgType) dat de liaison via ESP-NOW moet uitzenden
+    pub fn send_tunnel_packet(&self, packet: Vec<u8>) {
+        if let Ok(mut state) = self.shared_state.lock() {
+            state.outgoing_tunnel.push(packet);
+        }
+    }
+
     // Get and clear pending lightning events (for debugging)
     pub fn get_pending_lightning_events(&self) -> Vec<ESP32LightningEvent> {
         if let Ok(mut state) = self.shared_state.lock() {
@@ -333,8 +379,15 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
 
         // If connected, try to read data
         if let Some(ref mut serial_port) = port {
-            match read_esp32_data(serial_port) {
-                Ok(sensor_data) => {
+            match read_frame(serial_port) {
+                Ok(Frame::Tunnel(packet)) => {
+                    if let Ok(mut state) = shared_state.lock() {
+                        if state.incoming_tunnel.len() < TUNNEL_INCOMING_MAX {
+                            state.incoming_tunnel.push(packet);
+                        }
+                    }
+                }
+                Ok(Frame::Sensor(sensor_data)) => {
                     // Successfully read data - update shared state
                     // (vroeger stond hier elke ~1s een "📡 ESP32: zoom=... pan=..."
                     // telemetrieregel — té storend voor een always-on installatie, dus
@@ -356,6 +409,9 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
 
                     // Datum/tijd naar de ESP32's (elke minuut)
                     send_time_if_due(serial_port, &shared_state);
+
+                    // Antwoorden op instellingen e.d. (tunnel, zie settings_protocol.rs)
+                    send_pending_tunnel(serial_port, &shared_state);
 
                     // Small delay to prevent excessive CPU usage
                     thread::sleep(Duration::from_millis(16)); // ~60 FPS polling rate
@@ -730,14 +786,15 @@ fn test_esp32_communication(port: &mut Box<dyn SerialPort>) -> Result<bool, ESP3
         // Wait for data to arrive
         thread::sleep(Duration::from_millis(200));
 
-        match read_esp32_data(port) {
-            Ok(data) => {
+        match read_frame(port) {
+            Ok(Frame::Sensor(data)) => {
                 println!(
                     "✅ ESP32 data received: zoom={}, temp={}, pressure={}",
                     data.zoom, data.temperature, data.pressure
                 );
                 return Ok(true); // Successfully parsed ESP32 data
             }
+            Ok(Frame::Tunnel(_)) => return Ok(true), // ook alleen de liaison stuurt die
             Err(ESP32Error::ReadTimeout) => {
                 attempts -= 1;
                 if attempts > 0 {
@@ -761,8 +818,65 @@ fn test_esp32_communication(port: &mut Box<dyn SerialPort>) -> Result<bool, ESP3
     Ok(false) // No valid data after several attempts
 }
 
-// Read sensor data from ESP32
-fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ESP32Error> {
+/// Eén frame van de liaison
+enum Frame {
+    Sensor(ESP32SensorData),
+    /// Doorgegeven ESP-NOW-pakket, vanaf de msgType (zie TUNNEL_START)
+    Tunnel(Vec<u8>),
+}
+
+/// Precies `buf.len()` bytes; een time-out halverwege geldt als ReadTimeout
+fn read_exact_or_timeout(port: &mut Box<dyn SerialPort>, buf: &mut [u8]) -> Result<(), ESP32Error> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        match port.read(&mut buf[filled..]) {
+            Ok(0) => return Err(ESP32Error::ReadTimeout),
+            Ok(n) => filled += n,
+            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => return Err(ESP32Error::ReadTimeout),
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return Err(ESP32Error::ConnectionLost),
+        }
+    }
+    Ok(())
+}
+
+fn read_byte(port: &mut Box<dyn SerialPort>) -> Result<u8, ESP32Error> {
+    let mut b = [0u8; 1];
+    read_exact_or_timeout(port, &mut b)?;
+    Ok(b[0])
+}
+
+// Volgende frame van de liaison: sensorpakket of tunnelframe
+fn read_frame(port: &mut Box<dyn SerialPort>) -> Result<Frame, ESP32Error> {
+    // Scan for a start marker — resynchronises after any misalignment without reconnecting.
+    loop {
+        match read_byte(port)? {
+            0xAA => return read_sensor_packet(port).map(Frame::Sensor),
+            TUNNEL_START => return read_tunnel_frame(port).map(Frame::Tunnel),
+            _ => {} // Not a start marker — discard and keep scanning.
+        }
+    }
+}
+
+// Rest van een tunnelframe, na de 0xA5
+fn read_tunnel_frame(port: &mut Box<dyn SerialPort>) -> Result<Vec<u8>, ESP32Error> {
+    let len = read_byte(port)? as usize;
+    if len == 0 || len > TUNNEL_MAX_LEN {
+        return Err(ESP32Error::InvalidData);
+    }
+    let mut packet = vec![0u8; len];
+    read_exact_or_timeout(port, &mut packet)?;
+    let mut tail = [0u8; 2];
+    read_exact_or_timeout(port, &mut tail)?;
+    if tail[0] != tunnel_checksum(&packet) || tail[1] != TUNNEL_END {
+        // Ook een losse 0xA5 in een sensorpakket na een hapering komt hier: stil overslaan
+        return Err(ESP32Error::InvalidData);
+    }
+    Ok(packet)
+}
+
+// Rest van een sensorpakket, na de 0xAA
+fn read_sensor_packet(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ESP32Error> {
     // ESP32 sends data in this format (23 bytes total):
     // [0xAA] [zoom_high] [zoom_low] [pan_x_high] [pan_x_low] [pan_y_high] [pan_y_low]
     // [temp_high] [temp_low] [pressure_high] [pressure_low] [ph_high] [ph_low]
@@ -770,51 +884,8 @@ fn read_esp32_data(port: &mut Box<dyn SerialPort>) -> Result<ESP32SensorData, ES
     // [joy_click] [system_move_mask] [display_hue_high] [display_hue_low] [0x55]
 
     let mut buffer = [0u8; 23];
-
-    // Scan for 0xAA start marker — resynchronises after any misalignment without reconnecting.
-    loop {
-        let mut header = [0u8; 1];
-        match port.read(&mut header) {
-            Ok(0) | Err(_) if {
-                let is_timeout = matches!(
-                    port.read(&mut header),
-                    Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut
-                );
-                is_timeout
-            } => return Err(ESP32Error::ReadTimeout),
-            Ok(0) => return Err(ESP32Error::ReadTimeout),
-            Ok(_) => {
-                if header[0] == 0xAA {
-                    buffer[0] = 0xAA;
-                    break;
-                }
-                // Not the start marker — discard and keep scanning.
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
-                return Err(ESP32Error::ReadTimeout);
-            }
-            Err(_) => return Err(ESP32Error::ConnectionLost),
-        }
-    }
-
-    // Read the remaining 22 bytes of the packet.
-    let mut bytes_read = 1;
-    while bytes_read < 23 {
-        match port.read(&mut buffer[bytes_read..]) {
-            Ok(n) => {
-                bytes_read += n;
-                if n == 0 {
-                    return Err(ESP32Error::ReadTimeout);
-                }
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
-                return Err(ESP32Error::ReadTimeout);
-            }
-            Err(_) => {
-                return Err(ESP32Error::ConnectionLost);
-            }
-        }
-    }
+    buffer[0] = 0xAA;
+    read_exact_or_timeout(port, &mut buffer[1..])?;
 
     // Validate footer only (header is guaranteed 0xAA by the scan above).
     if buffer[22] != 0x55 {
@@ -1445,6 +1516,24 @@ fn send_pending_eruptions(
         debug_assert_eq!(packet.len(), 18);
         if let Err(err) = port.write_all(&packet) {
             println!("❌ ESP32: Failed to send eruption: {}", err);
+            break;
+        }
+    }
+}
+
+// Pakketten voor de liaison om uit te zenden, als tunnelframes
+fn send_pending_tunnel(port: &mut Box<dyn SerialPort>, shared_state: &Arc<Mutex<ESP32SharedState>>) {
+    let packets = match shared_state.lock() {
+        Ok(mut state) if !state.outgoing_tunnel.is_empty() => std::mem::take(&mut state.outgoing_tunnel),
+        _ => return,
+    };
+    for packet in packets {
+        let Some(frame) = encode_tunnel_frame(&packet) else {
+            println!("❌ ESP32: tunnelpakket van {} bytes past niet (max {})", packet.len(), TUNNEL_MAX_LEN);
+            continue;
+        };
+        if let Err(e) = port.write_all(&frame) {
+            println!("❌ ESP32: Failed to send tunnel packet: {}", e);
             break;
         }
     }

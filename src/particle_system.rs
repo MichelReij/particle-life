@@ -81,6 +81,8 @@ const DEFAULT_COLORS: [[f32; 3]; NUM_TYPES] = [
     [0.5450, 0.4704, 0.6709], // #8b78ab - WLP: violet
 ];
 
+const DEFAULT_OPACITY: f32 = 0.8;
+
 #[derive(Debug)]
 pub struct ParticleSystem {
     particles: Vec<Particle>,
@@ -153,7 +155,7 @@ impl ParticleSystem {
             active_count: params.num_particles,
             num_types,
             base_particle_size: params.particle_render_size,
-            particle_opacity: 0.8,
+            particle_opacity: DEFAULT_OPACITY,
             type_colors: DEFAULT_COLORS,
             spatial_grid,
         }
@@ -242,7 +244,9 @@ impl ParticleSystem {
 
                 // spawn_time = -1.0 (sentinel: initial particle, exempt from spawn damping)
                 buffer.extend_from_slice(&(-1.0f32).to_le_bytes());
-                buffer.extend_from_slice(&0.0f32.to_le_bytes()); // _padding2
+                // color_seed: kleurvariatie binnen het type (vert.wgsl); de GPU kiest
+                // bij elke latere spawn een nieuwe
+                buffer.extend_from_slice(&(i as u32).wrapping_mul(0x9E37_79B9).to_le_bytes());
             } else {
                 // Fill with zeros for missing particles
                 buffer.extend_from_slice(&[0u8; 48]);
@@ -250,6 +254,12 @@ impl ParticleSystem {
         }
 
         buffer
+    }
+
+    /// Ingebouwde typekleuren en dekking terugzetten
+    pub fn reset_colors(&mut self) {
+        self.type_colors = DEFAULT_COLORS;
+        self.particle_opacity = DEFAULT_OPACITY;
     }
 
     // Get particle colors buffer in RGBA format

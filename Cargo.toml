@@ -107,6 +107,8 @@ env_logger = "0.11"
 serialport = "4.4"
 # Lokale tijdzone (localtime_r) voor het tijdpakket naar de ESP32's
 libc = "0.2"
+# Instellingenbestand van de installatie (~/.config/origin-of-life/settings.json)
+serde_json = "1.0"
 # Alleen voor audio-uitvoer (de drone wordt zelf gesynthetiseerd); geen decoders nodig
 rodio = { version = "0.19", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png"] }

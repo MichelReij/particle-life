@@ -23,6 +23,10 @@ src/
   config.rs                # Configuration constants
   esp32_communication.rs   # ESP32 serial comm (native only)
   audio_engine.rs          # Native audio-uitvoer van de drone via rodio
+  installation_settings.rs # Instellingen van de installatie: mengpaneel, kleurenpalet (native only)
+  settings_protocol.rs     # Instellingen webpagina ↔ simulatie over ESP-NOW (native only)
+  watched_json.rs          # Generiek JSON-instellingenbestand dat gevolgd wordt (native only)
+  installation-link.ts     # Web: knoppen Send/Load naar de installatie (alleen lokaal)
   sonification.rs          # Simulatie → DroneParams (+ StormTracker voor onweer)
   stats_reader.rs          # GPU readback for particle-type statistics (native only)
   shaders/
@@ -76,7 +80,20 @@ dezelfde klank kan draaien — daar via `Milgram/scripts/sync-drone.sh` als loss
 feature `worklet`), aangestuurd vanuit de simulatie (`src/sonification.rs`). Native via rodio
 (`src/audio_engine.rs`), web via een AudioWorklet (`src/audio_engine_wasm.rs`,
 `src/audio_worklet_exports.rs`, `public/audio-processor.js`). Het mengpaneel staat in de
-web-UI (`src/audio-mixer.ts`). Offline renderen voor metingen:
+web-UI (`src/audio-mixer.ts`); de native simulatie leest dezelfde instellingen (dB per kanaal,
+sleutels `dsp::mix::KEYS`, bliksem-crunch) uit `~/.config/origin-of-life/settings.json`
+(`src/installation_settings.rs`). Ontbreekt dat bestand, dan maakt de simulatie het aan; met de
+hand aanpassen mag, wijzigingen worden binnen 2 s opgepikt, een onleesbaar bestand laat de
+vorige waarden staan. Daar staat ook het kleurenpalet van de deeltjestypes (`colors`, zonder =
+ingebouwde kleuren).
+
+Lokaal (`npm run dev`, OTA-master aan de Mac) hebben het mengpaneel en het kleurenpaneel een rij
+**Installation: Send / Load** (`src/installation-link.ts`): pagina → dev-server
+(`espnow-kit/tools/espnow_http.js`) → OTA-master → ESP-NOW → liaison (tunnel 0x4F10..0x4F1F,
+`ESP32_UART_Protocol.h`) → simulatie, die toepast, in settings.json bewaart en antwoordt met wat
+nu geldt (`src/settings_protocol.rs`). Op michelreij.nl bestaat het eindpunt niet en is de rij weg.
+
+Offline renderen voor metingen:
 ```bash
 cargo run --release --example render_drone -- uit.wav [seconden] ...   # zie de example voor alle argumenten
 ```

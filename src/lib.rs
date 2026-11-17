@@ -41,6 +41,15 @@ pub mod sonification;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod audio_engine;
 
+// Instellingenbestand dat de applicatie volgt (native only) en het schema van de
+// installatie-instellingen (mengpaneel, later het kleurenpalet)
+#[cfg(not(target_arch = "wasm32"))]
+pub mod watched_json;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod installation_settings;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod settings_protocol;
+
 // Audio engine: ambient drone via Web Audio API / AudioWorklet (WASM only)
 #[cfg(target_arch = "wasm32")]
 pub mod audio_engine_wasm;
@@ -76,6 +85,9 @@ pub use esp32_communication::*;
 // particle's own start, instead of every particle in the batch getting the
 // exact same transition_start and popping in perfect lockstep.
 pub const POPULATION_TRANSITION_STAGGER_SECONDS: f32 = 1.5;
+/// Hoe vaak de webversie de bliksemtoestand van de GPU leest (ms), net als native
+#[cfg(target_arch = "wasm32")]
+const LIGHTNING_POLL_MS: f64 = 100.0;
 
 // Hook for better error messages in browser console
 #[cfg(target_arch = "wasm32")]
@@ -114,9 +126,12 @@ pub struct ParticleLifeEngine {
     current_time: f32,
     frame_count: u32,
     renderer: Option<WebGpuRenderer>,
+    // Ook als de renderer er nog niet is (de UI zet hem bij het opstarten)
+    screen_brightness: f32,
     // Continuous rule evolution (shared logic, lives in interaction_rules.rs)
     rule_evolution: RuleEvolution,
     last_seen_flash_id: u32,
+    last_lightning_poll_ms: f64, // zie poll_lightning
     storm_tracker: sonification::StormTracker,
     blob_tracker: blobs::BlobTracker,
     chaos_meter: sonification::ChaosMeter,
@@ -181,8 +196,10 @@ impl ParticleLifeEngine {
             current_time: 0.0,
             frame_count: 0,
             renderer: None,
+            screen_brightness: 1.0,
             rule_evolution,
             last_seen_flash_id: 0,
+            last_lightning_poll_ms: 0.0,
             storm_tracker: sonification::StormTracker::default(),
             blob_tracker: blobs::BlobTracker::default(),
             chaos_meter: sonification::ChaosMeter::default(),
@@ -346,6 +363,9 @@ impl ParticleLifeEngine {
         }
 
         // PHYSICS IS HANDLED BY GPU COMPUTE SHADER - no CPU physics needed
+        // Bliksemtoestand van de GPU (vóór de regels: een superbliksem zet ze om)
+        self.poll_lightning();
+
         // === Continuous rule evolution (lerp) ===
         self.interaction_rules = self.rule_evolution.tick(delta_time, &mut self.rng).clone();
 
@@ -616,6 +636,15 @@ impl ParticleLifeEngine {
         self.particle_system.particle_opacity = opacity.clamp(0.0, 1.0);
     }
 
+    /// Helderheid van het hele beeld (1 = zoals ontworpen), voor het omgevingslicht
+    #[wasm_bindgen]
+    pub fn set_screen_brightness(&mut self, brightness: f32) {
+        self.screen_brightness = brightness;
+        if let Some(r) = &self.renderer {
+            r.set_screen_brightness(brightness);
+        }
+    }
+
     #[wasm_bindgen]
     pub fn set_type_color(&mut self, type_idx: usize, r: f32, g: f32, b: f32) {
         if type_idx < self.particle_system.type_colors.len() {
@@ -770,6 +799,7 @@ impl ParticleLifeEngine {
         let canvas_size = canvas.width();
         match WebGpuRenderer::new(&canvas).await {
             Ok(renderer) => {
+                renderer.set_screen_brightness(self.screen_brightness);
                 self.renderer = Some(renderer);
                 // Sync simulation params to actual canvas size (may differ from compile-time 1080)
                 self.simulation_params.canvas_render_width  = canvas_size as f32;
@@ -829,26 +859,27 @@ impl ParticleLifeEngine {
         }
     }
 
-    #[wasm_bindgen]
-    pub async fn check_super_lightning(&mut self) -> u32 {
-        let mut renderer = match self.renderer.take() { Some(r) => r, None => return 0 };
-        let result = match renderer.update_lightning_cache().await {
-            Ok(()) => {
-                if let Some(bolt) = renderer.get_cached_lightning_bolt() {
-                    if bolt.flash_id > self.last_seen_flash_id {
-                        self.last_seen_flash_id = bolt.flash_id;
-                        if bolt.is_super() { 1 } else { 0 }
-                    } else { 0 }
-                } else { 0 }
+    /// Bliksemtoestand van de GPU, zonder ooit te wachten (zoals native): een eerder
+    /// gestarte readback ophalen als die klaar is, en hooguit elke 100 ms een nieuwe
+    /// starten. Daarop timet de drone de donder; een superbliksem zet de regels om.
+    /// Vroeger was dit een async check (check_super_lightning) die elke seconde de
+    /// hele engine vasthield tot de GPU antwoordde — de pagina sloeg dan frames over.
+    fn poll_lightning(&mut self) {
+        let Some(renderer) = self.renderer.as_mut() else { return };
+        if let Some(Ok(bolt)) = renderer.poll_lightning_readback() {
+            renderer.process_lightning_bolt(&bolt);
+            if bolt.flash_id > self.last_seen_flash_id {
+                self.last_seen_flash_id = bolt.flash_id;
+                if bolt.is_super() {
+                    self.rule_evolution.snap_to_new(&mut self.rng);
+                    console_log!("⚡ Super-lightning: rules snapped immediately, new lerp started");
+                }
             }
-            Err(_) => 0,
-        };
-        self.renderer = Some(renderer);
-        if result == 1 {
-            self.rule_evolution.snap_to_new(&mut self.rng);
-            console_log!("⚡ Super-lightning: rules snapped immediately, new lerp started");
         }
-        result
+        let now = js_sys::Date::now();
+        if now - self.last_lightning_poll_ms >= LIGHTNING_POLL_MS && renderer.start_lightning_readback() {
+            self.last_lightning_poll_ms = now;
+        }
     }
 
     #[wasm_bindgen]

@@ -433,7 +433,6 @@ class EmbedApp {
     private engine: ParticleLifeEngine | null = null;
     private canvas: HTMLCanvasElement | null = null;
     private animationId: number | null = null;
-    private engineBusy = false;
     private isPaused = false;
     private autopaused = false;
     private intersectionObserver: IntersectionObserver | null = null;
@@ -714,7 +713,7 @@ class EmbedApp {
                     v,
                 );
                 this.sliderDefaults.temperature = v;
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_temperature(v);
                     const dur = 1800 - (1620 * (v - 3)) / 157;
                     this.engine.set_rules_lerp_duration(Math.round(dur));
@@ -755,7 +754,7 @@ class EmbedApp {
                     v,
                 );
                 this.sliderDefaults.ph = v;
-                if (!this.engine || this.engineBusy) return;
+                if (!this.engine) return;
                 if (this.activeHypothesis === "wlp") this.engine.set_uv(v);
                 else this.engine.set_ph(v);
             };
@@ -799,7 +798,7 @@ class EmbedApp {
                     v,
                 );
                 this.sliderDefaults.electricalActivity = v;
-                if (this.engine && !this.engineBusy)
+                if (this.engine)
                     this.engine.set_electrical_activity(v);
             };
             elecSlider.addEventListener("input", update);
@@ -812,7 +811,7 @@ class EmbedApp {
             "ol-pres-val",
             (v) => `${v}m`,
             (v) => {
-                if (this.engine && !this.engineBusy) {
+                if (this.engine) {
                     this.engine.set_pressure(v);
                     this.engine.set_particle_count_from_pressure(v);
                     this.applyHypothesis(
@@ -852,7 +851,7 @@ class EmbedApp {
         );
         this.sliderDefaults = vals;
 
-        if (this.engine && !this.engineBusy) {
+        if (this.engine) {
             this.engine.set_temperature(vals.temperature);
             if (hypothesis === "wlp") this.engine.set_uv(vals.ph);
             else this.engine.set_ph(vals.ph);
@@ -861,7 +860,7 @@ class EmbedApp {
     }
 
     private applyZoomPan() {
-        if (this.engine && !this.engineBusy) {
+        if (this.engine) {
             this.engine.set_zoom(this.zoom, this.panX, this.panY);
         }
     }
@@ -1170,26 +1169,6 @@ class EmbedApp {
         document.getElementById("ol-record-btn")?.classList.add("recording");
     }
 
-    // Eén keer per seconde de bliksemplanning van de GPU lezen, net als in
-    // main.ts: daarop timet de drone de donder en het geknetter, en een
-    // superbliksem zet de regels om. Zonder deze readback bleef de bliksem in
-    // de embed stil. check_super_lightning is async en houdt de engine vast
-    // zolang hij wacht, vandaar engineBusy (anders re-entrancy-panics in wasm).
-    private lastLightningCheck = 0;
-
-    private async checkLightning(now: number) {
-        if (!this.engine || this.engineBusy || now - this.lastLightningCheck < 1000) return;
-        this.lastLightningCheck = now;
-        this.engineBusy = true;
-        try {
-            await this.engine.check_super_lightning();
-        } catch (e) {
-            console.warn("Origin of Life: lightning readback failed:", e);
-        } finally {
-            this.engineBusy = false;
-        }
-    }
-
     private startLoop() {
         this.lastTime = performance.now();
 
@@ -1247,18 +1226,13 @@ class EmbedApp {
                 return;
             }
 
-            if (
-                !this.isPaused &&
-                this.engine &&
-                !this.engineBusy
-            ) {
+            if (!this.isPaused && this.engine) {
                 try {
                     this.engine.update_frame(dt);
                     this.engine.render();
                 } catch (e) {
                     console.error("Origin of Life simulation error:", e);
                 }
-                this.checkLightning(now);
             }
 
             this.animationId = requestAnimationFrame(animate);

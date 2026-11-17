@@ -122,6 +122,7 @@ struct ParticleInstanceInput {
     @location(6) transition_start: f32,
     @location(7) transition_type: u32,
     @location(8) is_active: u32,
+    @location(9) color_seed: u32, // nieuw bij elke spawn (compute.wgsl)
 }
 
 struct VertexOutput {
@@ -136,6 +137,101 @@ struct VertexOutput {
 // Get color for particle type from precomputed custom colors buffer
 fn getColorForType(ptype: u32, num_types: u32) -> vec4<f32> {
     return particle_colors[ptype];
+}
+
+// ─── Variatie binnen een deeltjestype ─────────────────────────────────────────
+// Elk deeltje wijkt vast een klein beetje af van de kleur van zijn type, zoals
+// individuen van één soort: lightness, chroma en hue in OkLCH, plus de opacity.
+// Elke as krijgt een eigen afwijking binnen ±max, klokvormig verdeeld (hash_bell):
+// de meeste deeltjes liggen dicht bij de typekleur, een enkeling haalt de rand.
+// Uit het kleurzaadje dat het deeltje bij elke spawn krijgt (color_seed,
+// compute.wgsl); zolang het leeft blijft zijn kleur dus gelijk.
+// Max ±5% van de volle schaal, in de schaal van CSS-oklch() en het kleurenpaneel:
+// L 0..1 → ±0.05, C 0..0.4 → ±0.02, H 0..360° → ±18°, opacity 0..1 → ±0.05.
+const VARY_L: f32 = 0.05;
+const VARY_C: f32 = 0.02;
+const VARY_H_DEG: f32 = 18.0;
+const VARY_ALPHA: f32 = 0.05;
+
+// PCG-hash
+fn pcg(x: u32) -> u32 {
+    let state = x * 747796405u + 2891336453u;
+    let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
+}
+
+// u32 → gelijkmatig verdeeld in [-1, 1]
+fn unit_signed(h: u32) -> f32 {
+    return f32(h) * (2.0 / 4294967295.0) - 1.0;
+}
+
+// Naar het midden verdeeld in [-1, 1]: het gemiddelde van twee gelijkmatige waarden
+// (driehoeksverdeling, σ ≈ 0.41). Komt nooit buiten ±1: 36% valt binnen ±0.2
+// (gelijkmatig: 20%), 16% buiten ±0.6 (gelijkmatig: 40%). Smaller: middel over
+// meer waarden (drie: σ = 1/3, 43% binnen ±0.2, 7% buiten ±0.6).
+fn hash_bell(x: u32) -> f32 {
+    let a = pcg(x);
+    let b = pcg(a);
+    return (unit_signed(a) + unit_signed(b)) / 2.0;
+}
+
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let x = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    return select(pow((x + 0.055) / 1.055, vec3<f32>(2.4)), x / 12.92, x <= vec3<f32>(0.04045));
+}
+
+fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let x = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    return select(1.055 * pow(x, vec3<f32>(1.0 / 2.4)) - 0.055, x * 12.92, x <= vec3<f32>(0.0031308));
+}
+
+// OkLab (Björn Ottosson) ↔ lineair sRGB
+fn linear_srgb_to_oklab(c: vec3<f32>) -> vec3<f32> {
+    let lms = vec3<f32>(
+        0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b,
+        0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b,
+        0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b,
+    );
+    let l_ = pow(max(lms, vec3<f32>(0.0)), vec3<f32>(1.0 / 3.0));
+    return vec3<f32>(
+        0.2104542553 * l_.x + 0.7936177850 * l_.y - 0.0040720468 * l_.z,
+        1.9779984951 * l_.x - 2.4285922050 * l_.y + 0.4505937099 * l_.z,
+        0.0259040371 * l_.x + 0.7827717662 * l_.y - 0.8086757660 * l_.z,
+    );
+}
+
+fn oklab_to_linear_srgb(lab: vec3<f32>) -> vec3<f32> {
+    let l_ = lab.x + 0.3963377774 * lab.y + 0.2158037573 * lab.z;
+    let m_ = lab.x - 0.1055613458 * lab.y - 0.0638541728 * lab.z;
+    let s_ = lab.x - 0.0894841775 * lab.y - 1.2914855480 * lab.z;
+    let l = l_ * l_ * l_;
+    let m = m_ * m_ * m_;
+    let s = s_ * s_ * s_;
+    return vec3<f32>(
+        4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+    );
+}
+
+// Typekleur (sRGB zoals in particle_colors, + alpha) → kleur van dit ene deeltje
+fn vary_per_particle(base: vec4<f32>, id: u32) -> vec4<f32> {
+    let seed = id * 4u;
+    let dl = hash_bell(seed) * VARY_L;
+    let dc = hash_bell(seed + 1u) * VARY_C;
+    let dh = radians(hash_bell(seed + 2u) * VARY_H_DEG);
+    let da = hash_bell(seed + 3u) * VARY_ALPHA;
+
+    let lab = linear_srgb_to_oklab(srgb_to_linear(base.rgb));
+    let chroma = length(lab.yz);
+    var ab = lab.yz;
+    if (chroma > 1e-4) {
+        // Hue draaien en chroma schalen; grijs blijft grijs (heeft geen tint)
+        let rotated = vec2<f32>(ab.x * cos(dh) - ab.y * sin(dh), ab.x * sin(dh) + ab.y * cos(dh));
+        ab = rotated * (max(chroma + dc, 0.0) / chroma);
+    }
+    let rgb = linear_to_srgb(oklab_to_linear_srgb(vec3<f32>(clamp(lab.x + dl, 0.0, 1.0), ab)));
+    return vec4<f32>(rgb, clamp(base.a + da, 0.0, 1.0));
 }
 
 // Pipeline-overridable: 1.1 for normal rendering, larger values for the glow pass
@@ -200,7 +296,9 @@ fn main(particle_attrs: ParticleInstanceInput, vertex_attrs: VertexInput) -> Ver
     // appearing (grow) is the exact mirror — fades in quickly at first and
     // eases off as it nears full opacity (ease-out, 1-(1-t)²). For a
     // particle with no active transition this is a no-op (alpha stays 1).
-    var particle_color = getColorForType(particle_attrs.particle_type, sim_params.num_types);
+    var particle_color = vary_per_particle(
+        getColorForType(particle_attrs.particle_type, sim_params.num_types),
+        particle_attrs.color_seed);
     var alpha_fade = 1.0;
     if (particle_attrs.transition_start > 0.0) {
         let elapsed = sim_params.time - particle_attrs.transition_start;

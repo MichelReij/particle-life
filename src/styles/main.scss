@@ -518,7 +518,8 @@ input[type="button"] {
         }
     }
 
-    #opacity-row {
+    #opacity-row,
+    #brightness-row {
         display    : flex;
         align-items: center;
         gap        : 8px;
@@ -672,6 +673,59 @@ input[type="button"] {
         &:hover {
             border-color: var(--accent-color);
             color       : var(--accent-color);
+        }
+    }
+}
+
+// Instellingen naar/van de installatie (installation-link.ts), in het mengpaneel en
+// het kleurenpaneel; alleen lokaal zichtbaar
+.installation-sync {
+    display    : flex;
+    align-items: center;
+    gap        : 6px;
+    margin-top : 10px;
+    font-size  : 11px;
+    color      : rgba(255, 255, 255, 0.8);
+
+    button {
+        background   : rgba(255, 255, 255, 0.15);
+        border       : 1px solid rgba(255, 255, 255, 0.3);
+        color        : white;
+        padding      : 3px 10px;
+        border-radius: 3px;
+        cursor       : pointer;
+        font-size    : 11px;
+
+        &:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor : default;
+        }
+
+        // Er is iets veranderd dat de installatie nog niet heeft
+        &.dirty {
+            border-color: var(--accent-color);
+            color       : var(--accent-color);
+        }
+    }
+
+    .installation-status {
+        margin-left: 4px;
+        color      : rgba(255, 255, 255, 0.6);
+
+        &[data-tone="ok"] {
+            color: #8fd18f;
+        }
+
+        &[data-tone="warn"] {
+            color: var(--accent-color);
+        }
+
+        &[data-tone="error"] {
+            color: #ff8a80;
         }
     }
 }

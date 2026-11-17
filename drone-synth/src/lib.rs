@@ -404,6 +404,36 @@ pub mod mix {
     /// Onder deze (afgevlakte) gain wordt een laag niet gerenderd: de Milgram zet de
     /// meeste lagen op 0 en hoeft ze dan ook niet door te rekenen
     pub const AUDIBLE:    f32   = 1e-4;
+    /// Standaard sample-and-hold van de bliksem (= crunch 3 op het mengpaneel)
+    pub const HOLD_DEFAULT: u32 = super::LIGHTNING_HOLD_DEFAULT;
+
+    /// Namen van de kanalen, in de volgorde hierboven. Dezelfde sleutels als het
+    /// mengpaneel van de web-UI (src/audio-mixer.ts) en het instellingenbestand van
+    /// de installatie — hernoemen breekt bewaarde instellingen.
+    pub const KEYS: [&str; LEN] = [
+        "cellos", "theremin", "brainwaves", "droplets", "stream", "surf", "thunder",
+        "lightning", "sonar", "vents", "events", "chaos", "reverb", "master",
+    ];
+
+    /// Bereik van een fader in dB; MIN_DB (onderste stand) betekent uit
+    pub const MIN_DB: f32 = -40.0;
+    pub const MAX_DB: f32 = 12.0;
+
+    /// Faderstand in dB → lineaire gain voor set_mix (zelfde regel als audio-mixer.ts)
+    pub fn db_to_gain(db: f32) -> f32 {
+        if db.is_nan() {
+            1.0
+        } else if db <= MIN_DB {
+            0.0
+        } else {
+            10f32.powf(db.min(MAX_DB) / 20.0)
+        }
+    }
+
+    /// Bliksem-crunch zoals op het mengpaneel (0 = uit) → sample-and-hold in samples
+    pub fn crunch_to_hold(crunch: u32) -> f32 {
+        (crunch.saturating_add(1) as f32).min(HOLD_MAX)
+    }
 }
 
 /// Thread-safe handle om de parameters en de mix van een draaiende DroneSynth te zetten.

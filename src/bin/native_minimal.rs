@@ -5,6 +5,9 @@
 
 use particle_life_wasm::audio_engine::AudioEngine;
 use particle_life_wasm::config::*;
+use particle_life_wasm::installation_settings::{ColorSettings, InstallationSettings};
+use particle_life_wasm::settings_protocol::{self, Incoming};
+use particle_life_wasm::watched_json::{config_path, WatchedJson};
 use particle_life_wasm::sonification::{GpuGlobalStats, GpuTypeStats, SonificationState};
 use particle_life_wasm::stats_reader::StatsReader;
 use particle_life_wasm::*;
@@ -44,6 +47,9 @@ struct MinimalNativeApp {
 
     // Audio: nieuwe synthesizer
     audio_engine: Option<AudioEngine>,
+
+    // Instellingen van de installatie (mengpaneel), ~/.config/origin-of-life/settings.json
+    settings: WatchedJson<InstallationSettings>,
 
     // Sonificatie
     sonification_state: SonificationState,
@@ -111,6 +117,10 @@ impl Default for MinimalNativeApp {
             esp32_manager: None,
             last_esp32_update: std::time::Instant::now(),
             audio_engine: None,
+            settings: WatchedJson::open(
+                config_path("origin-of-life", "settings.json"),
+                std::time::Duration::from_secs(2),
+            ),
             sonification_state: SonificationState::default(),
             last_gpu_stats: None,
             stats_reader: None,
@@ -224,6 +234,7 @@ impl ApplicationHandler for MinimalNativeApp {
                 console_log!("   Simulatie gaat door zonder audio");
             }
         }
+        self.apply_settings();
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
@@ -322,6 +333,13 @@ impl ApplicationHandler for MinimalNativeApp {
                         }
                     }
                 }
+
+                // Instellingenbestand met de hand aangepast? (kijkt hooguit elke 2 s)
+                if self.settings.poll() {
+                    self.apply_settings();
+                }
+                // Instellingen van de webpagina (OTA-master → ESP-NOW → liaison)
+                self.handle_settings_packets();
 
                 // Simulatie update
                 self.current_time += delta_time;
@@ -494,6 +512,75 @@ impl ApplicationHandler for MinimalNativeApp {
 }
 
 impl MinimalNativeApp {
+    /// Instellingen van de installatie toepassen (bij de start en na elke wijziging)
+    fn apply_settings(&mut self) {
+        let settings = self.settings.get();
+        if let Some(e) = &self.audio_engine {
+            e.set_mix(&settings.audio.gains());
+            console_log!("🎚️ Mengpaneel: {}", settings.audio.summary());
+        }
+        let brightness = settings.colors.as_ref().map_or(1.0, |c| c.screen_brightness);
+        if let Some(r) = &self.renderer {
+            r.set_screen_brightness(brightness);
+        }
+        let ps = &mut self.particle_system;
+        ps.reset_colors();
+        if let Some(colors) = &settings.colors {
+            for (i, slot) in ps.type_colors.iter_mut().enumerate() {
+                match colors.rgb(i) {
+                    Some(rgb) => *slot = rgb,
+                    None => console_log!("⚠️ settings.json: kleur van type {} ontbreekt of is ongeldig — ingebouwde kleur", i),
+                }
+            }
+            ps.particle_opacity = colors.opacity.clamp(0.0, 1.0);
+            console_log!("🎨 Kleuren: {}", colors.summary());
+        }
+    }
+
+    /// Instellingen van de webpagina (settings_protocol.rs): toepassen, bewaren in
+    /// settings.json en antwoorden met wat nu geldt
+    fn handle_settings_packets(&mut self) {
+        let packets = match &self.esp32_manager {
+            Some(esp32) => esp32.take_tunnel_packets(),
+            None => return,
+        };
+        for packet in packets {
+            let (seq, msg_type) = match settings_protocol::parse(&packet) {
+                Some(Incoming::SetAudio { seq, audio }) => {
+                    let mut s = self.settings.get().clone();
+                    s.audio = audio;
+                    if self.settings.set(s) {
+                        console_log!("📨 Mengpaneel van de webpagina");
+                        self.apply_settings();
+                    }
+                    (seq, settings_protocol::MSG_AUDIO)
+                }
+                Some(Incoming::SetColors { seq, colors }) => {
+                    let mut s = self.settings.get().clone();
+                    s.colors = Some(colors);
+                    if self.settings.set(s) {
+                        console_log!("📨 Kleuren van de webpagina");
+                        self.apply_settings();
+                    }
+                    (seq, settings_protocol::MSG_COLORS)
+                }
+                Some(Incoming::Request { seq, msg_type }) => (seq, msg_type),
+                None => continue,
+            };
+            let state = if msg_type == settings_protocol::MSG_AUDIO {
+                settings_protocol::audio_state(seq, &self.settings.get().audio)
+            } else {
+                let ps = &self.particle_system;
+                let brightness = self.settings.get().colors.as_ref().map_or(1.0, |c| c.screen_brightness);
+                let current = ColorSettings::from_rgb(&ps.type_colors, ps.particle_opacity, brightness);
+                settings_protocol::colors_state(seq, &current)
+            };
+            if let Some(esp32) = &self.esp32_manager {
+                esp32.send_tunnel_packet(state);
+            }
+        }
+    }
+
     /// Native variant van `ParticleLifeEngine::set_particle_count` (lib.rs, web-only via
     /// wasm_bindgen) — start een vloeiende groei/krimp-transitie naar `count` deeltjes.
     /// MinimalNativeApp deelt geen struct met ParticleLifeEngine, dus dezelfde logica

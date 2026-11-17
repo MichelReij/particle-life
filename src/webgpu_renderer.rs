@@ -261,6 +261,7 @@ pub struct WebGpuRenderer {
     blur_h_bind_group: wgpu::BindGroup,
     vignette_pipeline: wgpu::RenderPipeline,
     vignette_bind_group: wgpu::BindGroup,
+    vignette_uniform_buffer: wgpu::Buffer, // x = schermhelderheid
 
     // Positie-indicator midden-onder (zie shaders/position_indicator.wgsl)
     position_indicator_pipeline: wgpu::RenderPipeline,
@@ -890,6 +891,8 @@ impl WebGpuRenderer {
                 wgpu::VertexAttribute { shader_location: 6, offset: 28, format: wgpu::VertexFormat::Float32 },
                 wgpu::VertexAttribute { shader_location: 7, offset: 32, format: wgpu::VertexFormat::Uint32 },
                 wgpu::VertexAttribute { shader_location: 8, offset: 36, format: wgpu::VertexFormat::Uint32 },
+                // offset 40 = spawn_time (alleen compute)
+                wgpu::VertexAttribute { shader_location: 9, offset: 44, format: wgpu::VertexFormat::Uint32 }, // color_seed
             ],
         };
         let quad_vbl = wgpu::VertexBufferLayout {
@@ -1030,6 +1033,8 @@ impl WebGpuRenderer {
                 wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
                 wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
                 wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                // x = schermhelderheid (set_screen_brightness)
+                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }, count: None },
             ],
         });
         let pp1_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: Some("PP1 PL"), bind_group_layouts: &[&pp1_bgl], push_constant_ranges: &[] });
@@ -1056,12 +1061,18 @@ impl WebGpuRenderer {
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&post_texture_view) },
             ],
         });
+        let vignette_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vignette Uniforms"),
+            contents: bytemuck::cast_slice(&[1.0f32, 0.0, 0.0, 0.0]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
         let vignette_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Vignette BG"), layout: &pp2_bgl,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::Sampler(&scene_sampler) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&blur_temp_texture_view) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&post_texture_view) },
+                wgpu::BindGroupEntry { binding: 3, resource: vignette_uniform_buffer.as_entire_binding() },
             ],
         });
 
@@ -1082,6 +1093,7 @@ impl WebGpuRenderer {
             blur_h_bind_group,
             vignette_pipeline,
             vignette_bind_group,
+            vignette_uniform_buffer,
             position_indicator_pipeline,
             position_indicator_bind_group,
             position_indicator_buffer,
@@ -1144,6 +1156,13 @@ impl WebGpuRenderer {
 
     /// Lopende uitbarstingen voor de bubbels (EruptionScheduler::gpu_data); zonder
     /// actieve uitbarsting wordt de pass overgeslagen.
+    /// Helderheid van het hele beeld (1 = zoals ontworpen), voor het omgevingslicht:
+    /// de laatste renderstap vermenigvuldigt de kleur ermee
+    pub fn set_screen_brightness(&self, brightness: f32) {
+        let b = if brightness.is_finite() { brightness.clamp(0.0, 2.0) } else { 1.0 };
+        self.queue.write_buffer(&self.vignette_uniform_buffer, 0, bytemuck::cast_slice(&[b, 0.0, 0.0, 0.0]));
+    }
+
     pub fn set_eruptions(&mut self, data: &[f32; crate::eruptions::GPU_FLOATS]) {
         self.eruptions_active = data.chunks_exact(crate::eruptions::GPU_FLOATS_PER_ERUPTION).any(|e| e[7] > 0.5);
         self.queue.write_buffer(&self.eruptions_buffer, 0, bytemuck::cast_slice(data));
@@ -1438,10 +1457,11 @@ impl WebGpuRenderer {
         }
     }
 
-    /// Start een niet-blokkerende readback van de bliksemstatus (native). Geeft false
-    /// als er nog een loopt. Het resultaat komt via poll_lightning_readback, meestal
-    /// een paar frames later — anders dan read_lightning_bolt_data, dat met
-    /// poll(Wait) de CPU liet wachten tot de GPU al zijn werk af had.
+    /// Start een niet-blokkerende readback van de bliksemstatus (native en web). Geeft
+    /// false als er nog een loopt. Het resultaat komt via poll_lightning_readback,
+    /// meestal een paar frames later. Nooit op de GPU wachten: native liet dat de CPU
+    /// stilzetten, op het web moest de hele engine dan wachten en sloeg de pagina
+    /// frames over (zichtbaar haperen, elke seconde).
     pub fn start_lightning_readback(&self) -> bool {
         use std::sync::atomic::Ordering;
         if self.lightning_readback.load(Ordering::Acquire) != LIGHTNING_READBACK_IDLE {
@@ -1482,34 +1502,6 @@ impl WebGpuRenderer {
             }
             _ => None,
         }
-    }
-
-    pub async fn get_lightning_status(&self) -> Result<LightningBolt, RendererError> {
-        self.read_lightning_bolt_data().await
-    }
-
-    pub async fn read_lightning_bolt_data(&self) -> Result<LightningBolt, RendererError> {
-        let size = std::mem::size_of::<LightningBolt>() as u64;
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Lightning Staging"), size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("Lightning Copy") });
-        encoder.copy_buffer_to_buffer(&self.lightning_bolt_buffer, 0, &staging, 0, size);
-        self.queue.submit(std::iter::once(encoder.finish()));
-
-        let slice = staging.slice(..);
-        let (tx, rx) = futures::channel::oneshot::channel();
-        slice.map_async(wgpu::MapMode::Read, move |r| { tx.send(r).ok(); });
-        self.device.poll(wgpu::MaintainBase::Wait).map_err(|e| renderer_error("Poll failed", e))?;
-        rx.await.map_err(|_| renderer_error("Channel closed", ""))?.map_err(|e| renderer_error("Map failed", e))?;
-
-        let data = slice.get_mapped_range();
-        let bolt = *bytemuck::from_bytes::<LightningBolt>(&data[..std::mem::size_of::<LightningBolt>()]);
-        drop(data);
-        staging.unmap();
-        Ok(bolt)
     }
 
     /// Bumps the position-reroll generation counter and pushes it (+ the
@@ -1556,10 +1548,9 @@ impl WebGpuRenderer {
         }
     }
 
-    pub async fn update_lightning_cache(&mut self) -> Result<(), RendererError> {
-        let bolt = self.get_lightning_status().await?;
-        self.lightning_detector.process_lightning_bolt(&bolt);
-        Ok(())
+    /// Een bolt van poll_lightning_readback verwerken (cache + nieuwe-flitsdetectie)
+    pub fn process_lightning_bolt(&mut self, bolt: &LightningBolt) {
+        self.lightning_detector.process_lightning_bolt(bolt);
     }
 
     pub fn get_device(&self) -> &wgpu::Device { &self.device }

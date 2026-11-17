@@ -214,6 +214,18 @@ return {
             directory: path.join(__dirname, "public"),
         },
         port: 3000,
+        // Instellingen naar de installatie: /espnow/… → OTA-master → ESP-NOW → liaison →
+        // simulatie (espnow-kit/tools/espnow_http.js). Alleen lokaal; op michelreij.nl
+        // bestaat het eindpunt niet en verbergt de pagina die knoppen.
+        setupMiddlewares: (middlewares, devServer) => {
+            const bridge = path.resolve(__dirname, "../../../espnow-kit/tools/espnow_http.js");
+            if (fs.existsSync(bridge)) {
+                require(bridge).install(devServer.app);
+            } else {
+                console.warn(`espnow-kit niet gevonden (${bridge}): geen instellingen naar de installatie`);
+            }
+            return middlewares;
+        },
         hot: false, // Disable HMR to avoid WebGPU device conflicts
         liveReload: true, // Enable simple live reload instead
         setupExitSignals: true, // Ensure port is released on SIGTERM/SIGINT

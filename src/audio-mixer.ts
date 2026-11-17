@@ -2,7 +2,13 @@
 // Licensed under CC BY-NC 4.0 — https://creativecommons.org/licenses/by-nc/4.0/
 
 // Mengpaneel voor de ambient drone: één fader per klankbron.
-// Volgorde moet gelijk blijven aan dsp::mix in drone-synth/src/lib.rs.
+// Volgorde en sleutels moeten gelijk blijven aan dsp::mix (KEYS) in
+// drone-synth/src/lib.rs; MIN_DB/MAX_DB en de crunch-regel ook (db_to_gain,
+// crunch_to_hold) — de native simulatie leest dezelfde waarden uit settings.json.
+// Lokaal (dev-server met de OTA-master) kan de stand naar de installatie
+// (installation-link.ts).
+
+import { AudioState, attachInstallationSync, installationAudio } from "./installation-link";
 
 const CHANNELS: { key: string; label: string; title: string }[] = [
     { key: "cellos", label: "Cellos", title: "Bowed cellos" },
@@ -74,6 +80,7 @@ export function initAudioMixer(onChange: (gains: Float32Array) => void): void {
 
     const levels = loadLevels();
     const sliders: HTMLInputElement[] = [];
+    let installationChanged = () => {};
 
     const emit = () => {
         const gains = new Float32Array(CHANNELS.length + 1);
@@ -81,6 +88,7 @@ export function initAudioMixer(onChange: (gains: Float32Array) => void): void {
         gains[CHANNELS.length] = (levels[CRUNCH_KEY] ?? CRUNCH_DEFAULT) + 1;
         onChange(gains);
         saveLevels(levels);
+        installationChanged();
     };
 
     CHANNELS.forEach((ch) => {
@@ -161,6 +169,31 @@ export function initAudioMixer(onChange: (gains: Float32Array) => void): void {
             s.value = "0";
             s.dispatchEvent(new Event("input"));
         });
+    });
+
+    // Naar en van de installatie (alleen lokaal, zie installation-link.ts)
+    const sameDb = (a: number, b: number) => Math.round(a * 10) === Math.round(b * 10);
+    installationChanged = attachInstallationSync<AudioState>(body, {
+        what: "mixer settings",
+        current: () => ({
+            mixDb: CHANNELS.map((ch) => levels[ch.key] ?? 0),
+            crunch: levels[CRUNCH_KEY] ?? CRUNCH_DEFAULT,
+        }),
+        apply: (state) => {
+            sliders.forEach((s, i) => {
+                if (i >= state.mixDb.length) return;
+                s.value = String(state.mixDb[i]);
+                s.dispatchEvent(new Event("input"));
+            });
+            crunch.value = String(state.crunch);
+            crunch.dispatchEvent(new Event("input"));
+        },
+        equal: (a, b) =>
+            a.crunch === b.crunch &&
+            a.mixDb.length === b.mixDb.length &&
+            a.mixDb.every((db, i) => sameDb(db, b.mixDb[i])),
+        send: installationAudio.send,
+        request: installationAudio.request,
     });
 
     // Inklappen, zelfde gedrag als de andere panelen

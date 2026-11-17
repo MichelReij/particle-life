@@ -24,7 +24,7 @@ struct Particle {
     transition_type: u32,
     is_active: u32,
     spawn_time: f32,
-    _padding2: f32,
+    color_seed: u32,
 }
 
 struct SimParams {

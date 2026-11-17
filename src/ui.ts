@@ -6,6 +6,7 @@
 
 import { SimulationParams, BoundaryMode } from "./particle-life-types";
 import { updateThumbColor, applySliderGradient, syncValueColor } from "./color-utils";
+import { ColorState, attachInstallationSync, installationColors } from "./installation-link";
 import { WLP_DEPTH_THRESHOLD, SLIDERS } from "./gen/life_params";
 import {
     type Hypothesis,
@@ -78,6 +79,7 @@ const STORAGE_KEYS = {
     fisheyeStrength: "particleLife_fisheyeStrength",
     particleRenderSize: "particleLife_particleRenderSize",
     opacity: "particleLife_opacity",
+    screenBrightness: "particleLife_screenBrightness",
 };
 
 // Hypothesis-specific storage keys (shared with embed.ts via hypothesis-sliders.ts)
@@ -226,6 +228,7 @@ let parameterUpdateCallbacks = {
     setElectricalActivity: (electrical: number) => {},
     setZoom: (level: number, centerX?: number, centerY?: number) => {},
     setParticleOpacity: (opacity: number) => {},
+    setScreenBrightness: (brightness: number) => {},
     setTypeColor: (typeIdx: number, r: number, g: number, b: number) => {},
     getTypeColorsRgb: (): Float32Array | null => null,
     getZoom: (): number | null => null,
@@ -251,6 +254,7 @@ export function setParameterUpdateCallbacks(callbacks: {
     setElectricalActivity?: (electrical: number) => void;
     setZoom?: (level: number, centerX?: number, centerY?: number) => void;
     setParticleOpacity?: (opacity: number) => void;
+    setScreenBrightness?: (brightness: number) => void;
     setTypeColor?: (typeIdx: number, r: number, g: number, b: number) => void;
     getTypeColorsRgb?: () => Float32Array | null;
     getZoom?: () => number | null;
@@ -282,6 +286,9 @@ export function setParameterUpdateCallbacks(callbacks: {
         setParticleOpacity:
             callbacks.setParticleOpacity ||
             parameterUpdateCallbacks.setParticleOpacity,
+        setScreenBrightness:
+            callbacks.setScreenBrightness ||
+            parameterUpdateCallbacks.setScreenBrightness,
         setTypeColor:
             callbacks.setTypeColor || parameterUpdateCallbacks.setTypeColor,
         getTypeColorsRgb:
@@ -1769,6 +1776,59 @@ function refreshPaletteSelect(): void {
     }
 }
 
+/** Kleur van type `typeIdx` zetten: schuifjes en waarden van zijn rij, en de engine */
+function setTypeOklch(row: HTMLElement | undefined, typeIdx: number, l: number, c: number, h: number): void {
+    typeOklch[typeIdx] = [l, c, h];
+    if (row) {
+        const set = (axis: string, value: string, text: string) => {
+            const slider = row.querySelector<HTMLInputElement>(`.oklch-${axis}`);
+            const label = row.querySelector<HTMLElement>(`.oklch-${axis}-val`);
+            if (slider) slider.value = value;
+            if (label) label.textContent = text;
+        };
+        set("h", h.toFixed(0), h.toFixed(0));
+        set("l", String(l), l.toFixed(2));
+        set("c", String(c), c.toFixed(3));
+    }
+    applyTypeColor(typeIdx);
+}
+
+/**
+ * Schuifje met een waarde-label (#valueId, 2 decimalen), bewaard in localStorage.
+ * `apply` krijgt de bewaarde waarde bij het opstarten en daarna elke beweging.
+ */
+function bindStoredSlider(
+    sliderId: string,
+    valueId: string,
+    storageKey: string,
+    fallback: number,
+    apply: (value: number) => void,
+): HTMLInputElement | null {
+    const slider = document.getElementById(sliderId) as HTMLInputElement | null;
+    const label = document.getElementById(valueId);
+    if (!slider || !label) return null;
+    const set = (v: number, save: boolean) => {
+        label.textContent = v.toFixed(2);
+        if (save) saveToLocalStorage(storageKey, v);
+        apply(v);
+    };
+    const stored = loadFromLocalStorage(storageKey, fallback);
+    slider.value = String(stored);
+    set(stored, false);
+    slider.addEventListener("input", () => set(parseFloat(slider.value), true));
+    return slider;
+}
+
+/** Een palet ("#rrggbb" per type) op de rijen zetten */
+function applyHexColors(colors: string[]): void {
+    const rows = document.querySelectorAll<HTMLElement>(".color-type-row");
+    colors.forEach((hex, i) => {
+        if (i >= rows.length) return;
+        const [l, c, h] = srgbToOklch(...hexToSrgb(hex));
+        setTypeOklch(rows[i], i, l, c, h);
+    });
+}
+
 function applyTypeColor(typeIdx: number): void {
     const [l, c, h] = typeOklch[typeIdx];
     const [r, g, b] = oklchToSrgb(l, c, h);
@@ -1817,19 +1877,10 @@ export function initColorPanel(): void {
             h = parseFloat(hSlider.defaultValue);
         }
 
-        // Update sliders to reflect derived values
-        hSlider.value = h.toFixed(0);
-        lSlider.value = String(l);
-        cSlider.value = String(c);
-        if (hVal) hVal.textContent = h.toFixed(0);
-        if (lVal) lVal.textContent = l.toFixed(2);
-        if (cVal) cVal.textContent = c.toFixed(3);
-
-        // Initialize typeOklch from the engine's built-in values
-        typeOklch[typeIdx] = [l, c, h];
+        // Sliders and typeOklch from the engine's built-in values
+        setTypeOklch(row, typeIdx, l, c, h);
         // Capture built-in defaults for the "In-built colors" option
         builtinTypeOklch[typeIdx] = [l, c, h];
-        applyTypeColor(typeIdx);
 
         const onInput = () => {
             const h = parseFloat(hSlider.value);
@@ -1934,66 +1985,14 @@ export function initColorPanel(): void {
         if (sel.value === "__builtin__") {
             const rows =
                 document.querySelectorAll<HTMLElement>(".color-type-row");
-            builtinTypeOklch.forEach(([l, c, h], i) => {
-                typeOklch[i] = [l, c, h];
-                const row = rows[i];
-                if (!row) return;
-                const hSlider = row.querySelector<HTMLInputElement>(".oklch-h");
-                const lSlider = row.querySelector<HTMLInputElement>(".oklch-l");
-                const cSlider = row.querySelector<HTMLInputElement>(".oklch-c");
-                const hVal = row.querySelector<HTMLElement>(".oklch-h-val");
-                const lVal = row.querySelector<HTMLElement>(".oklch-l-val");
-                const cVal = row.querySelector<HTMLElement>(".oklch-c-val");
-                if (hSlider) {
-                    hSlider.value = h.toFixed(0);
-                    if (hVal) hVal.textContent = h.toFixed(0);
-                }
-                if (lSlider) {
-                    lSlider.value = String(l);
-                    if (lVal) lVal.textContent = l.toFixed(2);
-                }
-                if (cSlider) {
-                    cSlider.value = String(c);
-                    if (cVal) cVal.textContent = c.toFixed(3);
-                }
-                applyTypeColor(i);
-            });
+            builtinTypeOklch.forEach(([l, c, h], i) => setTypeOklch(rows[i], i, l, c, h));
             return;
         }
 
         const palettes = loadPalettes();
         const palette = palettes[parseInt(sel.value)];
         if (!palette) return;
-
-        const rows = document.querySelectorAll<HTMLElement>(".color-type-row");
-        palette.colors.forEach((hex, i) => {
-            if (i >= rows.length) return;
-            const [r, g2, b] = hexToSrgb(hex);
-            const [l, c, h] = srgbToOklch(r, g2, b);
-            typeOklch[i] = [l, c, h];
-
-            const row = rows[i];
-            if (!row) return;
-            const hSlider = row.querySelector<HTMLInputElement>(".oklch-h");
-            const lSlider = row.querySelector<HTMLInputElement>(".oklch-l");
-            const cSlider = row.querySelector<HTMLInputElement>(".oklch-c");
-            const hVal = row.querySelector<HTMLElement>(".oklch-h-val");
-            const lVal = row.querySelector<HTMLElement>(".oklch-l-val");
-            const cVal = row.querySelector<HTMLElement>(".oklch-c-val");
-            if (hSlider) {
-                hSlider.value = h.toFixed(0);
-                if (hVal) hVal.textContent = h.toFixed(0);
-            }
-            if (lSlider) {
-                lSlider.value = String(l);
-                if (lVal) lVal.textContent = l.toFixed(2);
-            }
-            if (cSlider) {
-                cSlider.value = String(c);
-                if (cVal) cVal.textContent = c.toFixed(3);
-            }
-            applyTypeColor(i);
-        });
+        applyHexColors(palette.colors);
     };
 
     // Auto-load when selecting from dropdown
@@ -2074,27 +2073,50 @@ export function initColorPanel(): void {
         });
 
     // Opacity slider (in color panel)
-    const opacitySlider = document.getElementById(
-        "opacitySlider",
-    ) as HTMLInputElement | null;
-    const opacityValueDisplay = document.getElementById("opacityValue");
+    // Dekking van de deeltjes en helderheid van het hele beeld (omgevingslicht)
+    const opacitySlider = bindStoredSlider("opacitySlider", "opacityValue", STORAGE_KEYS.opacity, 0.8, (v) =>
+        parameterUpdateCallbacks.setParticleOpacity?.(v),
+    );
+    const brightnessSlider = bindStoredSlider(
+        "screenBrightnessSlider",
+        "screenBrightnessValue",
+        STORAGE_KEYS.screenBrightness,
+        1.0,
+        (v) => parameterUpdateCallbacks.setScreenBrightness?.(v),
+    );
 
-    if (opacitySlider && opacityValueDisplay) {
-        // Restore from localStorage
-        const stored = loadFromLocalStorage(STORAGE_KEYS.opacity, 0.8);
-        opacitySlider.value = String(stored);
-        opacityValueDisplay.textContent = stored.toFixed(2);
-        if (parameterUpdateCallbacks.setParticleOpacity) {
-            parameterUpdateCallbacks.setParticleOpacity(stored);
-        }
-
-        opacitySlider.addEventListener("input", () => {
-            const val = parseFloat(opacitySlider.value);
-            opacityValueDisplay.textContent = val.toFixed(2);
-            saveToLocalStorage(STORAGE_KEYS.opacity, val);
-            if (parameterUpdateCallbacks.setParticleOpacity) {
-                parameterUpdateCallbacks.setParticleOpacity(val);
-            }
+    // Naar en van de installatie (alleen lokaal, zie installation-link.ts):
+    // de typekleuren, de dekking en de schermhelderheid
+    if (body) {
+        const value = (slider: HTMLInputElement | null, fallback: number) =>
+            slider ? parseFloat(slider.value) : fallback;
+        const setValue = (slider: HTMLInputElement | null, v: number) => {
+            if (!slider) return;
+            slider.value = String(v);
+            slider.dispatchEvent(new Event("input"));
+        };
+        const changed = attachInstallationSync<ColorState>(body, {
+            what: "particle colors, opacity and screen brightness",
+            current: () => ({
+                types: typeOklch.map(([l, c, h]) => srgbToHex(...oklchToSrgb(l, c, h))),
+                opacity: Math.round(value(opacitySlider, 0.8) * 255) / 255,
+                screenBrightness: Math.round(value(brightnessSlider, 1.0) * 100) / 100,
+            }),
+            apply: (state) => {
+                applyHexColors(state.types);
+                setValue(opacitySlider, state.opacity);
+                setValue(brightnessSlider, state.screenBrightness);
+            },
+            equal: (a, b) =>
+                Math.round(a.opacity * 255) === Math.round(b.opacity * 255) &&
+                Math.round(a.screenBrightness * 100) === Math.round(b.screenBrightness * 100) &&
+                a.types.length === b.types.length &&
+                a.types.every((hex, i) => hex === b.types[i]),
+            send: installationColors.send,
+            request: installationColors.request,
         });
+        // Schuifjes (input) en de paletkeuze (change) borrelen op naar het paneel
+        body.addEventListener("input", changed);
+        body.addEventListener("change", changed);
     }
 }

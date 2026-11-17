@@ -82,6 +82,12 @@ impl AudioEngine {
         self.drone.set(p);
     }
 
+    /// Mengpaneel: lineaire gain per kanaal (dsp::mix), optioneel gevolgd door de
+    /// sample-and-hold van de bliksem — zie InstallationSettings::audio.gains()
+    pub fn set_mix(&self, gains: &[f32]) {
+        self.drone.set_mix(gains);
+    }
+
     pub fn set_master_volume(&self, v: f32) {
         self.sink.set_volume(v.clamp(0.0, 1.0));
     }

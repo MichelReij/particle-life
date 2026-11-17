@@ -4,6 +4,9 @@
 @group(0) @binding(0) var s: sampler;
 @group(0) @binding(1) var blur_h_tex: texture_2d<f32>; // horizontally blurred
 @group(0) @binding(2) var sharp_tex:  texture_2d<f32>; // original sharp frame
+// x = schermhelderheid voor het omgevingslicht (1 = zoals ontworpen); de laatste
+// stap naar het scherm, dus het hele beeld (WebGpuRenderer::set_screen_brightness)
+@group(0) @binding(3) var<uniform> look: vec4<f32>;
 
 @fragment
 fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
@@ -29,5 +32,5 @@ fn main(@builtin(position) frag_coord: vec4<f32>) -> @location(0) vec4<f32> {
     let dark_t   = smoothstep(0.05, 0.5, dist); // wider transition for darkening
     let blur_t   = t * 0.6; // cap blur blend at 60% so corners stay readable
 
-    return vec4<f32>(mix(sharp, blurred, blur_t).rgb * mix(1.0, 0.95, dark_t), 1.0);
+    return vec4<f32>(mix(sharp, blurred, blur_t).rgb * mix(1.0, 0.95, dark_t) * look.x, 1.0);
 }

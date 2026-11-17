@@ -13,7 +13,7 @@ struct Particle {
     is_active: u32,
     // Whether this particle is active/visible (bool as u32)
     spawn_time: f32,   // sim_params.time at last respawn; -1.0 = initial particle (no damping)
-    _padding2: f32,
+    color_seed: u32,   // nieuw bij elke spawn: kleurvariatie binnen het type (vert.wgsl)
     // Ensure 16-byte alignment (48 bytes total)
 }
 
@@ -679,6 +679,11 @@ fn bell_random(seed: u32, n: u32) -> f32 {
     return sum / f32(n);
 }
 
+// Elk (opnieuw) gespawnd deeltje krijgt een eigen kleurzaadje: zijn vaste
+// afwijking van de typekleur in lightness, chroma, hue en opacity (vert.wgsl).
+// Het zout houdt het los van de seeds voor positie en type.
+const COLOR_SEED_SALT: u32 = 0x2545F491u;
+
 // Seconds over which forces fade in after a respawn (see main).
 const SPAWN_RAMP: f32 = 2.0;
 // Random initial speed of a respawned particle (world units/s), so newcomers fan out
@@ -858,6 +863,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let spawn_seed = hash(global_id.x * 103u + u32(sim_params.time * 1000.0) + particle_p.ptype * 59u);
         particle_p.pos = inflow_position(spawn_seed);
         particle_p.vel = inflow_velocity(spawn_seed);
+        particle_p.color_seed = hash(spawn_seed ^ COLOR_SEED_SALT);
 
         particles_out[p_idx] = particle_p;
         return;
@@ -1138,6 +1144,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             particle_p.pos = inflow_position(spawn_seed);
             particle_p.vel = inflow_velocity(spawn_seed);
             particle_p.spawn_time = sim_params.time;
+            particle_p.color_seed = hash(spawn_seed ^ COLOR_SEED_SALT);
         }
     }
 
@@ -1167,6 +1174,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     particle_p.vel.x = (random_float(vel_seed_x) - 0.5) * 50.0;
                     // Random velocity -25 to +25
                     particle_p.vel.y = (random_float(vel_seed_y) - 0.5) * 50.0;
+                    particle_p.color_seed = hash(pos_seed_y ^ COLOR_SEED_SALT);
                 }
 
                 particle_p.is_active = 1u;
