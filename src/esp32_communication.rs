@@ -146,6 +146,7 @@ pub struct ESP32SharedState {
     pub pending_night_alpha: Option<f32>,          // Set when night_alpha needs to be sent
     pub last_sent_night_alpha: f32,                // Track last sent value to avoid redundant sends
     pub last_night_send_time: Instant,             // For periodic night heartbeat
+    pub last_time_send: Option<Instant>,           // Tijdpakket: direct na verbinden, daarna elke minuut
 }
 
 impl Default for ESP32SharedState {
@@ -159,6 +160,7 @@ impl Default for ESP32SharedState {
             pending_night_alpha: None,
             last_sent_night_alpha: -1.0, // force first send
             last_night_send_time: Instant::now(),
+            last_time_send: None,
         }
     }
 }
@@ -351,6 +353,9 @@ fn esp32_communication_thread(shared_state: Arc<Mutex<ESP32SharedState>>) {
 
                     // Send pending night alpha update
                     send_pending_night_alpha(serial_port, &shared_state);
+
+                    // Datum/tijd naar de ESP32's (elke minuut)
+                    send_time_if_due(serial_port, &shared_state);
 
                     // Small delay to prevent excessive CPU usage
                     thread::sleep(Duration::from_millis(16)); // ~60 FPS polling rate
@@ -1443,6 +1448,47 @@ fn send_pending_eruptions(
             break;
         }
     }
+}
+
+// Tijdpakket (8 bytes, zie TimePacket in ESP32_UART_Protocol.h):
+// [0xBF] [unix u32 BE, UTC] [tz_offset_min i16 BE, lokale tijd min UTC] [0xD0]
+// De liaison geeft het als ESP-NOW TIME_SYNC door, zodat de modules (o.a. hun
+// LinkWatchdog-logboek) echte datum/tijd hebben.
+const TIME_SEND_INTERVAL: Duration = Duration::from_secs(60);
+
+fn send_time_if_due(
+    port: &mut Box<dyn SerialPort>,
+    shared_state: &Arc<Mutex<ESP32SharedState>>,
+) {
+    if let Ok(mut state) = shared_state.lock() {
+        match state.last_time_send {
+            Some(t) if t.elapsed() < TIME_SEND_INTERVAL => return,
+            _ => state.last_time_send = Some(Instant::now()),
+        }
+    } else {
+        return;
+    }
+    let unix = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_secs() as u32,
+        Err(_) => return,
+    };
+    let tz = local_utc_offset_minutes(unix as i64);
+    let mut packet = Vec::with_capacity(8);
+    packet.push(0xBF);
+    packet.extend_from_slice(&unix.to_be_bytes());
+    packet.extend_from_slice(&tz.to_be_bytes());
+    packet.push(0xD0);
+    if let Err(e) = port.write_all(&packet) {
+        println!("❌ ESP32: Failed to send time packet: {}", e);
+    }
+}
+
+// Verschil lokale tijd − UTC in minuten (incl. zomertijd), via localtime_r
+fn local_utc_offset_minutes(unix: i64) -> i16 {
+    let t = unix as libc::time_t;
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    let ok = unsafe { !libc::localtime_r(&t, &mut tm).is_null() };
+    if ok { (tm.tm_gmtoff / 60) as i16 } else { 0 }
 }
 
 // Send pending night value to ESP32 as a 4-byte binary NightPacket (0xBD + u16 BE + 0xCE)
